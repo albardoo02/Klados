@@ -17,10 +17,19 @@ type Site struct {
 	Description  string         `json:"description"`
 	Theme        string         `gorm:"default:minimal" json:"theme"`
 	IsPublic     bool           `gorm:"default:true" json:"is_public"`
+	PasswordHash *string        `gorm:"type:text" json:"-"`
+	IsProtected  bool           `gorm:"-" json:"is_protected"`
 	Settings     datatypes.JSON `json:"settings"`
 	User         User           `gorm:"foreignKey:UserID" json:"-"`
 	CreatedAt    time.Time      `json:"created_at"`
 	UpdatedAt    time.Time      `json:"updated_at"`
+}
+
+func (s *Site) AfterFind(tx *gorm.DB) error {
+	if s.PasswordHash != nil && *s.PasswordHash != "" {
+		s.IsProtected = true
+	}
+	return nil
 }
 
 func (s *Site) BeforeCreate(tx *gorm.DB) error {

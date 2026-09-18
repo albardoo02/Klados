@@ -14,5 +14,7 @@ func Migrate(db *gorm.DB) error {
 		&model.PageVersion{},
 		&model.MediaFile{},
 		&model.PageView{},
+		&model.Comment{},
+		&model.APIKey{},
 	)
 }

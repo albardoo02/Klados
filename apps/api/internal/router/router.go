@@ -9,9 +9,10 @@ import (
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"gorm.io/gorm"
-	"log"
-	"strings"
 	"context"
+	"log"
+	"net/http"
+	"strings"
 )
 
 func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
@@ -51,6 +52,8 @@ func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
 	authH := &handler.AuthHandler{DB: db, JWTSecret: cfg.JWTSecret}
 	siteH := &handler.SiteHandler{DB: db}
 	pageH := &handler.PageHandler{DB: db}
+	commentH := &handler.CommentHandler{DB: db}
+	apiKeyH := &handler.APIKeyHandler{DB: db}
 	analyticsH := &handler.AnalyticsHandler{DB: db}
 	mediaH := &handler.MediaHandler{
 		DB:       db,
@@ -59,18 +62,35 @@ func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
 		Endpoint: cfg.MinioEndpoint,
 	}
 
+	// WebSocket Hub
+	wsHub := handler.NewWSHub()
+	go wsHub.Run()
+	wsH := handler.NewWSHandler(wsHub)
+
 	api := r.Group("/v1")
+
+	// WebSocket Collaborative Editing
+	api.GET("/ws/pages/:id", wsH.HandlePageWS)
 
 	// パブリック閲覧 (Public)
 	public := api.Group("/public")
 	{
 		public.GET("/sites/:slug", siteH.GetBySlug)
+		public.POST("/sites/:slug/verify-password", siteH.VerifyPassword)
 		public.GET("/sites/:slug/sitemap.xml", siteH.GetSitemap)
 		public.GET("/sites/:slug/robots.txt", siteH.GetRobotsTxt)
 		public.POST("/sites/:slug/view", analyticsH.RecordView)
 		public.POST("/sites/:slug/views", analyticsH.RecordView)
 		public.GET("/sites/:slug/pages", pageH.ListPublicBySlug)
 		public.GET("/sites/:slug/pages/*pageSlug", pageH.GetPublicPage)
+		public.POST("/sites/:slug/pages/*pageSlug", func(c *gin.Context) {
+			rawPageSlug := c.Param("pageSlug")
+			if strings.HasSuffix(rawPageSlug, "/comments") || rawPageSlug == "/comments" || rawPageSlug == "comments" {
+				commentH.CreatePublic(c)
+				return
+			}
+			c.JSON(http.StatusNotFound, gin.H{"error": "route not found"})
+		})
 	}
 
 	// 認証 (Public)
@@ -82,7 +102,7 @@ func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
 
 	// 認証必須
 	protected := api.Group("")
-	protected.Use(middleware.Auth(cfg.JWTSecret))
+	protected.Use(middleware.Auth(cfg.JWTSecret, db))
 	{
 		protected.GET("/auth/me", authH.Me)
 
@@ -96,6 +116,9 @@ func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
 		protected.POST("/sites/:id/verify-domain", siteH.VerifyDomain)
 		protected.GET("/sites/:id/analytics", analyticsH.GetAnalytics)
 		protected.GET("/sites/:id/search", pageH.Search)
+		protected.GET("/sites/:id/trash", pageH.ListTrash)
+		protected.GET("/sites/:id/export", siteH.Export)
+		protected.POST("/sites/:id/password", siteH.SetPassword)
 
 		// Pages
 		protected.GET("/sites/:id/pages", pageH.List)
@@ -105,6 +128,17 @@ func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
 		protected.DELETE("/pages/:id", pageH.Delete)
 		protected.GET("/pages/:id/versions", pageH.GetVersions)
 		protected.POST("/pages/:id/revert/:ver", pageH.Revert)
+		protected.POST("/pages/:id/restore", pageH.Restore)
+		protected.GET("/pages/:id/comments", commentH.List)
+		protected.POST("/pages/:id/comments", commentH.Create)
+
+		// Comments
+		protected.DELETE("/comments/:id", commentH.Delete)
+
+		// API Keys
+		protected.GET("/api-keys", apiKeyH.List)
+		protected.POST("/api-keys", apiKeyH.Create)
+		protected.DELETE("/api-keys/:id", apiKeyH.Delete)
 
 		// Media
 		protected.POST("/media/upload", mediaH.Upload)

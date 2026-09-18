@@ -1,15 +1,19 @@
 package handler
 
 import (
+	"archive/zip"
+	"bytes"
 	"encoding/xml"
 	"fmt"
 	"net"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/klados/api/internal/model"
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
 
@@ -23,6 +27,7 @@ type createSiteRequest struct {
 	Title       string `json:"title" binding:"required"`
 	Description string `json:"description"`
 	Theme       string `json:"theme"`
+	Password    string `json:"password"`
 }
 
 type updateCustomDomainRequest struct {
@@ -72,6 +77,17 @@ func (h *SiteHandler) Create(c *gin.Context) {
 		Title:       req.Title,
 		Description: req.Description,
 		Theme:       theme,
+	}
+
+	if strings.TrimSpace(req.Password) != "" {
+		hash, err := bcrypt.GenerateFromPassword([]byte(strings.TrimSpace(req.Password)), bcrypt.DefaultCost)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to hash password"})
+			return
+		}
+		hashStr := string(hash)
+		site.PasswordHash = &hashStr
+		site.IsProtected = true
 	}
 
 	if err := h.DB.Create(site).Error; err != nil {
@@ -135,6 +151,10 @@ func (h *SiteHandler) GetBySlug(c *gin.Context) {
 		return
 	}
 
+	if !CheckSiteAccess(c, &site) {
+		return
+	}
+
 	var pages []model.Page
 	h.DB.Where("site_id = ? AND status = ? AND deleted_at IS NULL", site.ID, model.PageStatusPublished).
 		Order("position asc, created_at asc").
@@ -151,6 +171,7 @@ func (h *SiteHandler) GetBySlug(c *gin.Context) {
 			"description":   site.Description,
 			"theme":         site.Theme,
 			"is_public":     site.IsPublic,
+			"is_protected":  site.IsProtected,
 			"settings":      site.Settings,
 			"created_at":    site.CreatedAt,
 			"updated_at":    site.UpdatedAt,
@@ -332,4 +353,67 @@ func (h *SiteHandler) GetRobotsTxt(c *gin.Context) {
 
 	robots := fmt.Sprintf("User-agent: *\nAllow: /\n\nSitemap: %s/sitemap.xml\n", baseURL)
 	c.Data(http.StatusOK, "text/plain; charset=utf-8", []byte(robots))
+}
+
+// Export packages all pages as .md files (with YAML frontmatter) into a downloadable ZIP archive
+func (h *SiteHandler) Export(c *gin.Context) {
+	userID := c.GetString("user_id")
+	id := c.Param("id")
+
+	var site model.Site
+	if err := h.DB.Where("id = ? AND user_id = ?", id, userID).First(&site).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "site not found"})
+		return
+	}
+
+	var pages []model.Page
+	if err := h.DB.Where("site_id = ? AND deleted_at IS NULL", site.ID).
+		Order("position asc, created_at asc").Find(&pages).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	buf := new(bytes.Buffer)
+	zw := zip.NewWriter(buf)
+
+	for _, page := range pages {
+		cleanSlug := strings.Trim(page.Slug, "/")
+		if cleanSlug == "" {
+			cleanSlug = "index"
+		}
+		filename := cleanSlug + ".md"
+
+		createdAtStr := page.CreatedAt.Format(time.RFC3339)
+		updatedAtStr := page.UpdatedAt.Format(time.RFC3339)
+
+		frontmatter := fmt.Sprintf("---\ntitle: \"%s\"\nslug: \"%s\"\nstatus: \"%s\"\nposition: %d\ncreated_at: \"%s\"\nupdated_at: \"%s\"\n---\n\n",
+			strings.ReplaceAll(page.Title, `"`, `\"`),
+			strings.ReplaceAll(page.Slug, `"`, `\"`),
+			page.Status,
+			page.Position,
+			createdAtStr,
+			updatedAtStr,
+		)
+
+		content := frontmatter + page.Content
+
+		w, err := zw.Create(filename)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create zip entry"})
+			return
+		}
+		if _, err := w.Write([]byte(content)); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to write zip file content"})
+			return
+		}
+	}
+
+	if err := zw.Close(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to finalize zip archive"})
+		return
+	}
+
+	c.Header("Content-Type", "application/zip")
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s-export.zip\"", site.Slug))
+	c.Data(http.StatusOK, "application/zip", buf.Bytes())
 }

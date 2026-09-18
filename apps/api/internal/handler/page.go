@@ -161,6 +161,10 @@ func (h *PageHandler) ListPublicBySlug(c *gin.Context) {
 		return
 	}
 
+	if !CheckSiteAccess(c, &site) {
+		return
+	}
+
 	var pages []model.Page
 	if err := h.DB.Where("site_id = ? AND status = ? AND deleted_at IS NULL", site.ID, model.PageStatusPublished).
 		Order("position asc, created_at asc").Find(&pages).Error; err != nil {
@@ -173,7 +177,13 @@ func (h *PageHandler) ListPublicBySlug(c *gin.Context) {
 func (h *PageHandler) GetPublicPage(c *gin.Context) {
 	siteSlug := c.Param("slug")
 	rawPageSlug := c.Param("pageSlug")
-	pageSlug := strings.Trim(rawPageSlug, "/")
+
+	// If route matches /sites/:slug/pages/*pageSlug/comments, delegate to CommentHandler.ListPublic
+	if strings.HasSuffix(rawPageSlug, "/comments") || rawPageSlug == "/comments" || rawPageSlug == "comments" {
+		commentH := &CommentHandler{DB: h.DB}
+		commentH.ListPublic(c)
+		return
+	}
 
 	var site model.Site
 	if err := h.DB.Where("slug = ? AND is_public = ?", siteSlug, true).First(&site).Error; err != nil {
@@ -181,6 +191,11 @@ func (h *PageHandler) GetPublicPage(c *gin.Context) {
 		return
 	}
 
+	if !CheckSiteAccess(c, &site) {
+		return
+	}
+
+	pageSlug := strings.Trim(rawPageSlug, "/")
 	var page model.Page
 	var err error
 	if pageSlug == "" || pageSlug == "index" {
@@ -200,6 +215,43 @@ func (h *PageHandler) GetPublicPage(c *gin.Context) {
 		return
 	}
 
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": page})
+}
+
+// ListTrash lists soft-deleted pages for a site (GET /v1/sites/:id/trash)
+func (h *PageHandler) ListTrash(c *gin.Context) {
+	siteID := c.Param("id")
+	if siteID == "" {
+		siteID = c.Param("siteId")
+	}
+	var pages []model.Page
+	if err := h.DB.Where("site_id = ? AND deleted_at IS NOT NULL", siteID).
+		Order("deleted_at desc").Find(&pages).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": pages})
+}
+
+// Restore restores a soft-deleted page (POST /v1/pages/:id/restore)
+func (h *PageHandler) Restore(c *gin.Context) {
+	id := c.Param("id")
+	var page model.Page
+	if err := h.DB.Where("id = ?", id).First(&page).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "page not found"})
+		return
+	}
+
+	if err := h.DB.Model(&model.Page{}).Where("id = ?", id).Updates(map[string]interface{}{
+		"deleted_at": nil,
+		"status":     model.PageStatusDraft,
+	}).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	page.DeletedAt = nil
+	page.Status = model.PageStatusDraft
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": page})
 }
 
