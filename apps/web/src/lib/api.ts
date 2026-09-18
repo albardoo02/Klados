@@ -48,6 +48,10 @@ export const authApi = {
     api.patch('/auth/profile', data),
   changePassword: (data: { current_password: string; new_password: string }) =>
     api.patch('/auth/password', data),
+  verifyEmail: (token: string) =>
+    api.post('/auth/verify-email', { token }),
+  resendVerification: (email?: string) =>
+    api.post('/auth/resend-verification', { email }),
 };
 
 // --- Sites ---

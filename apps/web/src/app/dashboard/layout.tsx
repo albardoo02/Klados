@@ -15,7 +15,9 @@ import {
   ChevronDown,
   FolderKanban,
   Settings,
+  AlertTriangle,
 } from 'lucide-react';
+import { authApi } from '@/lib/api';
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -24,6 +26,21 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [searchOpen, setSearchOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
+  const [resending, setResending] = useState(false);
+  const [resendStatus, setResendStatus] = useState<string | null>(null);
+
+  const handleResend = async () => {
+    setResending(true);
+    setResendStatus(null);
+    try {
+      const res = await authApi.resendVerification(user?.email);
+      setResendStatus(res.data?.dev_verification_url || '確認メールを再送しました');
+    } catch {
+      setResendStatus('再送に失敗しました');
+    } finally {
+      setResending(false);
+    }
+  };
 
   useEffect(() => {
     if (!user) router.push('/login');
@@ -190,6 +207,45 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </div>
         </div>
       </nav>
+
+      {/* メールアドレス未確認バナー */}
+      {user && user.email_verified === false && (
+        <div className="bg-amber-50 border-b border-amber-200 px-6 py-2.5 text-xs text-amber-900 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="size-4 text-amber-600 shrink-0" />
+            <span>
+              メールアドレス（<strong>{user.email}</strong>）の認証が完了していません。サイトの外部公開や設定変更を有効にするために認証を完了してください。
+            </span>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <Link
+              href="/verify-email"
+              className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-medium transition-colors"
+            >
+              認証ページを開く
+            </Link>
+            <button
+              type="button"
+              onClick={handleResend}
+              disabled={resending}
+              className="px-2.5 py-1 bg-white hover:bg-amber-100/60 text-amber-800 border border-amber-300 rounded-lg font-medium transition-colors disabled:opacity-50"
+            >
+              {resending ? '送信中...' : 'メールを再送'}
+            </button>
+            {resendStatus && (
+              <span className="text-amber-700 font-mono text-[11px] truncate max-w-xs">
+                {resendStatus.startsWith('http') ? (
+                  <Link href={resendStatus} className="underline text-blue-600 font-bold ml-1">
+                    クイック認証リンク →
+                  </Link>
+                ) : (
+                  resendStatus
+                )}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
 
       <main className="container mx-auto px-6 py-8">{children}</main>
 

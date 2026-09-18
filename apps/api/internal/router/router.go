@@ -98,6 +98,8 @@ func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
 	{
 		auth.POST("/register", authH.Register)
 		auth.POST("/login", authH.Login)
+		auth.POST("/verify-email", authH.VerifyEmail)
+		auth.POST("/resend-verification", authH.ResendVerification)
 	}
 
 	// 認証必須
