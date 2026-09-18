@@ -13,13 +13,42 @@ interface MarkdownRendererProps {
   className?: string;
 }
 
+/**
+ * Markdownの前処理:
+ * 1. 箇条書きリスト内での斜体指定を補正
+ *    - "* 斜体*" のように箇条書き記号と同一記号で斜体を指定したケースを "* *斜体*" に補正
+ *    - "- * 斜体*" や "- *斜体 *" のようにアスタリスク前後にスペースが入って斜体判定から外れたケースを補正
+ */
+function preprocessMarkdown(content: string): string {
+  if (!content) return '';
+  let result = content;
+
+  // 1. "* 斜体*" -> "* *斜体*"
+  result = result.replace(/^([ \t]*[*])([ \t]+)(?!\*)([^\n*]+)\*[ \t]*$/gm, '$1$2*$3*');
+  // 2. "- * 斜体*" -> "- *斜体*"
+  result = result.replace(/^([ \t]*[-*+])([ \t]+)\*[ \t]+([^\n*]+)\*[ \t]*$/gm, '$1$2*$3*');
+  // 3. "- *斜体 *" -> "- *斜体*"
+  result = result.replace(/^([ \t]*[-*+])([ \t]+)\*([^\n*]+)[ \t]+\*[ \t]*$/gm, '$1$2*$3*');
+
+  return result;
+}
+
 export function MarkdownRenderer({ content, className = '' }: MarkdownRendererProps) {
+  const processedContent = React.useMemo(() => preprocessMarkdown(content), [content]);
+
   return (
     <div className={`markdown-body max-w-none ${className}`}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={[rehypeHighlight, rehypeKatex]}
         components={{
+          em({ children, ...props }) {
+            return (
+              <em className="italic" style={{ fontStyle: 'italic' }} {...props}>
+                {children}
+              </em>
+            );
+          },
           code({ className, children, ...props }) {
             const hasLang = /language-(\w+)/.exec(className || '');
             const isBlock = Boolean(hasLang) || String(children).includes('\n');
@@ -91,7 +120,7 @@ export function MarkdownRenderer({ content, className = '' }: MarkdownRendererPr
           },
         }}
       >
-        {content}
+        {processedContent}
       </ReactMarkdown>
     </div>
   );

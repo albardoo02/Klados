@@ -204,14 +204,23 @@ export default function PageEditPage() {
     const selection = state.selection.main;
     const from = selection.from;
     const to = selection.to;
-    const selectedText = state.sliceDoc(from, to) || defaultText;
-    const replacement = `${before}${selectedText}${after}`;
+    let selectedText = state.sliceDoc(from, to) || defaultText;
+
+    // リスト記号（"- ", "* ", "+ ", "1. "など）が含まれている場合、マーカーの外側に書式をかけないよう分離
+    let prefix = '';
+    const listMatch = /^([ \t]*[-*+]\s+|[ \t]*\d+\.\s+)/.exec(selectedText);
+    if (listMatch && after !== '') {
+      prefix = listMatch[1];
+      selectedText = selectedText.slice(prefix.length);
+    }
+
+    const replacement = `${prefix}${before}${selectedText}${after}`;
 
     dispatch({
       changes: { from, to, insert: replacement },
       selection: {
-        anchor: from + before.length,
-        head: from + before.length + selectedText.length,
+        anchor: from + prefix.length + before.length,
+        head: from + prefix.length + before.length + selectedText.length,
       },
       scrollIntoView: true,
     });
