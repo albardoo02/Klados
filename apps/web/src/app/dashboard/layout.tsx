@@ -3,19 +3,42 @@
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
 import { useAuthStore } from '@/store/auth';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { CommandPalette } from '@/components/command-palette';
-import { Search, KeyRound, LogOut, ExternalLink, Sparkles } from 'lucide-react';
+import {
+  Search,
+  KeyRound,
+  LogOut,
+  ExternalLink,
+  Sparkles,
+  User,
+  ChevronDown,
+  FolderKanban,
+  Settings,
+} from 'lucide-react';
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const { user, clearAuth } = useAuthStore();
   const [searchOpen, setSearchOpen] = useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!user) router.push('/login');
   }, [user, router]);
+
+  // 外側クリックでメニューを閉じる
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (userMenuRef.current && !userMenuRef.current.contains(event.target as Node)) {
+        setUserMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const handleLogout = () => {
     clearAuth();
@@ -65,23 +88,106 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
           <div className="h-4 w-px bg-slate-200 hidden sm:block" />
 
-          <div className="flex items-center gap-2">
-            <div className="size-7 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-bold shadow-2xs">
-              {(user.display_name || user.username || 'U').charAt(0).toUpperCase()}
-            </div>
-            <span className="text-xs font-medium text-slate-700 hidden sm:inline">
-              {user.display_name || user.username}
-            </span>
-          </div>
+          {/* ユーザーアバター & 個人設定ドロップダウン */}
+          <div className="relative" ref={userMenuRef}>
+            <button
+              type="button"
+              onClick={() => setUserMenuOpen(!userMenuOpen)}
+              className="flex items-center gap-2 p-1.5 rounded-xl hover:bg-slate-100 transition-colors cursor-pointer border border-transparent hover:border-slate-200"
+              aria-expanded={userMenuOpen}
+              aria-haspopup="true"
+            >
+              <div className="size-8 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-600 text-white flex items-center justify-center text-xs font-bold shadow-2xs">
+                {(user.display_name || user.username || 'U').charAt(0).toUpperCase()}
+              </div>
+              <div className="hidden sm:flex flex-col text-left">
+                <span className="text-xs font-semibold text-slate-800 leading-tight">
+                  {user.display_name || user.username}
+                </span>
+                <span className="text-[10px] text-slate-400 capitalize">
+                  {user.plan} プラン
+                </span>
+              </div>
+              <ChevronDown className={`size-3.5 text-slate-400 transition-transform ${userMenuOpen ? 'rotate-180' : ''}`} />
+            </button>
 
-          <button
-            onClick={handleLogout}
-            className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-rose-600 transition-colors p-1.5 rounded-lg hover:bg-rose-50 cursor-pointer"
-            title="ログアウト"
-          >
-            <LogOut className="size-3.5" />
-            <span className="hidden sm:inline">ログアウト</span>
-          </button>
+            {/* ドロップダウンメニュー */}
+            {userMenuOpen && (
+              <div className="absolute right-0 mt-2 w-64 bg-white rounded-2xl border border-slate-200 shadow-xl py-2 z-50 animate-in fade-in zoom-in-95 duration-100 text-slate-800">
+                {/* ユーザー情報ヘッダー */}
+                <div className="px-4 py-3 border-b border-slate-100">
+                  <div className="flex items-center gap-2.5">
+                    <div className="size-9 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-600 text-white flex items-center justify-center text-sm font-bold shrink-0">
+                      {(user.display_name || user.username || 'U').charAt(0).toUpperCase()}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-bold text-slate-900 truncate">
+                        {user.display_name || user.username}
+                      </p>
+                      <p className="text-[11px] text-slate-400 truncate">
+                        {user.email}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="mt-2.5 flex items-center justify-between text-[11px] bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-100">
+                    <span className="text-slate-500">ご利用プラン</span>
+                    <span className="font-semibold text-blue-600 uppercase flex items-center gap-1">
+                      <Sparkles className="size-2.5" />
+                      {user.plan}
+                    </span>
+                  </div>
+                </div>
+
+                {/* メニューアイテム */}
+                <div className="p-1.5 space-y-0.5 text-xs font-medium">
+                  <Link
+                    href="/dashboard/settings/profile"
+                    onClick={() => setUserMenuOpen(false)}
+                    className="flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-slate-100 transition-colors text-slate-700 hover:text-slate-900"
+                  >
+                    <User className="size-4 text-blue-600" />
+                    <div className="flex-1">
+                      <span>個人設定 / プロフィール</span>
+                      <span className="block text-[10px] text-slate-400 font-normal">表示名やパスワードの編集</span>
+                    </div>
+                  </Link>
+
+                  <Link
+                    href="/dashboard/settings/api-keys"
+                    onClick={() => setUserMenuOpen(false)}
+                    className="flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-slate-100 transition-colors text-slate-700 hover:text-slate-900"
+                  >
+                    <KeyRound className="size-4 text-indigo-600" />
+                    <div className="flex-1">
+                      <span>開発者 API キー</span>
+                      <span className="block text-[10px] text-slate-400 font-normal">API トークンの発行と管理</span>
+                    </div>
+                  </Link>
+
+                  <Link
+                    href="/dashboard"
+                    onClick={() => setUserMenuOpen(false)}
+                    className="flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-slate-100 transition-colors text-slate-700 hover:text-slate-900"
+                  >
+                    <FolderKanban className="size-4 text-slate-500" />
+                    <span>マイサイト一覧</span>
+                  </Link>
+                </div>
+
+                {/* ログアウト */}
+                <div className="pt-1.5 mt-1 border-t border-slate-100 p-1.5">
+                  <button
+                    type="button"
+                    onClick={handleLogout}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-rose-50 text-rose-600 transition-colors text-xs font-medium cursor-pointer"
+                  >
+                    <LogOut className="size-4 text-rose-500" />
+                    <span>ログアウト</span>
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </nav>
 

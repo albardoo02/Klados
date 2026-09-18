@@ -44,6 +44,10 @@ export const authApi = {
   login: (data: { email: string; password: string }) =>
     api.post('/auth/login', data),
   me: () => api.get('/auth/me'),
+  updateProfile: (data: { display_name?: string; avatar_url?: string }) =>
+    api.patch('/auth/profile', data),
+  changePassword: (data: { current_password: string; new_password: string }) =>
+    api.patch('/auth/password', data),
 };
 
 // --- Sites ---
