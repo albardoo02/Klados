@@ -156,7 +156,7 @@ export default function PageEditPage() {
 
   const { data: commentList = [] } = useQuery({
     queryKey: ['comments', id],
-    queryFn: () => commentsApi.list(id).then((r) => r.data.data),
+    queryFn: () => commentsApi.list(id).then((r) => r.data?.data ?? []),
   });
 
   // 履歴モーダルが開いたとき、最新の旧バージョンを自動選択

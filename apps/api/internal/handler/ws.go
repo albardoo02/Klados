@@ -34,12 +34,33 @@ type WSMessage struct {
 }
 
 type WSClient struct {
-	Hub      *WSHub
-	Conn     *websocket.Conn
-	Send     chan []byte
-	PageID   string
-	UserID   string
-	UserName string
+	Hub       *WSHub
+	Conn      *websocket.Conn
+	Send      chan []byte
+	PageID    string
+	UserID    string
+	UserName  string
+	closeOnce sync.Once
+}
+
+func (c *WSClient) CloseSend() {
+	c.closeOnce.Do(func() {
+		close(c.Send)
+	})
+}
+
+func (c *WSClient) SafeSend(msg []byte) (sent bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			sent = false
+		}
+	}()
+	select {
+	case c.Send <- msg:
+		return true
+	default:
+		return false
+	}
 }
 
 type wsRoomMessage struct {
@@ -67,6 +88,13 @@ func NewWSHub() *WSHub {
 }
 
 func (h *WSHub) Run() {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("recovered panic in WSHub: %v", r)
+			go h.Run()
+		}
+	}()
+
 	for {
 		select {
 		case client := <-h.register:
@@ -94,7 +122,7 @@ func (h *WSHub) Run() {
 			if clients, ok := h.rooms[client.PageID]; ok {
 				if _, exists := clients[client]; exists {
 					delete(clients, client)
-					close(client.Send)
+					client.CloseSend()
 					count := len(clients)
 					if count == 0 {
 						delete(h.rooms, client.PageID)
@@ -140,12 +168,12 @@ func (h *WSHub) broadcastMessage(pageID string, sender *WSClient, msg []byte, ex
 	h.mu.RUnlock()
 
 	for _, client := range clientList {
-		select {
-		case client.Send <- msg:
-		default:
+		if !client.SafeSend(msg) {
 			h.mu.Lock()
-			delete(h.rooms[pageID], client)
-			close(client.Send)
+			if clients, ok := h.rooms[pageID]; ok {
+				delete(clients, client)
+			}
+			client.CloseSend()
 			h.mu.Unlock()
 		}
 	}
