@@ -30,6 +30,58 @@ function preprocessMarkdown(content: string): string {
   // 3. "- *斜体 *" -> "- *斜体*"
   result = result.replace(/^([ \t]*[-*+])([ \t]+)\*([^\n*]+)[ \t]+\*[ \t]*$/gm, '$1$2*$3*');
 
+  // 4. Transform ==highlight== to [text](bg:%23fef08a)
+  result = result.replace(/==([^=\n]+)==/g, '[$1](bg:%23fef08a)');
+
+  // 5. Transform [text]{color:#hex} or [text]{color:red} or [text]{#hex} or [text]{bg:#hex} or combined
+  result = result.replace(/\[([^\]\n]+)\]\{([^\}\n]+)\}/g, (match, text, attrs) => {
+    let color = '';
+    let bg = '';
+    const directHex = /^\s*#([0-9a-fA-F]{3,8})\s*$/.exec(attrs);
+    if (directHex) {
+      color = '#' + directHex[1];
+    } else {
+      const colorMatch = /(?:^|[\s;])color\s*:\s*([^;\}]+)/i.exec(attrs);
+      if (colorMatch) color = colorMatch[1].trim();
+
+      const bgMatch = /(?:^|[\s;])bg(?:-color)?\s*:\s*([^;\}]+)/i.exec(attrs);
+      if (bgMatch) bg = bgMatch[1].trim();
+
+      const singleColor = /^\s*([a-zA-Z]+)\s*$/.exec(attrs);
+      if (!color && !bg && singleColor) {
+        const c = singleColor[1].toLowerCase();
+        const known = ['red', 'blue', 'green', 'yellow', 'purple', 'pink', 'orange', 'gray', 'black', 'white', 'cyan'];
+        if (known.includes(c)) color = c;
+      }
+    }
+
+    const params: string[] = [];
+    if (color) params.push('color:' + encodeURIComponent(color));
+    if (bg) params.push('bg:' + encodeURIComponent(bg));
+
+    if (params.length > 0) {
+      return `[${text}](${params.join('&')})`;
+    }
+    return match;
+  });
+
+  // 6. Transform <span style="...color: ..."> and <font color="...">
+  result = result.replace(/<span\s+style="([^"]*)"\s*>([\s\S]*?)<\/span>/gi, (match, style, text) => {
+    const colorMatch = /color\s*:\s*([^;"]+)/i.exec(style);
+    const bgMatch = /background(?:-color)?\s*:\s*([^;"]+)/i.exec(style);
+    const params: string[] = [];
+    if (colorMatch) params.push('color:' + encodeURIComponent(colorMatch[1].trim()));
+    if (bgMatch) params.push('bg:' + encodeURIComponent(bgMatch[1].trim()));
+    if (params.length > 0) {
+      return `[${text}](${params.join('&')})`;
+    }
+    return match;
+  });
+
+  result = result.replace(/<font\s+color="([^"]+)"\s*>([\s\S]*?)<\/font>/gi, (match, color, text) => {
+    return `[${text}](color:${encodeURIComponent(color.trim())})`;
+  });
+
   return result;
 }
 
@@ -87,6 +139,57 @@ export function MarkdownRenderer({ content, className = '' }: MarkdownRendererPr
             );
           },
           a({ href, children, ...props }) {
+            // 文字色・背景色（ハイライト）リンク記号の検知
+            if (href && (href.startsWith('color:') || href.startsWith('bg:'))) {
+              let color: string | undefined;
+              let bg: string | undefined;
+
+              const parts = href.split('&');
+              for (const part of parts) {
+                if (part.startsWith('color:')) {
+                  try {
+                    color = decodeURIComponent(part.replace(/^color:/, ''));
+                  } catch {
+                    color = part.replace(/^color:/, '');
+                  }
+                } else if (part.startsWith('bg:')) {
+                  try {
+                    bg = decodeURIComponent(part.replace(/^bg:/, ''));
+                  } catch {
+                    bg = part.replace(/^bg:/, '');
+                  }
+                }
+              }
+
+              // 安全なカラー書式チェック
+              const isValidColor = (val?: string) => {
+                if (!val) return false;
+                return (
+                  /^#([0-9a-fA-F]{3,8})$/.test(val) ||
+                  /^[a-zA-Z]+$/.test(val) ||
+                  /^rgba?\([0-9,\s.%]+\)$/.test(val) ||
+                  /^hsla?\([0-9,\s.%]+\)$/.test(val)
+                );
+              };
+
+              const safeColor = isValidColor(color) ? color : undefined;
+              const safeBg = isValidColor(bg) ? bg : undefined;
+
+              return (
+                <span
+                  style={{
+                    color: safeColor,
+                    backgroundColor: safeBg,
+                    padding: safeBg ? '0.15em 0.4em' : undefined,
+                    borderRadius: safeBg ? '0.25rem' : undefined,
+                  }}
+                  className={safeBg ? (safeColor ? 'inline font-medium' : 'inline font-medium text-slate-900 dark:text-slate-100') : 'inline font-medium'}
+                >
+                  {children}
+                </span>
+              );
+            }
+
             const isExternal = href?.startsWith('http://') || href?.startsWith('https://');
             return (
               <a

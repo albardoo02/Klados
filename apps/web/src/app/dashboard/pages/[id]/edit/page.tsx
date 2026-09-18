@@ -50,6 +50,8 @@ import {
   CheckSquare,
   Sparkles,
   Info,
+  Palette,
+  Highlighter,
 } from 'lucide-react';
 
 interface Collaborator {
@@ -110,6 +112,26 @@ export default function PageEditPage() {
   const [slashFilter, setSlashFilter] = useState('');
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0);
   const slashMenuRef = useRef<HTMLDivElement>(null);
+
+  // カラーピッカー ステート
+  const [colorPickerOpen, setColorPickerOpen] = useState(false);
+  const [customColor, setCustomColor] = useState('#ef4444');
+  const colorPickerRef = useRef<HTMLDivElement>(null);
+
+  // カラーピッカー外側クリックで閉じる
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (colorPickerRef.current && !colorPickerRef.current.contains(e.target as Node)) {
+        setColorPickerOpen(false);
+      }
+    };
+    if (colorPickerOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [colorPickerOpen]);
 
   // リアルタイム協調編集 & Presence ステート
   const [collaborators, setCollaborators] = useState<Collaborator[]>([]);
@@ -227,6 +249,20 @@ export default function PageEditPage() {
     view.focus();
   };
 
+  const applyTextColor = (color: string) => {
+    wrapText('[', `]{color:${color}}`, '色付きテキスト');
+    setColorPickerOpen(false);
+  };
+
+  const applyBgHighlight = (bg: string) => {
+    if (bg === '#fef08a') {
+      wrapText('==', '==', 'ハイライトテキスト');
+    } else {
+      wrapText('[', `]{bg:${bg}}`, 'ハイライトテキスト');
+    }
+    setColorPickerOpen(false);
+  };
+
   // スラッシュコマンド定義一覧
   const slashCommands: SlashCommandItem[] = useMemo(
     () => [
@@ -250,6 +286,48 @@ export default function PageEditPage() {
         description: '詳細な小項目タイトル',
         icon: Heading3,
         action: () => insertText('### '),
+      },
+      {
+        id: 'highlight',
+        label: 'ハイライトマーカー',
+        description: 'テキストを黄色マーカーで強調 (==テキスト==)',
+        icon: Highlighter,
+        action: () => wrapText('==', '==', 'ハイライトテキスト'),
+      },
+      {
+        id: 'red',
+        label: '赤文字 (Red)',
+        description: '選択テキストまたは赤色文字を挿入',
+        icon: Palette,
+        action: () => wrapText('[', ']{color:#ef4444}', '赤色テキスト'),
+      },
+      {
+        id: 'blue',
+        label: '青文字 (Blue)',
+        description: '選択テキストまたは青色文字を挿入',
+        icon: Palette,
+        action: () => wrapText('[', ']{color:#3b82f6}', '青色テキスト'),
+      },
+      {
+        id: 'green',
+        label: '緑文字 (Green)',
+        description: '選択テキストまたは緑色文字を挿入',
+        icon: Palette,
+        action: () => wrapText('[', ']{color:#10b981}', '緑色テキスト'),
+      },
+      {
+        id: 'yellow',
+        label: '黄文字 (Yellow)',
+        description: '選択テキストまたは黄色文字を挿入',
+        icon: Palette,
+        action: () => wrapText('[', ']{color:#f59e0b}', '黄色テキスト'),
+      },
+      {
+        id: 'purple',
+        label: '紫文字 (Purple)',
+        description: '選択テキストまたは紫色文字を挿入',
+        icon: Palette,
+        action: () => wrapText('[', ']{color:#8b5cf6}', '紫色テキスト'),
       },
       {
         id: 'table',
@@ -1054,6 +1132,134 @@ export default function PageEditPage() {
           >
             <Strikethrough className="size-4" />
           </button>
+
+          {/* テキストカラー & ハイライト ドロップダウン */}
+          <div className="relative" ref={colorPickerRef}>
+            <button
+              type="button"
+              onClick={() => setColorPickerOpen(!colorPickerOpen)}
+              className={`p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer flex items-center gap-1 ${
+                colorPickerOpen ? 'bg-muted text-foreground ring-1 ring-border' : ''
+              }`}
+              title="文字色・ハイライト"
+            >
+              <Palette className="size-4 text-primary" />
+            </button>
+
+            {colorPickerOpen && (
+              <div className="absolute left-0 top-full mt-2 z-50 w-64 p-3 bg-card text-card-foreground border border-border rounded-2xl shadow-2xl space-y-3 animate-in fade-in-0 zoom-in-95 duration-100">
+                {/* 文字色セクション */}
+                <div>
+                  <div className="text-[11px] font-semibold text-muted-foreground mb-1.5 flex items-center justify-between">
+                    <span className="flex items-center gap-1">
+                      <Palette className="size-3 text-primary" />
+                      文字色
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        wrapText('[', ']{color:currentColor}', 'テキスト');
+                        setColorPickerOpen(false);
+                      }}
+                      className="text-[10px] text-muted-foreground hover:text-foreground underline cursor-pointer"
+                    >
+                      リセット
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-6 gap-1.5">
+                    {[
+                      { name: '赤', color: '#ef4444', bg: 'bg-red-500' },
+                      { name: 'オレンジ', color: '#f97316', bg: 'bg-orange-500' },
+                      { name: '黄', color: '#f59e0b', bg: 'bg-amber-500' },
+                      { name: '緑', color: '#10b981', bg: 'bg-emerald-500' },
+                      { name: '青', color: '#3b82f6', bg: 'bg-blue-500' },
+                      { name: '紫', color: '#8b5cf6', bg: 'bg-purple-500' },
+                      { name: 'ピンク', color: '#ec4899', bg: 'bg-pink-500' },
+                      { name: 'シアン', color: '#06b6d4', bg: 'bg-cyan-500' },
+                      { name: 'インディゴ', color: '#6366f1', bg: 'bg-indigo-500' },
+                      { name: 'グレー', color: '#64748b', bg: 'bg-slate-500' },
+                      { name: 'ダーク', color: '#1e293b', bg: 'bg-slate-800' },
+                      { name: '白', color: '#ffffff', bg: 'bg-white border border-slate-300 dark:border-slate-600' },
+                    ].map((c) => (
+                      <button
+                        key={c.color}
+                        type="button"
+                        onClick={() => applyTextColor(c.color)}
+                        className={`size-6 rounded-full ${c.bg} transition-transform hover:scale-110 cursor-pointer shadow-xs`}
+                        title={c.name}
+                      />
+                    ))}
+                  </div>
+
+                  {/* カスタムカラー指定 */}
+                  <div className="flex items-center gap-1.5 mt-2.5 pt-2 border-t border-border">
+                    <input
+                      type="color"
+                      value={customColor}
+                      onChange={(e) => setCustomColor(e.target.value)}
+                      className="size-6 p-0 rounded cursor-pointer border-0 bg-transparent"
+                      title="カラーピッカー"
+                    />
+                    <input
+                      type="text"
+                      value={customColor}
+                      onChange={(e) => setCustomColor(e.target.value)}
+                      placeholder="#hex"
+                      className="flex-1 h-6 px-1.5 text-xs font-mono bg-muted/50 border border-border rounded text-foreground"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => applyTextColor(customColor)}
+                      className="h-6 px-2 text-[11px] font-medium bg-primary text-primary-foreground rounded hover:bg-primary/90 cursor-pointer"
+                    >
+                      適用
+                    </button>
+                  </div>
+                </div>
+
+                {/* ハイライト / 背景色セクション */}
+                <div className="pt-2 border-t border-border">
+                  <div className="text-[11px] font-semibold text-muted-foreground mb-1.5 flex items-center justify-between">
+                    <span className="flex items-center gap-1">
+                      <Highlighter className="size-3 text-amber-500" />
+                      ハイライト (マーカー)
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        wrapText('==', '==', 'ハイライトテキスト');
+                        setColorPickerOpen(false);
+                      }}
+                      className="text-[10px] text-primary hover:underline cursor-pointer font-medium"
+                      title="標準Markdownハイライト (==テキスト==)"
+                    >
+                      == 標準 ==
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-6 gap-1.5">
+                    {[
+                      { name: 'イエロー', color: '#fef08a', bg: 'bg-yellow-200 text-yellow-900' },
+                      { name: 'グリーン', color: '#bbf7d0', bg: 'bg-green-200 text-green-900' },
+                      { name: 'ブルー', color: '#bfdbfe', bg: 'bg-blue-200 text-blue-900' },
+                      { name: 'ピンク', color: '#fbcfe8', bg: 'bg-pink-200 text-pink-900' },
+                      { name: 'オレンジ', color: '#fed7aa', bg: 'bg-orange-200 text-orange-900' },
+                      { name: 'パープル', color: '#e9d5ff', bg: 'bg-purple-200 text-purple-900' },
+                    ].map((c) => (
+                      <button
+                        key={c.color}
+                        type="button"
+                        onClick={() => applyBgHighlight(c.color)}
+                        className={`size-6 rounded-md ${c.bg} transition-transform hover:scale-110 cursor-pointer border border-border/40 shadow-xs flex items-center justify-center text-[10px] font-bold`}
+                        title={c.name}
+                      >
+                        A
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
 
           <div className="h-4 w-px bg-border mx-1" />
 
