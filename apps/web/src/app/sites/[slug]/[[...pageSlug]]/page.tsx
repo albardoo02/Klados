@@ -215,20 +215,7 @@ export default function PublicSitePage() {
         .catch(() => null),
   });
 
-  // 個別ページ情報取得
-  const {
-    data: pageData,
-    isLoading: isPageLoading,
-  } = useQuery({
-    queryKey: ['public-page', siteSlug, currentSlug],
-    queryFn: () =>
-      publicApi
-        .getPage(siteSlug, currentSlug)
-        .then((res) => res.data?.data?.page || res.data?.data as PublicPage)
-        .catch(() => null),
-  });
-
-  // フォールバック制御
+  // フォールバック制御 & ページ一覧
   const isFallback = isSiteError || (!isSiteLoading && !siteData);
   const site: PublicSite = siteData || {
     id: 'demo-site',
@@ -246,12 +233,42 @@ export default function PublicSitePage() {
       ? DEMO_PAGES
       : [];
 
+  // ターゲットとなるスラッグの決定 (指定がなければ最初の公開ページ、または home/index)
+  const targetSlug =
+    currentSlug ||
+    (pages.find((p) => p.slug === 'home' || p.slug === 'index' || p.slug === '')?.slug ||
+      pages[0]?.slug ||
+      '');
+
+  // 個別ページ情報取得 (ターゲットスラッグがある場合のみ実行)
+  const {
+    data: pageData,
+    isLoading: isPageLoading,
+  } = useQuery({
+    queryKey: ['public-page', siteSlug, targetSlug],
+    queryFn: async () => {
+      if (!targetSlug) return null;
+      try {
+        const res = await publicApi.getPage(siteSlug, targetSlug);
+        const data = res.data?.data;
+        // 単一ページオブジェクトであることを確認 (配列なら null)
+        if (data && !Array.isArray(data)) {
+          return (data.page || data) as PublicPage;
+        }
+        return null;
+      } catch {
+        return null;
+      }
+    },
+    enabled: !!siteSlug && !!targetSlug,
+  });
+
   // 表示する現在のアクティブページを特定
   const activePage: PublicPage | undefined =
     pageData ||
-    (currentSlug
-      ? pages.find((p) => p.slug === currentSlug || p.slug === `/${currentSlug}`)
-      : pages.find((p) => p.slug === 'index' || p.slug === 'home' || p.slug === '') || pages[0]);
+    (targetSlug
+      ? pages.find((p) => p.slug === targetSlug || p.slug === `/${targetSlug}`)
+      : pages[0]);
 
   // テーマ切り替え
   const siteThemePreset = site.theme || 'minimal';
