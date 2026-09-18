@@ -14,7 +14,7 @@ interface User {
 interface AuthState {
   user: User | null;
   token: string | null;
-  setAuth: (user: User, token: string) => void;
+  setAuth: (user: User, token: string, rememberMe?: boolean) => void;
   updateUser: (user: Partial<User>) => void;
   clearAuth: () => void;
 }
@@ -24,8 +24,16 @@ export const useAuthStore = create<AuthState>()(
     (set) => ({
       user: null,
       token: null,
-      setAuth: (user, token) => {
-        localStorage.setItem('access_token', token);
+      setAuth: (user, token, rememberMe = true) => {
+        // rememberMe=true → localStorage（30日保持）
+        // rememberMe=false → sessionStorage（ブラウザを閉じたらログアウト）
+        if (rememberMe) {
+          localStorage.setItem('access_token', token);
+          sessionStorage.removeItem('access_token');
+        } else {
+          sessionStorage.setItem('access_token', token);
+          localStorage.removeItem('access_token');
+        }
         set({ user, token });
       },
       updateUser: (partialUser) => {
@@ -35,6 +43,7 @@ export const useAuthStore = create<AuthState>()(
       },
       clearAuth: () => {
         localStorage.removeItem('access_token');
+        sessionStorage.removeItem('access_token');
         set({ user: null, token: null });
       },
     }),

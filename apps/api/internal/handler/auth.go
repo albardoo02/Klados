@@ -27,8 +27,9 @@ type registerRequest struct {
 }
 
 type loginRequest struct {
-	Email    string `json:"email" binding:"required,email"`
-	Password string `json:"password" binding:"required"`
+	Email      string `json:"email" binding:"required,email"`
+	Password   string `json:"password" binding:"required"`
+	RememberMe bool   `json:"remember_me"`
 }
 
 func (h *AuthHandler) Register(c *gin.Context) {
@@ -62,7 +63,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
-	token, err := h.generateToken(user.ID.String())
+	token, err := h.generateToken(user.ID.String(), 24*time.Hour)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate token"})
 		return
@@ -209,13 +210,19 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	token, err := h.generateToken(user.ID.String())
+	// remember_me=true → 30日、false → 1日（ブラウザセッション相当）
+	ttl := 24 * time.Hour
+	if req.RememberMe {
+		ttl = 30 * 24 * time.Hour
+	}
+
+	token, err := h.generateToken(user.ID.String(), ttl)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate token"})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"token": token, "user": user}})
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"token": token, "user": user, "remember_me": req.RememberMe}})
 }
 
 func (h *AuthHandler) Me(c *gin.Context) {
@@ -230,11 +237,11 @@ func (h *AuthHandler) Me(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": user})
 }
 
-func (h *AuthHandler) generateToken(userID string) (string, error) {
+func (h *AuthHandler) generateToken(userID string, ttl time.Duration) (string, error) {
 	claims := jwt.MapClaims{
 		"sub": userID,
 		"iat": time.Now().Unix(),
-		"exp": time.Now().Add(7 * 24 * time.Hour).Unix(),
+		"exp": time.Now().Add(ttl).Unix(),
 	}
 	return jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString([]byte(h.JWTSecret))
 }
@@ -396,7 +403,7 @@ console.log("Hello, Klados!");
 		}
 	}
 
-	token, err := h.generateToken(user.ID.String())
+	token, err := h.generateToken(user.ID.String(), 30*24*time.Hour)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate token"})
 		return
@@ -509,7 +516,7 @@ func (h *AuthHandler) handleOAuthUser(c *gin.Context, req oauthLoginRequest) {
 		}
 	}
 
-	token, err := h.generateToken(user.ID.String())
+	token, err := h.generateToken(user.ID.String(), 30*24*time.Hour)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "トークンの生成に失敗しました"})
 		return

@@ -11,6 +11,7 @@ export default function LoginPage() {
   const router = useRouter();
   const setAuth = useAuthStore((s) => s.setAuth);
   const [form, setForm] = useState({ email: '', password: '' });
+  const [rememberMe, setRememberMe] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -19,8 +20,8 @@ export default function LoginPage() {
     setLoading(true);
     setError('');
     try {
-      const res = await authApi.login(form);
-      setAuth(res.data.data.user, res.data.data.token);
+      const res = await authApi.login({ ...form, remember_me: rememberMe });
+      setAuth(res.data.data.user, res.data.data.token, rememberMe);
       router.push('/dashboard');
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } } };
@@ -70,6 +71,29 @@ export default function LoginPage() {
               className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
+
+          {/* 30日間ログイン保持 */}
+          <label className="flex items-center gap-2.5 cursor-pointer select-none group">
+            <div className="relative">
+              <input
+                type="checkbox"
+                checked={rememberMe}
+                onChange={(e) => setRememberMe(e.target.checked)}
+                className="sr-only peer"
+              />
+              <div className="w-4 h-4 border-2 border-slate-300 rounded peer-checked:bg-blue-500 peer-checked:border-blue-500 transition-colors group-hover:border-blue-400 flex items-center justify-center">
+                {rememberMe && (
+                  <svg className="w-2.5 h-2.5 text-white" viewBox="0 0 10 8" fill="none">
+                    <path d="M1 4L3.5 6.5L9 1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                )}
+              </div>
+            </div>
+            <span className="text-sm text-slate-600 group-hover:text-slate-900 transition-colors">
+              30日間ログインを保持する
+            </span>
+          </label>
+
           <button
             type="submit"
             disabled={loading}

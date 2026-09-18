@@ -9,10 +9,10 @@ export const api = axios.create({
   withCredentials: true,
 });
 
-// リクエストインターセプター: JWTトークン付与
+// リクエストインターセプター: JWTトークン付与（localStorage → sessionStorage の順で探す）
 api.interceptors.request.use((config) => {
   if (typeof window !== 'undefined') {
-    const token = localStorage.getItem('access_token');
+    const token = localStorage.getItem('access_token') ?? sessionStorage.getItem('access_token');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
@@ -41,7 +41,7 @@ api.interceptors.response.use(
 export const authApi = {
   register: (data: { email: string; username: string; password: string; display_name?: string }) =>
     api.post('/auth/register', data),
-  login: (data: { email: string; password: string }) =>
+  login: (data: { email: string; password: string; remember_me?: boolean }) =>
     api.post('/auth/login', data),
   me: () => api.get('/auth/me'),
   updateProfile: (data: { display_name?: string; avatar_url?: string }) =>
