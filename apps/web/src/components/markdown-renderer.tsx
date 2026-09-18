@@ -50,8 +50,8 @@ export function MarkdownRenderer({ content, className = '' }: MarkdownRendererPr
           },
           table({ children, ...props }) {
             return (
-              <div className="my-6 overflow-x-auto rounded-xl border border-border shadow-xs">
-                <table className="w-full text-left text-sm" {...props}>
+              <div className="my-4 overflow-x-auto">
+                <table className="border-collapse border border-border text-left text-sm my-2" {...props}>
                   {children}
                 </table>
               </div>

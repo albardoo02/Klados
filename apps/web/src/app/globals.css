@@ -179,11 +179,10 @@
 }
 
 .markdown-body table {
-  width: 100%;
   border-collapse: collapse;
-  margin: 1.25rem 0;
-  display: block;
-  overflow-x: auto;
+  margin: 1rem 0;
+  width: auto;
+  max-width: 100%;
 }
 
 .markdown-body th, .markdown-body td {
