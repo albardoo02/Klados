@@ -1,7 +1,7 @@
 'use client';
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { sitesApi, SiteSettingsData } from '@/lib/api';
+import { sitesApi, pagesApi, downloadSiteZip, SiteSettingsData } from '@/lib/api';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useState, useEffect } from 'react';
@@ -25,6 +25,10 @@ import {
   Trash2,
   FileText,
   BarChart3,
+  Download,
+  Palette,
+  Type,
+  Code2,
 } from 'lucide-react';
 
 interface SiteDetails {
@@ -35,11 +39,17 @@ interface SiteDetails {
   theme: string;
   is_public: boolean;
   custom_domain?: string;
+  custom_font?: string;
+  primary_color?: string;
+  custom_css?: string;
   settings?: {
     ogp_title?: string;
     ogp_description?: string;
     ogp_image?: string;
     favicon?: string;
+    custom_font?: string;
+    primary_color?: string;
+    custom_css?: string;
     [key: string]: any;
   };
   created_at?: string;
@@ -80,6 +90,25 @@ const THEMES = [
   },
 ];
 
+const GOOGLE_FONTS = [
+  { id: 'Inter', name: 'Inter', desc: 'モダン & ニュートラル (推奨)', family: 'Inter, sans-serif' },
+  { id: 'Roboto', name: 'Roboto', desc: 'Google標準サンセリフ', family: 'Roboto, sans-serif' },
+  { id: 'Noto Sans JP', name: 'Noto Sans JP', desc: '日本語向けゴシック体', family: "'Noto Sans JP', sans-serif" },
+  { id: 'JetBrains Mono', name: 'JetBrains Mono', desc: '等幅・技術ドキュメント向け', family: "'JetBrains Mono', monospace" },
+  { id: 'Serif', name: 'Serif (Merriweather)', desc: 'クラシック・読み物向け明朝', family: 'Merriweather, Georgia, serif' },
+];
+
+const PRESET_COLORS = [
+  { name: 'Indigo', value: '#6366f1' },
+  { name: 'Blue', value: '#3b82f6' },
+  { name: 'Emerald', value: '#10b981' },
+  { name: 'Rose', value: '#f43f5e' },
+  { name: 'Amber', value: '#f59e0b' },
+  { name: 'Purple', value: '#a855f7' },
+  { name: 'Cyan', value: '#06b6d4' },
+  { name: 'Slate', value: '#475569' },
+];
+
 export default function SiteSettingsPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
@@ -92,16 +121,22 @@ export default function SiteSettingsPage() {
     theme: 'minimal',
     is_public: true,
     custom_domain: '',
+    custom_font: 'Inter',
+    primary_color: '#3b82f6',
+    custom_css: '',
     settings: {
       ogp_title: '',
       ogp_description: '',
       ogp_image: '',
       favicon: '',
+      custom_font: 'Inter',
+      primary_color: '#3b82f6',
+      custom_css: '',
     },
   });
 
-  const [isSaved, setIsSaved] = useState(false);
   const [saveSuccessMsg, setSaveSuccessMsg] = useState<string | null>(null);
+  const [isExporting, setIsExporting] = useState(false);
 
   // DNS確認ステート
   const [dnsStatus, setDnsStatus] = useState<'idle' | 'checking' | 'verified' | 'pending'>('idle');
@@ -120,9 +155,18 @@ export default function SiteSettingsPage() {
     queryFn: () => sitesApi.get(id).then((r) => r.data.data),
   });
 
+  const { data: pages = [] } = useQuery({
+    queryKey: ['pages', id],
+    queryFn: () => pagesApi.list(id).then((r) => r.data.data),
+  });
+
   // フォームの初期値ロード
   useEffect(() => {
     if (site) {
+      const customFont = site.settings?.custom_font || site.custom_font || 'Inter';
+      const primaryColor = site.settings?.primary_color || site.primary_color || '#3b82f6';
+      const customCss = site.settings?.custom_css || site.custom_css || '';
+
       setForm({
         title: site.title || '',
         slug: site.slug || '',
@@ -130,11 +174,17 @@ export default function SiteSettingsPage() {
         theme: site.theme || 'minimal',
         is_public: site.is_public ?? true,
         custom_domain: site.custom_domain || '',
+        custom_font: customFont,
+        primary_color: primaryColor,
+        custom_css: customCss,
         settings: {
           ogp_title: site.settings?.ogp_title || '',
           ogp_description: site.settings?.ogp_description || '',
           ogp_image: site.settings?.ogp_image || '',
           favicon: site.settings?.favicon || '',
+          custom_font: customFont,
+          primary_color: primaryColor,
+          custom_css: customCss,
         },
       });
     }
@@ -145,7 +195,6 @@ export default function SiteSettingsPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['site', id] });
       queryClient.invalidateQueries({ queryKey: ['sites'] });
-      setIsSaved(true);
       setSaveSuccessMsg('サイト設定を保存しました');
       setTimeout(() => setSaveSuccessMsg(null), 3000);
     },
@@ -156,7 +205,32 @@ export default function SiteSettingsPage() {
 
   const handleSave = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    updateMutation.mutate(form);
+    // settings 内にも同期
+    const payload: SiteSettingsData = {
+      ...form,
+      settings: {
+        ...form.settings,
+        custom_font: form.custom_font,
+        primary_color: form.primary_color,
+        custom_css: form.custom_css,
+      },
+    };
+    updateMutation.mutate(payload);
+  };
+
+  // ZIPエクスポート処理
+  const handleExportZip = async () => {
+    if (!site) return;
+    setIsExporting(true);
+    try {
+      await downloadSiteZip(site, pages);
+      setSaveSuccessMsg('サイトのZIPエクスポートが完了しました');
+      setTimeout(() => setSaveSuccessMsg(null), 3500);
+    } catch (err: any) {
+      alert('エクスポートに失敗しました: ' + (err?.message || '不明なエラー'));
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   // DNSチェック処理
@@ -168,19 +242,21 @@ export default function SiteSettingsPage() {
 
     setDnsStatus('checking');
     try {
-      // sitesApi.checkDomain を呼び出し
       const res = await sitesApi.checkDomain(id, form.custom_domain).catch(() => null);
       if (res?.data?.success && res?.data?.data?.verified) {
         setDnsStatus('verified');
         setDnsMessage('CNAMEレコードが正常に確認されました。SSL証明書が有効です。');
       } else {
-        // DNS伝播中のステータスを表示
         setDnsStatus('verified');
-        setDnsMessage(`CNAMEレコードが cname.klados.app に向けられています。ドメイン "${form.custom_domain}" は接続済みです。`);
+        setDnsMessage(
+          `CNAMEレコードが cname.klados.app に向けられています。ドメイン "${form.custom_domain}" は接続済みです。`
+        );
       }
     } catch {
       setDnsStatus('pending');
-      setDnsMessage('DNSレコードがまだ伝播していないか、CNAME設定が確認できませんでした。設定後反映まで最大24時間かかる場合があります。');
+      setDnsMessage(
+        'DNSレコードがまだ伝播していないか、CNAME設定が確認できませんでした。反映まで最大24時間かかる場合があります。'
+      );
     }
   };
 
@@ -237,11 +313,27 @@ export default function SiteSettingsPage() {
               <span>サイト設定</span>
             </h1>
             <p className="text-xs text-muted-foreground mt-1">
-              {site?.title} ({site?.slug}.klados.app) のデザイン、ドメイン、SEO設定
+              {site?.title} ({site?.slug}.klados.app) のデザイン、ドメイン、カスタムCSS、SEO設定
             </p>
           </div>
 
           <div className="flex items-center gap-2">
+            {/* ZIPエクスポートボタン */}
+            <button
+              type="button"
+              onClick={handleExportZip}
+              disabled={isExporting || !site}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-card hover:bg-muted text-foreground text-xs font-semibold rounded-xl border border-border transition-colors shadow-2xs cursor-pointer disabled:opacity-50"
+              title="サイトの全MarkdownページをZIP形式でダウンロード"
+            >
+              {isExporting ? (
+                <Loader2 className="size-3.5 animate-spin text-primary" />
+              ) : (
+                <Download className="size-3.5 text-primary" />
+              )}
+              <span>Export Site (ZIP)</span>
+            </button>
+
             <button
               type="button"
               onClick={handleSave}
@@ -315,7 +407,12 @@ export default function SiteSettingsPage() {
                   type="text"
                   required
                   value={form.slug}
-                  onChange={(e) => setForm({ ...form, slug: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '') })}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      slug: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''),
+                    })
+                  }
                   placeholder="my-site"
                   className="w-full px-3.5 py-2 text-sm bg-background border border-border rounded-l-xl focus:outline-none focus:ring-2 focus:ring-primary"
                 />
@@ -368,7 +465,7 @@ export default function SiteSettingsPage() {
             <div>
               <h2 className="text-base font-bold">デザインテーマ設定</h2>
               <p className="text-xs text-muted-foreground">
-                サイト全体のデザインスタイルとタイポグラフィを選択できます
+                サイト全体のレイアウトテーマを選択できます
               </p>
             </div>
           </div>
@@ -394,7 +491,6 @@ export default function SiteSettingsPage() {
                       </span>
                     </div>
 
-                    {/* テーマミニプレビューカード */}
                     <div
                       className={`h-20 rounded-xl border p-2 flex flex-col justify-between mb-3 text-[10px] ${theme.bgPreview}`}
                     >
@@ -417,7 +513,9 @@ export default function SiteSettingsPage() {
                     </span>
                     <div
                       className={`size-4 rounded-full border flex items-center justify-center ${
-                        isSelected ? 'border-primary bg-primary text-primary-foreground' : 'border-border'
+                        isSelected
+                          ? 'border-primary bg-primary text-primary-foreground'
+                          : 'border-border'
                       }`}
                     >
                       {isSelected && <Check className="size-2.5 stroke-[3]" />}
@@ -429,7 +527,143 @@ export default function SiteSettingsPage() {
           </div>
         </div>
 
-        {/* 3. カスタムドメイン設定 */}
+        {/* 3. Google Fonts & カスタムカラー & カスタムCSS (Phase 3) */}
+        <div className="bg-card border border-border rounded-2xl p-6 shadow-xs space-y-6">
+          <div className="flex items-center gap-2 pb-3 border-b border-border">
+            <Palette className="size-5 text-indigo-500" />
+            <div>
+              <h2 className="text-base font-bold">タイポグラフィ & カスタムスタイリング (Phase 3)</h2>
+              <p className="text-xs text-muted-foreground">
+                Google Fontsフォントの適用、ブランドカラー、独自CSSの追加ができます
+              </p>
+            </div>
+          </div>
+
+          {/* フォントセレクター */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <Type className="size-4 text-primary" />
+              <label className="text-xs font-bold">フォントファミリー (Google Fonts)</label>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {GOOGLE_FONTS.map((font) => {
+                const isSelected = form.custom_font === font.id;
+                return (
+                  <button
+                    key={font.id}
+                    type="button"
+                    onClick={() => setForm({ ...form, custom_font: font.id })}
+                    className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer ${
+                      isSelected
+                        ? 'border-primary bg-primary/10 shadow-xs'
+                        : 'border-border hover:bg-muted/40'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-sm" style={{ fontFamily: font.family }}>
+                        {font.name}
+                      </span>
+                      {isSelected && <Check className="size-3.5 text-primary stroke-[3]" />}
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-1">{font.desc}</p>
+                    <div
+                      className="mt-2 text-xs opacity-70 truncate font-normal"
+                      style={{ fontFamily: font.family }}
+                    >
+                      The quick brown fox jumps over the lazy dog.
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* ブランドカラーピッカー */}
+          <div className="space-y-3 pt-2 border-t border-border">
+            <div className="flex items-center gap-2">
+              <Palette className="size-4 text-primary" />
+              <label className="text-xs font-bold">プライマリブランドカラー</label>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              公開サイトのアクセントリンク、ボタン、見出しハイライトに適用されます
+            </p>
+
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              {PRESET_COLORS.map((color) => {
+                const isSelected = form.primary_color === color.value;
+                return (
+                  <button
+                    key={color.value}
+                    type="button"
+                    onClick={() => setForm({ ...form, primary_color: color.value })}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-medium cursor-pointer transition-all ${
+                      isSelected
+                        ? 'border-primary shadow-xs ring-2 ring-primary/20'
+                        : 'border-border hover:bg-muted/50'
+                    }`}
+                  >
+                    <div
+                      className="size-3.5 rounded-full shadow-2xs border border-black/10"
+                      style={{ backgroundColor: color.value }}
+                    />
+                    <span>{color.name}</span>
+                  </button>
+                );
+              })}
+
+              {/* カスタムカラー Hex インプット */}
+              <div className="flex items-center gap-2 pl-2 border-l border-border">
+                <input
+                  type="color"
+                  value={form.primary_color || '#3b82f6'}
+                  onChange={(e) => setForm({ ...form, primary_color: e.target.value })}
+                  className="size-7 rounded-lg border border-border cursor-pointer p-0.5"
+                  title="カスタムカラーを選択"
+                />
+                <input
+                  type="text"
+                  value={form.primary_color || '#3b82f6'}
+                  onChange={(e) => setForm({ ...form, primary_color: e.target.value })}
+                  placeholder="#3b82f6"
+                  className="w-24 px-2.5 py-1 text-xs font-mono bg-background border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-primary uppercase"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* カスタム CSS エディタ */}
+          <div className="space-y-2 pt-2 border-t border-border">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Code2 className="size-4 text-primary" />
+                <label className="text-xs font-bold">カスタム CSS エディタ</label>
+              </div>
+              <span className="text-[11px] text-muted-foreground">
+                公開サイトの &lt;style&gt; に直接埋め込まれます
+              </span>
+            </div>
+
+            <textarea
+              rows={6}
+              value={form.custom_css || ''}
+              onChange={(e) => setForm({ ...form, custom_css: e.target.value })}
+              placeholder={`/* ここにカスタムCSSを記述してください */
+.markdown-body h1 {
+  border-bottom: 2px solid var(--brand-primary);
+  padding-bottom: 0.5rem;
+}
+.markdown-body a {
+  text-decoration-thickness: 2px;
+}`}
+              className="w-full px-3.5 py-3 text-xs bg-muted/20 font-mono border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary leading-relaxed resize-y"
+            />
+            <p className="text-[11px] text-muted-foreground leading-relaxed">
+              💡 ヒント: <code className="px-1 rounded bg-muted">var(--brand-primary)</code> を指定すると選択したブランドカラーが利用できます。
+            </p>
+          </div>
+        </div>
+
+        {/* 4. カスタムドメイン設定 */}
         <div className="bg-card border border-border rounded-2xl p-6 shadow-xs space-y-5">
           <div className="flex items-center gap-2 pb-3 border-b border-border">
             <Globe className="size-5 text-blue-500" />
@@ -448,7 +682,9 @@ export default function SiteSettingsPage() {
                 type="text"
                 placeholder="docs.yourdomain.com"
                 value={form.custom_domain}
-                onChange={(e) => setForm({ ...form, custom_domain: e.target.value.toLowerCase().trim() })}
+                onChange={(e) =>
+                  setForm({ ...form, custom_domain: e.target.value.toLowerCase().trim() })
+                }
                 className="flex-1 px-3.5 py-2 text-sm bg-background border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary font-mono"
               />
               <button
@@ -466,7 +702,6 @@ export default function SiteSettingsPage() {
               </button>
             </div>
 
-            {/* DNSステータスメッセージ */}
             {dnsStatus === 'verified' && (
               <div className="p-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 text-emerald-800 dark:text-emerald-300 text-xs flex items-start gap-2">
                 <CheckCircle2 className="size-4 shrink-0 mt-0.5 text-emerald-600" />
@@ -487,11 +722,10 @@ export default function SiteSettingsPage() {
               </div>
             )}
 
-            {/* CNAME設定ガイドカード */}
             <div className="p-4 rounded-xl bg-muted/30 border border-border text-xs space-y-2">
               <span className="font-semibold text-foreground block">DNS 設定手順 (CNAME レコード):</span>
               <p className="text-muted-foreground">
-                ご利用のDNSプロバイダー（Cloudflare, Route53, お名前.com など）の管理画面で以下のレコードを追加してください:
+                DNSプロバイダーの管理画面で以下のレコードを追加してください:
               </p>
               <div className="grid grid-cols-3 gap-2 p-2.5 rounded-lg bg-background border border-border font-mono text-[11px]">
                 <div>
@@ -513,20 +747,19 @@ export default function SiteSettingsPage() {
           </div>
         </div>
 
-        {/* 4. SEO & OGP 設定 */}
+        {/* 5. SEO & OGP 設定 */}
         <div className="bg-card border border-border rounded-2xl p-6 shadow-xs space-y-5">
           <div className="flex items-center gap-2 pb-3 border-b border-border">
             <Share2 className="size-5 text-indigo-500" />
             <div>
               <h2 className="text-base font-bold">SEO & OGP (SNSシェア) 設定</h2>
               <p className="text-xs text-muted-foreground">
-                検索エンジンやSNS（X / Twitter, Slack 等）でシェアされた際の見栄えをカスタマイズします
+                SNSでシェアされた際の見栄えをカスタマイズします
               </p>
             </div>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* 入力側 */}
             <div className="space-y-4">
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold">OGP タイトル</label>
@@ -542,7 +775,6 @@ export default function SiteSettingsPage() {
                   }
                   className="w-full px-3.5 py-2 text-sm bg-background border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary"
                 />
-                <span className="text-[11px] text-muted-foreground">未入力時はサイト名が使われます</span>
               </div>
 
               <div className="space-y-1.5">
@@ -562,7 +794,7 @@ export default function SiteSettingsPage() {
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold">OGP 画像 URL (1200 x 630px 推奨)</label>
+                <label className="text-xs font-semibold">OGP 画像 URL</label>
                 <div className="flex items-center gap-2">
                   <input
                     type="url"
@@ -588,7 +820,7 @@ export default function SiteSettingsPage() {
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold">ファビコン URL (.ico, .png, .svg)</label>
+                <label className="text-xs font-semibold">ファビコン URL</label>
                 <input
                   type="url"
                   placeholder="https://example.com/favicon.ico"
@@ -604,11 +836,11 @@ export default function SiteSettingsPage() {
               </div>
             </div>
 
-            {/* リアルタイム SNS シェア プレビュー */}
             <div className="space-y-2">
-              <span className="text-xs font-semibold text-muted-foreground block">SNSシェア プレビューカード:</span>
+              <span className="text-xs font-semibold text-muted-foreground block">
+                SNSシェア プレビュー:
+              </span>
               <div className="rounded-2xl border border-border overflow-hidden bg-background shadow-sm">
-                {/* OGP画像プレビュー */}
                 <div className="aspect-[1.91/1] w-full bg-muted/40 relative flex items-center justify-center overflow-hidden">
                   {form.settings?.ogp_image ? (
                     <img
@@ -619,11 +851,10 @@ export default function SiteSettingsPage() {
                   ) : (
                     <div className="flex flex-col items-center justify-center text-muted-foreground/60 p-6 text-center">
                       <ImageIcon className="size-10 stroke-[1.2] mb-1" />
-                      <span className="text-xs font-medium">OGP画像未設定 (デフォルト表示)</span>
+                      <span className="text-xs font-medium">OGP画像未設定</span>
                     </div>
                   )}
                 </div>
-
                 <div className="p-3.5 bg-card space-y-1">
                   <span className="text-[11px] font-mono text-muted-foreground uppercase">
                     {form.custom_domain || `${form.slug || 'mysite'}.klados.app`}
@@ -632,7 +863,9 @@ export default function SiteSettingsPage() {
                     {form.settings?.ogp_title || form.title || 'サイトタイトル'}
                   </p>
                   <p className="text-xs text-muted-foreground line-clamp-2">
-                    {form.settings?.ogp_description || form.description || 'サイトの紹介文がここに表示されます。'}
+                    {form.settings?.ogp_description ||
+                      form.description ||
+                      'サイトの紹介文がここに表示されます。'}
                   </p>
                 </div>
               </div>
@@ -640,7 +873,7 @@ export default function SiteSettingsPage() {
           </div>
         </div>
 
-        {/* 5. 危険な操作 (Danger Zone) */}
+        {/* 6. 危険な操作 (Danger Zone) */}
         <div className="bg-rose-50/50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900/40 rounded-2xl p-6 shadow-xs space-y-4">
           <div className="flex items-center gap-2 pb-3 border-b border-rose-200 dark:border-rose-900/40 text-rose-600 dark:text-rose-400">
             <ShieldAlert className="size-5" />
@@ -654,7 +887,7 @@ export default function SiteSettingsPage() {
             <div>
               <p className="text-sm font-bold text-foreground">このサイトを削除する</p>
               <p className="text-xs text-muted-foreground mt-0.5">
-                サイトを削除すると、公開URLやアップロードされたメディアとの紐付けがすべて消去されます。この操作は取り消せません。
+                サイトを削除すると、公開URLやアップロードされたメディアとの紐付けがすべて消去されます。
               </p>
             </div>
             <button
@@ -738,7 +971,11 @@ export default function SiteSettingsPage() {
                 disabled={deleteConfirmText !== site?.slug || isDeleting}
                 className="inline-flex items-center gap-1.5 px-4 py-2 text-xs rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-semibold cursor-pointer disabled:opacity-40 transition-colors shadow-xs"
               >
-                {isDeleting ? <Loader2 className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
+                {isDeleting ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <Trash2 className="size-3.5" />
+                )}
                 <span>削除を実行する</span>
               </button>
             </div>
@@ -746,7 +983,7 @@ export default function SiteSettingsPage() {
         </div>
       )}
 
-      {/* メディアライブラリモーダル (OGP画像選択用) */}
+      {/* メディアライブラリモーダル */}
       <MediaLibraryModal
         isOpen={mediaLibraryOpen}
         onClose={() => setMediaLibraryOpen(false)}

@@ -1,11 +1,13 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { publicApi } from '@/lib/api';
+import { publicApi, commentsApi } from '@/lib/api';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { MarkdownRenderer } from '@/components/markdown-renderer';
+import { CommandPalette } from '@/components/command-palette';
+import { CommentsDrawer } from '@/components/comments-drawer';
 import {
   BookOpen,
   ChevronRight,
@@ -19,8 +21,8 @@ import {
   ArrowRight,
   Sparkles,
   ExternalLink,
-  Tag,
-  Share2,
+  Search,
+  MessageSquare,
 } from 'lucide-react';
 
 interface PublicPage {
@@ -40,17 +42,22 @@ interface PublicSite {
   title: string;
   description?: string;
   theme?: string;
+  custom_font?: string;
+  primary_color?: string;
+  custom_css?: string;
   settings?: {
     ogp_title?: string;
     ogp_description?: string;
     ogp_image?: string;
     favicon?: string;
+    custom_font?: string;
+    primary_color?: string;
+    custom_css?: string;
     [key: string]: any;
   };
   pages?: PublicPage[];
 }
 
-// バックエンド未起動時やデモ表示用のフォールバックデータ
 const DEMO_PAGES: PublicPage[] = [
   {
     id: 'demo-1',
@@ -70,7 +77,7 @@ Klados は、Markdownで書かれたドキュメントや記事を美しく高�
 | **シンタックスハイライト** | 多彩な言語に対応したコードブロック | ✅ サポート |
 | **KaTeX 数式表示** | インラインおよびブロック数式の美麗なレンダリング | ✅ サポート |
 | **画像最適化** | MinIO & CDN による高速画像配信 | ✅ サポート |
-| **マルチテーマ** | Minimal, Dark, Technical, Blog に対応 | ✅ サポート |
+| **マルチテーマ & カスタムCSS** | Minimal, Dark, Google Fonts, 独自CSS | ✅ サポート |
 
 ---
 
@@ -113,6 +120,7 @@ $$
 - [x] ドラッグ＆ドロップ画像アップロード
 - [x] バージョン履歴と差分ロールバック
 - [x] アクセス解析 (PV & UU)
+- [x] グローバル検索 (Ctrl+K) & コメント
 `,
   },
   {
@@ -181,12 +189,35 @@ Klados で使用できる代表的な記法一覧です。
   },
 ];
 
+// フォントURL & CSSファミリーマップ
+const FONT_CONFIG: Record<string, { url: string; family: string }> = {
+  Inter: {
+    url: 'https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap',
+    family: "'Inter', sans-serif",
+  },
+  Roboto: {
+    url: 'https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap',
+    family: "'Roboto', sans-serif",
+  },
+  'Noto Sans JP': {
+    url: 'https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;700&display=swap',
+    family: "'Noto Sans JP', sans-serif",
+  },
+  'JetBrains Mono': {
+    url: 'https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap',
+    family: "'JetBrains Mono', monospace",
+  },
+  Serif: {
+    url: 'https://fonts.googleapis.com/css2?family=Merriweather:wght@300;400;700&display=swap',
+    family: "'Merriweather', Georgia, serif",
+  },
+};
+
 export default function PublicSitePage() {
   const params = useParams<{ slug: string; pageSlug?: string[] }>();
   const siteSlug = params.slug;
   const rawPageSlug = params.pageSlug;
 
-  // 現在のページスラグ (スラッシュ結合)
   const currentSlug = Array.isArray(rawPageSlug)
     ? rawPageSlug.join('/')
     : rawPageSlug || '';
@@ -195,7 +226,6 @@ export default function PublicSitePage() {
   useEffect(() => {
     if (siteSlug) {
       publicApi.recordView(siteSlug, currentSlug).catch((err) => {
-        // バックエンド未起動環境や開発時は静かに処理
         console.debug('Analytics view recorded:', siteSlug, currentSlug, err?.message);
       });
     }
@@ -215,7 +245,6 @@ export default function PublicSitePage() {
         .catch(() => null),
   });
 
-  // フォールバック制御 & ページ一覧
   const isFallback = isSiteError || (!isSiteLoading && !siteData);
   const site: PublicSite = siteData || {
     id: 'demo-site',
@@ -223,6 +252,8 @@ export default function PublicSitePage() {
     title: siteSlug.charAt(0).toUpperCase() + siteSlug.slice(1) + ' Site',
     description: 'Klados Markdown Site Builder で構築されたサイト',
     theme: 'minimal',
+    custom_font: 'Inter',
+    primary_color: '#3b82f6',
     pages: DEMO_PAGES,
   };
 
@@ -233,14 +264,13 @@ export default function PublicSitePage() {
       ? DEMO_PAGES
       : [];
 
-  // ターゲットとなるスラッグの決定 (指定がなければ最初の公開ページ、または home/index)
   const targetSlug =
     currentSlug ||
     (pages.find((p) => p.slug === 'home' || p.slug === 'index' || p.slug === '')?.slug ||
       pages[0]?.slug ||
       '');
 
-  // 個別ページ情報取得 (ターゲットスラッグがある場合のみ実行)
+  // 個別ページ情報取得
   const {
     data: pageData,
     isLoading: isPageLoading,
@@ -251,7 +281,6 @@ export default function PublicSitePage() {
       try {
         const res = await publicApi.getPage(siteSlug, targetSlug);
         const data = res.data?.data;
-        // 単一ページオブジェクトであることを確認 (配列なら null)
         if (data && !Array.isArray(data)) {
           return (data.page || data) as PublicPage;
         }
@@ -263,21 +292,33 @@ export default function PublicSitePage() {
     enabled: !!siteSlug && !!targetSlug,
   });
 
-  // 表示する現在のアクティブページを特定
   const activePage: PublicPage | undefined =
     pageData ||
     (targetSlug
       ? pages.find((p) => p.slug === targetSlug || p.slug === `/${targetSlug}`)
       : pages[0]);
 
+  // コメント数取得
+  const { data: comments = [] } = useQuery({
+    queryKey: ['comments', activePage?.id],
+    queryFn: () => (activePage?.id ? commentsApi.list(activePage.id).then((r) => r.data.data) : []),
+    enabled: !!activePage?.id,
+  });
+
+  // UIステート: 検索モーダル & コメントドロワー
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [commentsOpen, setCommentsOpen] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
   // テーマ切り替え
-  const siteThemePreset = site.theme || 'minimal';
   const [theme, setTheme] = useState<'minimal' | 'dark'>('minimal');
 
-  // サイトデータ取得時、サイト設定のテーマを同期
   useEffect(() => {
     if (siteData) {
-      const stored = typeof window !== 'undefined' ? localStorage.getItem(`klados_theme_${siteSlug}`) : null;
+      const stored =
+        typeof window !== 'undefined'
+          ? localStorage.getItem(`klados_theme_${siteSlug}`)
+          : null;
       if (stored === 'dark' || stored === 'minimal') {
         setTheme(stored);
       } else {
@@ -287,7 +328,6 @@ export default function PublicSitePage() {
     }
   }, [siteData, siteSlug]);
 
-  // html タグへの dark クラス適用
   const isDark = theme === 'dark';
   useEffect(() => {
     if (typeof document !== 'undefined') {
@@ -304,8 +344,6 @@ export default function PublicSitePage() {
     };
   }, [isDark]);
 
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-
   const toggleTheme = () => {
     const nextTheme = theme === 'minimal' ? 'dark' : 'minimal';
     setTheme(nextTheme);
@@ -315,11 +353,21 @@ export default function PublicSitePage() {
   };
 
   // 前後のページナビゲーション
-  const currentIndex = pages.findIndex((p) => p.id === activePage?.id || p.slug === activePage?.slug);
+  const currentIndex = pages.findIndex(
+    (p) => p.id === activePage?.id || p.slug === activePage?.slug
+  );
   const prevPage = currentIndex > 0 ? pages[currentIndex - 1] : null;
-  const nextPage = currentIndex >= 0 && currentIndex < pages.length - 1 ? pages[currentIndex + 1] : null;
+  const nextPage =
+    currentIndex >= 0 && currentIndex < pages.length - 1 ? pages[currentIndex + 1] : null;
 
-  // 動的メタタグ値の計算
+  // カスタムフォント & カラー & CSS設定
+  const customFontKey = site.settings?.custom_font || site.custom_font || 'Inter';
+  const fontConfig = FONT_CONFIG[customFontKey] || FONT_CONFIG['Inter'];
+  const brandPrimaryColor =
+    site.settings?.primary_color || site.primary_color || '#3b82f6';
+  const customCss = site.settings?.custom_css || site.custom_css || '';
+
+  // メタタグ情報
   const pageTitle = activePage ? `${activePage.title} - ${site.title}` : site.title;
   const pageDescription =
     site.settings?.ogp_description ||
@@ -329,7 +377,6 @@ export default function PublicSitePage() {
   const ogImage = site.settings?.ogp_image || '';
   const favicon = site.settings?.favicon || '/favicon.ico';
 
-  // クライアント側での document.title および favicon 反映
   useEffect(() => {
     if (typeof document !== 'undefined') {
       document.title = pageTitle;
@@ -351,8 +398,9 @@ export default function PublicSitePage() {
       className={`min-h-screen transition-colors duration-200 ${
         isDark ? 'dark bg-[#0f1117] text-slate-100' : 'bg-white text-slate-900'
       }`}
+      style={{ fontFamily: fontConfig.family }}
     >
-      {/* 2. 動的メタタグ (React 19 / Next.js 15+ による head への自動ホイスティング) */}
+      {/* 動的メタタグ & Google Fonts 読み込み */}
       <title>{pageTitle}</title>
       <meta name="description" content={pageDescription} />
       <meta property="og:title" content={ogTitle} />
@@ -364,6 +412,27 @@ export default function PublicSitePage() {
       <meta name="twitter:title" content={ogTitle} />
       <meta name="twitter:description" content={pageDescription} />
       {ogImage && <meta name="twitter:image" content={ogImage} />}
+
+      {/* Google Fonts スタイルシート */}
+      {fontConfig.url && <link rel="stylesheet" href={fontConfig.url} />}
+
+      {/* 動的ブランドカラー & カスタム CSS 埋め込み */}
+      <style
+        dangerouslySetInnerHTML={{
+          __html: `
+            :root {
+              --brand-primary: ${brandPrimaryColor};
+            }
+            .klados-brand-accent {
+              color: var(--brand-primary);
+            }
+            .klados-brand-bg {
+              background-color: var(--brand-primary);
+            }
+            ${customCss}
+          `,
+        }}
+      />
 
       {/* サイト上部ヘッダー */}
       <header
@@ -383,11 +452,11 @@ export default function PublicSitePage() {
               {mobileMenuOpen ? <X className="size-5" /> : <Menu className="size-5" />}
             </button>
 
-            <Link
-              href={`/sites/${siteSlug}`}
-              className="flex items-center gap-2 group"
-            >
-              <div className="size-8 rounded-lg bg-blue-600 flex items-center justify-center text-white shadow-sm group-hover:scale-105 transition-transform">
+            <Link href={`/sites/${siteSlug}`} className="flex items-center gap-2.5 group">
+              <div
+                className="size-8 rounded-lg flex items-center justify-center text-white shadow-xs group-hover:scale-105 transition-transform"
+                style={{ backgroundColor: brandPrimaryColor }}
+              >
                 <BookOpen className="size-4" />
               </div>
               <div className="flex flex-col">
@@ -411,10 +480,52 @@ export default function PublicSitePage() {
           </div>
 
           <div className="flex items-center gap-2">
+            {/* グローバル検索ボタン (Ctrl+K) */}
+            <button
+              type="button"
+              onClick={() => setSearchOpen(true)}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs text-muted-foreground transition-colors cursor-pointer ${
+                isDark
+                  ? 'border-slate-800 bg-slate-900/60 hover:border-slate-700 hover:text-slate-200'
+                  : 'border-slate-200 bg-slate-50 hover:border-slate-300 hover:text-slate-900'
+              }`}
+            >
+              <Search className="size-3.5" />
+              <span className="hidden sm:inline">検索...</span>
+              <kbd className="hidden sm:inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono rounded bg-muted border border-border">
+                Ctrl K
+              </kbd>
+            </button>
+
+            {/* コメント ドロワー開閉ボタン */}
+            {activePage && (
+              <button
+                type="button"
+                onClick={() => setCommentsOpen(true)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-medium transition-colors cursor-pointer ${
+                  isDark
+                    ? 'border-slate-800 bg-slate-900/60 text-slate-300 hover:bg-slate-800'
+                    : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100'
+                }`}
+                title="このページへのコメントとフィードバック"
+              >
+                <MessageSquare className="size-3.5" />
+                <span className="hidden sm:inline">コメント</span>
+                {comments.length > 0 && (
+                  <span
+                    className="size-4 rounded-full text-white text-[10px] font-bold flex items-center justify-center -mr-1"
+                    style={{ backgroundColor: brandPrimaryColor }}
+                  >
+                    {comments.length}
+                  </span>
+                )}
+              </button>
+            )}
+
             {/* テーマ切替ボタン */}
             <button
               onClick={toggleTheme}
-              className={`p-2 rounded-lg border transition-colors cursor-pointer ${
+              className={`p-2 rounded-xl border transition-colors cursor-pointer ${
                 isDark
                   ? 'border-slate-700 bg-slate-800/80 text-amber-400 hover:bg-slate-700'
                   : 'border-slate-200 bg-slate-100 text-slate-600 hover:bg-slate-200'
@@ -428,7 +539,7 @@ export default function PublicSitePage() {
             {/* ダッシュボードへのリンク */}
             <Link
               href="/dashboard"
-              className={`hidden sm:inline-flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg border transition-colors ${
+              className={`hidden sm:inline-flex items-center gap-1 text-xs px-3 py-1.5 rounded-xl border transition-colors ${
                 isDark
                   ? 'border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800'
                   : 'border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-50'
@@ -443,7 +554,7 @@ export default function PublicSitePage() {
 
       {/* メインレイアウト */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex gap-8">
-        {/* デスクトップ用サイドバー (ページナビゲーション) */}
+        {/* デスクトップ用サイドバー */}
         <aside className="hidden md:block w-64 shrink-0">
           <div className="sticky top-24 space-y-4">
             <div className="flex items-center justify-between pb-2 border-b border-border">
@@ -455,7 +566,8 @@ export default function PublicSitePage() {
               {pages.map((p) => {
                 const isSelected =
                   activePage?.id === p.id ||
-                  (currentSlug === '' && (p.slug === 'index' || p.slug === 'home' || p.slug === '')) ||
+                  (currentSlug === '' &&
+                    (p.slug === 'index' || p.slug === 'home' || p.slug === '')) ||
                   p.slug === currentSlug;
                 const pageHref =
                   p.slug === 'index' || p.slug === 'home' || p.slug === ''
@@ -466,28 +578,43 @@ export default function PublicSitePage() {
                   <Link
                     key={p.id || p.slug}
                     href={pageHref}
-                    className={`flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors group ${
+                    style={
                       isSelected
-                        ? isDark
-                          ? 'bg-blue-900/30 text-blue-400 font-medium border border-blue-800/40'
-                          : 'bg-blue-50 text-blue-600 font-medium border border-blue-100'
+                        ? {
+                            color: brandPrimaryColor,
+                            borderColor: `${brandPrimaryColor}40`,
+                            backgroundColor: `${brandPrimaryColor}15`,
+                          }
+                        : undefined
+                    }
+                    className={`flex items-center justify-between px-3 py-2 rounded-xl text-sm transition-colors group ${
+                      isSelected
+                        ? 'font-bold border'
                         : isDark
                         ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
                         : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
                     }`}
                   >
                     <div className="flex items-center gap-2 truncate">
-                      <FileText className={`size-4 shrink-0 ${isSelected ? 'text-blue-500' : 'text-slate-400'}`} />
+                      <FileText
+                        className="size-4 shrink-0"
+                        style={isSelected ? { color: brandPrimaryColor } : undefined}
+                      />
                       <span className="truncate">{p.title}</span>
                     </div>
-                    {isSelected && <ChevronRight className="size-3.5 shrink-0 text-blue-500" />}
+                    {isSelected && (
+                      <ChevronRight
+                        className="size-3.5 shrink-0"
+                        style={{ color: brandPrimaryColor }}
+                      />
+                    )}
                   </Link>
                 );
               })}
             </nav>
 
             {isFallback && (
-              <div className="mt-8 p-3 rounded-lg bg-blue-50/70 dark:bg-blue-950/30 border border-blue-100 dark:border-blue-900/50 text-xs text-blue-600 dark:text-blue-300">
+              <div className="mt-8 p-3.5 rounded-xl bg-blue-50/70 dark:bg-blue-950/30 border border-blue-100 dark:border-blue-900/50 text-xs text-blue-600 dark:text-blue-300">
                 <p className="flex items-center gap-1 font-semibold mb-1">
                   <Sparkles className="size-3" /> デモプレビュー中
                 </p>
@@ -533,9 +660,10 @@ export default function PublicSitePage() {
                       key={p.id || p.slug}
                       href={pageHref}
                       onClick={() => setMobileMenuOpen(false)}
-                      className={`flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors ${
+                      style={isSelected ? { backgroundColor: brandPrimaryColor } : undefined}
+                      className={`flex items-center justify-between px-3 py-2 rounded-xl text-sm transition-colors ${
                         isSelected
-                          ? 'bg-blue-500 text-white font-medium'
+                          ? 'text-white font-semibold'
                           : isDark
                           ? 'text-slate-300 hover:bg-slate-800'
                           : 'text-slate-700 hover:bg-slate-100'
@@ -555,14 +683,21 @@ export default function PublicSitePage() {
         <main className="flex-1 min-w-0 max-w-4xl mx-auto">
           {isPageLoading ? (
             <div className="py-20 flex flex-col items-center justify-center text-slate-400 space-y-3">
-              <div className="size-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+              <div
+                className="size-8 border-2 border-t-transparent rounded-full animate-spin"
+                style={{ borderColor: `${brandPrimaryColor} transparent ${brandPrimaryColor} ${brandPrimaryColor}` }}
+              />
               <p className="text-sm">ページを読み込み中...</p>
             </div>
           ) : activePage ? (
             <article className="space-y-6">
               {/* パンくずリスト */}
               <div className="flex items-center gap-1.5 text-xs text-slate-400 dark:text-slate-500">
-                <Link href={`/sites/${siteSlug}`} className="hover:text-blue-500 transition-colors">
+                <Link
+                  href={`/sites/${siteSlug}`}
+                  className="hover:underline transition-colors"
+                  style={{ color: brandPrimaryColor }}
+                >
                   {site.title}
                 </Link>
                 <ChevronRight className="size-3" />
@@ -576,14 +711,26 @@ export default function PublicSitePage() {
                 <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-slate-900 dark:text-white mb-3">
                   {activePage.title}
                 </h1>
-                {activePage.created_at && (
-                  <div className="flex items-center gap-1.5 text-xs text-slate-400 dark:text-slate-500">
-                    <Calendar className="size-3.5" />
-                    <span>
-                      公開日: {new Date(activePage.created_at).toLocaleDateString('ja-JP')}
-                    </span>
-                  </div>
-                )}
+                <div className="flex items-center justify-between flex-wrap gap-2 text-xs text-slate-400 dark:text-slate-500">
+                  {activePage.created_at && (
+                    <div className="flex items-center gap-1.5">
+                      <Calendar className="size-3.5" />
+                      <span>
+                        公開日: {new Date(activePage.created_at).toLocaleDateString('ja-JP')}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* コメントを開くボタン */}
+                  <button
+                    type="button"
+                    onClick={() => setCommentsOpen(true)}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-muted/60 hover:bg-muted text-foreground transition-colors cursor-pointer"
+                  >
+                    <MessageSquare className="size-3 text-primary" />
+                    <span>コメント ({comments.length})</span>
+                  </button>
+                </div>
               </div>
 
               {/* Markdown コンテンツ */}
@@ -591,12 +738,37 @@ export default function PublicSitePage() {
                 <MarkdownRenderer content={activePage.content} />
               </div>
 
-              {/* ページ送り (前後の記事へのナビゲーション) */}
-              <div className="pt-10 mt-12 border-t border-border flex flex-col sm:flex-row items-stretch justify-between gap-4">
+              {/* 記事下部コメントエリア */}
+              <div className="pt-8 border-t border-border">
+                <div className="p-6 rounded-2xl bg-muted/20 border border-border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                  <div>
+                    <h3 className="font-bold text-sm flex items-center gap-2">
+                      <MessageSquare className="size-4 text-primary" />
+                      <span>この記事についてフィードバックを送る</span>
+                    </h3>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      疑問点や改善要望など、お気軽にコメントを投稿してください。
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setCommentsOpen(true)}
+                    className="px-4 py-2 rounded-xl text-xs font-semibold text-white shadow-xs transition-opacity cursor-pointer hover:opacity-90"
+                    style={{ backgroundColor: brandPrimaryColor }}
+                  >
+                    コメントを書く ({comments.length})
+                  </button>
+                </div>
+              </div>
+
+              {/* ページ送りナビゲーション */}
+              <div className="pt-6 mt-8 border-t border-border flex flex-col sm:flex-row items-stretch justify-between gap-4">
                 {prevPage ? (
                   <Link
                     href={
-                      prevPage.slug === 'index' || prevPage.slug === 'home' || prevPage.slug === ''
+                      prevPage.slug === 'index' ||
+                      prevPage.slug === 'home' ||
+                      prevPage.slug === ''
                         ? `/sites/${siteSlug}`
                         : `/sites/${siteSlug}/${prevPage.slug}`
                     }
@@ -606,7 +778,7 @@ export default function PublicSitePage() {
                         : 'border-slate-200 hover:border-slate-300 bg-slate-50/50 hover:bg-slate-100/60'
                     }`}
                   >
-                    <div className="flex items-center gap-1 text-xs text-slate-400 dark:text-slate-500 mb-1 group-hover:text-blue-500 transition-colors">
+                    <div className="flex items-center gap-1 text-xs text-slate-400 dark:text-slate-500 mb-1 group-hover:text-primary transition-colors">
                       <ArrowLeft className="size-3" />
                       <span>前のページ</span>
                     </div>
@@ -627,7 +799,7 @@ export default function PublicSitePage() {
                         : 'border-slate-200 hover:border-slate-300 bg-slate-50/50 hover:bg-slate-100/60'
                     }`}
                   >
-                    <div className="flex items-center justify-end gap-1 text-xs text-slate-400 dark:text-slate-500 mb-1 group-hover:text-blue-500 transition-colors">
+                    <div className="flex items-center justify-end gap-1 text-xs text-slate-400 dark:text-slate-500 mb-1 group-hover:text-primary transition-colors">
                       <span>次のページ</span>
                       <ArrowRight className="size-3" />
                     </div>
@@ -649,7 +821,8 @@ export default function PublicSitePage() {
               </p>
               <Link
                 href={`/sites/${siteSlug}`}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors"
+                className="inline-flex items-center gap-2 px-4 py-2 text-white rounded-xl text-sm font-medium transition-opacity hover:opacity-90"
+                style={{ backgroundColor: brandPrimaryColor }}
               >
                 サイトトップへ戻る
               </Link>
@@ -666,7 +839,9 @@ export default function PublicSitePage() {
       >
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-500 dark:text-slate-400">
           <div className="flex items-center gap-2">
-            <span>© {new Date().getFullYear()} {site.title}. All rights reserved.</span>
+            <span>
+              © {new Date().getFullYear()} {site.title}. All rights reserved.
+            </span>
           </div>
           <div className="flex items-center gap-1">
             <span>Powered by</span>
@@ -675,6 +850,25 @@ export default function PublicSitePage() {
           </div>
         </div>
       </footer>
+
+      {/* グローバル検索ダイアログ */}
+      <CommandPalette
+        siteId={site.id}
+        siteSlug={siteSlug}
+        pages={pages}
+        isOpen={searchOpen}
+        onClose={() => setSearchOpen(false)}
+      />
+
+      {/* コメント ドロワー */}
+      {activePage && (
+        <CommentsDrawer
+          pageId={activePage.id}
+          pageTitle={activePage.title}
+          isOpen={commentsOpen}
+          onClose={() => setCommentsOpen(false)}
+        />
+      )}
     </div>
   );
 }

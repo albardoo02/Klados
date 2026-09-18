@@ -1,15 +1,18 @@
 'use client';
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { pagesApi, sitesApi, mediaApi, PageVersion } from '@/lib/api';
+import { pagesApi, sitesApi, mediaApi, commentsApi, PageVersion } from '@/lib/api';
 import { useParams, useRouter } from 'next/navigation';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import { EditorView, basicSetup } from 'codemirror';
 import { markdown } from '@codemirror/lang-markdown';
-import { EditorState } from '@codemirror/state';
+import { EditorState, Compartment } from '@codemirror/state';
+import { vim } from '@replit/codemirror-vim';
 import { MarkdownRenderer } from '@/components/markdown-renderer';
 import { DiffViewer } from '@/components/diff-viewer';
 import { MediaLibraryModal } from '@/components/media-library-modal';
+import { CommentsDrawer } from '@/components/comments-drawer';
+import { useAuthStore } from '@/store/auth';
 import Link from 'next/link';
 import {
   ArrowLeft,
@@ -18,6 +21,7 @@ import {
   Strikethrough,
   Heading1,
   Heading2,
+  Heading3,
   List,
   ListOrdered,
   Code,
@@ -39,15 +43,49 @@ import {
   Clock,
   FileClock,
   Images,
+  MessageSquare,
+  Users,
+  Terminal,
+  Minus,
+  CheckSquare,
+  Sparkles,
+  Info,
 } from 'lucide-react';
+
+interface Collaborator {
+  id: string;
+  name: string;
+  avatar?: string;
+  color: string;
+  lastActive: number;
+}
+
+const COLLAB_COLORS = [
+  'bg-blue-500 text-white border-blue-600',
+  'bg-purple-500 text-white border-purple-600',
+  'bg-emerald-500 text-white border-emerald-600',
+  'bg-amber-500 text-white border-amber-600',
+  'bg-rose-500 text-white border-rose-600',
+  'bg-cyan-500 text-white border-cyan-600',
+];
+
+interface SlashCommandItem {
+  id: string;
+  label: string;
+  description: string;
+  icon: any;
+  action: () => void;
+}
 
 export default function PageEditPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const queryClient = useQueryClient();
+  const { user } = useAuthStore();
 
   const editorRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
+  const keybindingCompartmentRef = useRef<Compartment | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [preview, setPreview] = useState('');
@@ -59,9 +97,45 @@ export default function PageEditPage() {
   // モーダル開閉ステート
   const [historyOpen, setHistoryOpen] = useState(false);
   const [mediaLibraryOpen, setMediaLibraryOpen] = useState(false);
+  const [commentsOpen, setCommentsOpen] = useState(false);
   const [selectedVersion, setSelectedVersion] = useState<PageVersion | null>(null);
   const [isReverting, setIsReverting] = useState(false);
   const [revertSuccessMsg, setRevertSuccessMsg] = useState<string | null>(null);
+
+  // エディタ設定: Vim / Standard
+  const [keybinding, setKeybinding] = useState<'standard' | 'vim'>('standard');
+
+  // スラッシュコマンド メニューステート
+  const [slashMenuOpen, setSlashMenuOpen] = useState(false);
+  const [slashFilter, setSlashFilter] = useState('');
+  const [slashSelectedIndex, setSlashSelectedIndex] = useState(0);
+  const slashMenuRef = useRef<HTMLDivElement>(null);
+
+  // リアルタイム協調編集 & Presence ステート
+  const [collaborators, setCollaborators] = useState<Collaborator[]>([]);
+  const [isWsConnected, setIsWsConnected] = useState(false);
+  const wsRef = useRef<WebSocket | null>(null);
+  const broadcastChannelRef = useRef<BroadcastChannel | null>(null);
+  const myClientIdRef = useRef<string>('');
+
+  // ユーザー情報設定
+  const currentUser = useMemo(() => {
+    return {
+      name: user?.display_name || user?.username || 'あなた',
+      avatar: user?.avatar_url || '',
+      id: user?.id || 'guest',
+    };
+  }, [user]);
+
+  // 初回マウント時にキーバインド設定読み込み
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('klados_editor_keybinding');
+      if (stored === 'vim' || stored === 'standard') {
+        setKeybinding(stored);
+      }
+    }
+  }, []);
 
   const { data: page } = useQuery({
     queryKey: ['page', id],
@@ -78,6 +152,11 @@ export default function PageEditPage() {
     queryKey: ['page-versions', id],
     queryFn: () => pagesApi.versions(id).then((r) => r.data?.data || []),
     enabled: historyOpen,
+  });
+
+  const { data: commentList = [] } = useQuery({
+    queryKey: ['comments', id],
+    queryFn: () => commentsApi.list(id).then((r) => r.data.data),
   });
 
   // 履歴モーダルが開いたとき、最新の旧バージョンを自動選択
@@ -101,96 +180,7 @@ export default function PageEditPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['page', id] }),
   });
 
-  // CodeMirror エディタ初期化
-  useEffect(() => {
-    if (!editorRef.current || !page || viewRef.current) return;
-
-    const startState = EditorState.create({
-      doc: page.content ?? '',
-      extensions: [
-        basicSetup,
-        markdown(),
-        EditorView.lineWrapping,
-        EditorView.updateListener.of((update) => {
-          if (update.docChanged) {
-            const content = update.state.doc.toString();
-            setPreview(content);
-            setSaved(false);
-          }
-        }),
-      ],
-    });
-
-    const view = new EditorView({ state: startState, parent: editorRef.current });
-    viewRef.current = view;
-    setPreview(page.content ?? '');
-
-    return () => {
-      view.destroy();
-      viewRef.current = null;
-    };
-  }, [page]);
-
-  // 自動保存 (5秒ごと)
-  useEffect(() => {
-    const timer = setInterval(() => {
-      if (!saved && viewRef.current) {
-        updateMutation.mutate(viewRef.current.state.doc.toString());
-      }
-    }, 5000);
-    return () => clearInterval(timer);
-  }, [saved, updateMutation]);
-
-  const handleManualSave = () => {
-    if (viewRef.current) {
-      updateMutation.mutate(viewRef.current.state.doc.toString());
-    }
-  };
-
-  // バージョン復元処理
-  const handleRestoreVersion = async (targetVer: PageVersion) => {
-    if (!confirm(`バージョン v${targetVer.version} に復元しますか？\n現在のドキュメントは新バージョンとして保存された上でロールバックされます。`)) {
-      return;
-    }
-
-    try {
-      setIsReverting(true);
-      // API呼び出し (revertエンドポイント、未対応環境ではupdateでフォールバック)
-      try {
-        await pagesApi.revert(id, targetVer.version);
-      } catch (err) {
-        console.warn('Direct revert API fallback to update:', err);
-        await pagesApi.update(id, { content: targetVer.content });
-      }
-
-      // エディタ内のテキストを復元したバージョンで置き換え
-      if (viewRef.current) {
-        viewRef.current.dispatch({
-          changes: {
-            from: 0,
-            to: viewRef.current.state.doc.length,
-            insert: targetVer.content,
-          },
-        });
-      }
-
-      setPreview(targetVer.content);
-      setSaved(true);
-      queryClient.invalidateQueries({ queryKey: ['page', id] });
-      queryClient.invalidateQueries({ queryKey: ['page-versions', id] });
-
-      setRevertSuccessMsg(`バージョン v${targetVer.version} を復元しました`);
-      setTimeout(() => setRevertSuccessMsg(null), 4000);
-      setHistoryOpen(false);
-    } catch (err: any) {
-      console.error('Revert error:', err);
-      alert('バージョンの復元に失敗しました: ' + (err?.response?.data?.error || err.message));
-    } finally {
-      setIsReverting(false);
-    }
-  };
-
-  // テキスト挿入ユーティリティ
+  // --- テキスト挿入ユーティリティ ---
   const insertText = (textToInsert: string) => {
     if (!viewRef.current) return;
     const view = viewRef.current;
@@ -226,6 +216,435 @@ export default function PageEditPage() {
       scrollIntoView: true,
     });
     view.focus();
+  };
+
+  // スラッシュコマンド定義一覧
+  const slashCommands: SlashCommandItem[] = useMemo(
+    () => [
+      {
+        id: 'h1',
+        label: '大見出し (H1)',
+        description: '主要セクションのタイトル',
+        icon: Heading1,
+        action: () => insertText('# '),
+      },
+      {
+        id: 'h2',
+        label: '中見出し (H2)',
+        description: 'サブセクションのタイトル',
+        icon: Heading2,
+        action: () => insertText('## '),
+      },
+      {
+        id: 'h3',
+        label: '小見出し (H3)',
+        description: '詳細な小項目タイトル',
+        icon: Heading3,
+        action: () => insertText('### '),
+      },
+      {
+        id: 'table',
+        label: 'テーブル (表)',
+        description: 'GFM構文のMarkdownテーブルを挿入',
+        icon: TableIcon,
+        action: () =>
+          insertText(
+            '\n| 項目名 | 説明 | 状態 |\n| :--- | :--- | :---: |\n| サンプル1 | 詳細テキスト | ✅ 完了 |\n| サンプル2 | 詳細テキスト | ⏳ 進行中 |\n'
+          ),
+      },
+      {
+        id: 'code',
+        label: 'コードブロック',
+        description: 'シンタックスハイライト付きコードブロック',
+        icon: Code,
+        action: () => insertText('```typescript\n// ここにコードを記述\nconst greeting = "Hello, Klados!";\nconsole.log(greeting);\n```\n'),
+      },
+      {
+        id: 'quote',
+        label: '引用 (Quote)',
+        description: '引用テキストブロックを挿入',
+        icon: Quote,
+        action: () => insertText('> 引用文をここに記述します。\n'),
+      },
+      {
+        id: 'katex',
+        label: 'KaTeX 数式',
+        description: '数式ブロックフォーミュラ ($$ 数式 $$)',
+        icon: Sigma,
+        action: () =>
+          insertText('$$\n\\int_{-\\infty}^{\\infty} e^{-x^2} dx = \\sqrt{\\pi}\n$$\n'),
+      },
+      {
+        id: 'divider',
+        label: '区切り線 (Divider)',
+        description: '水平罫線 (---) を挿入',
+        icon: Minus,
+        action: () => insertText('\n---\n\n'),
+      },
+      {
+        id: 'checklist',
+        label: 'タスクリスト',
+        description: 'チェック可能なToDo項目',
+        icon: CheckSquare,
+        action: () => insertText('- [ ] 新しいタスク\n'),
+      },
+      {
+        id: 'callout',
+        label: 'コールアウト / 注意書き',
+        description: '強調表示用のメッセージボックス',
+        icon: Info,
+        action: () => insertText(':::info\nここに注意書きや追加情報を記述します。\n:::\n'),
+      },
+      {
+        id: 'image',
+        label: '画像挿入',
+        description: 'メディアライブラリまたは画像ファイルを選択',
+        icon: ImageIcon,
+        action: () => setMediaLibraryOpen(true),
+      },
+    ],
+    []
+  );
+
+  // フィルタリングされたスラッシュコマンド
+  const filteredCommands = useMemo(() => {
+    if (!slashFilter) return slashCommands;
+    const f = slashFilter.toLowerCase();
+    return slashCommands.filter(
+      (c) =>
+        c.label.toLowerCase().includes(f) ||
+        c.description.toLowerCase().includes(f) ||
+        c.id.includes(f)
+    );
+  }, [slashCommands, slashFilter]);
+
+  // スラッシュコマンド実行
+  const executeSlashCommand = (cmd: SlashCommandItem) => {
+    setSlashMenuOpen(false);
+    if (!viewRef.current) return;
+    const view = viewRef.current;
+    const { state, dispatch } = view;
+    const pos = state.selection.main.from;
+    const line = state.doc.lineAt(pos);
+    const lineText = line.text;
+
+    // スラッシュ文字を探して削除
+    const lastSlashIdx = lineText.lastIndexOf('/');
+    if (lastSlashIdx !== -1) {
+      const slashFrom = line.from + lastSlashIdx;
+      dispatch({
+        changes: { from: slashFrom, to: pos, insert: '' },
+      });
+    }
+
+    cmd.action();
+  };
+
+  // --- WebSocket & BroadcastChannel リアルタイム同期 ---
+  useEffect(() => {
+    if (!id) return;
+
+    // クライアントID
+    if (!myClientIdRef.current) {
+      myClientIdRef.current = `client_${Math.random().toString(36).substring(2, 9)}`;
+    }
+    const myClientId = myClientIdRef.current;
+    const myColor = COLLAB_COLORS[Math.floor(Math.random() * COLLAB_COLORS.length)];
+
+    // 自アバターを初期追加
+    const me: Collaborator = {
+      id: myClientId,
+      name: `${currentUser.name} (あなた)`,
+      avatar: currentUser.avatar,
+      color: myColor,
+      lastActive: Date.now(),
+    };
+    setCollaborators([me]);
+
+    // 1. BroadcastChannel (同一ブラウザの複数タブ間で即座に同期)
+    const bc = new BroadcastChannel(`klados_collab_page_${id}`);
+    broadcastChannelRef.current = bc;
+
+    bc.onmessage = (event) => {
+      const msg = event.data;
+      if (!msg || msg.sender === myClientId) return;
+
+      if (msg.type === 'doc_change' && msg.content !== undefined) {
+        if (viewRef.current && viewRef.current.state.doc.toString() !== msg.content) {
+          const prevPos = viewRef.current.state.selection.main.from;
+          viewRef.current.dispatch({
+            changes: {
+              from: 0,
+              to: viewRef.current.state.doc.length,
+              insert: msg.content,
+            },
+            selection: { anchor: Math.min(prevPos, msg.content.length) },
+          });
+          setPreview(msg.content);
+          setSaved(false);
+        }
+      } else if (msg.type === 'presence' && msg.user) {
+        setCollaborators((prev) => {
+          const filtered = prev.filter((c) => c.id !== msg.user.id);
+          return [...filtered, { ...msg.user, lastActive: Date.now() }];
+        });
+      }
+    };
+
+    // 初期プレゼンス通知
+    bc.postMessage({
+      type: 'presence',
+      sender: myClientId,
+      user: {
+        id: myClientId,
+        name: currentUser.name,
+        avatar: currentUser.avatar,
+        color: myColor,
+      },
+    });
+
+    // 2. WebSocket (バックエンド ws://localhost:8080/v1/ws/pages/:id)
+    const wsHost = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
+    const wsUrl =
+      process.env.NEXT_PUBLIC_WS_URL || `ws://${wsHost}:8080/v1/ws/pages/${id}`;
+
+    let ws: WebSocket | null = null;
+    try {
+      ws = new WebSocket(wsUrl);
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        setIsWsConnected(true);
+        ws?.send(
+          JSON.stringify({
+            type: 'join',
+            page_id: id,
+            sender_id: myClientId,
+            user: {
+              id: myClientId,
+              name: currentUser.name,
+              color: myColor,
+            },
+          })
+        );
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.sender_id === myClientId) return;
+
+          if (msg.type === 'doc_change' || msg.type === 'content_update') {
+            const newContent = msg.content;
+            if (viewRef.current && viewRef.current.state.doc.toString() !== newContent) {
+              viewRef.current.dispatch({
+                changes: {
+                  from: 0,
+                  to: viewRef.current.state.doc.length,
+                  insert: newContent,
+                },
+              });
+              setPreview(newContent);
+            }
+          } else if (msg.type === 'presence' || msg.type === 'collaborator_joined') {
+            if (msg.user) {
+              setCollaborators((prev) => {
+                const filtered = prev.filter((c) => c.id !== msg.user.id);
+                return [...filtered, { ...msg.user, lastActive: Date.now() }];
+              });
+            }
+          }
+        } catch {
+          // ignore parsing error
+        }
+      };
+
+      ws.onerror = () => {
+        setIsWsConnected(false);
+      };
+
+      ws.onclose = () => {
+        setIsWsConnected(false);
+      };
+    } catch {
+      // WebSocket server offline
+      setIsWsConnected(false);
+    }
+
+    // 定期的なPresenceハートビート
+    const presenceTimer = setInterval(() => {
+      bc.postMessage({
+        type: 'presence',
+        sender: myClientId,
+        user: {
+          id: myClientId,
+          name: currentUser.name,
+          color: myColor,
+        },
+      });
+      // 30秒以上更新のないコラボレーターを消去 (自身を除く)
+      setCollaborators((prev) =>
+        prev.filter((c) => c.id === myClientId || Date.now() - c.lastActive < 35000)
+      );
+    }, 10000);
+
+    return () => {
+      clearInterval(presenceTimer);
+      bc.close();
+      if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+        ws.close();
+      }
+    };
+  }, [id, currentUser]);
+
+  // ドキュメント更新時のブロードキャスト送信
+  const broadcastDocChange = (content: string) => {
+    // BroadcastChannel
+    broadcastChannelRef.current?.postMessage({
+      type: 'doc_change',
+      sender: myClientIdRef.current,
+      content,
+    });
+
+    // WebSocket
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(
+        JSON.stringify({
+          type: 'doc_change',
+          page_id: id,
+          sender_id: myClientIdRef.current,
+          content,
+        })
+      );
+    }
+  };
+
+  // CodeMirror エディタ初期化
+  useEffect(() => {
+    if (!editorRef.current || !page || viewRef.current) return;
+
+    const keybindingCompartment = new Compartment();
+    keybindingCompartmentRef.current = keybindingCompartment;
+
+    const startState = EditorState.create({
+      doc: page.content ?? '',
+      extensions: [
+        basicSetup,
+        markdown(),
+        EditorView.lineWrapping,
+        keybindingCompartment.of(keybinding === 'vim' ? vim() : []),
+        EditorView.updateListener.of((update) => {
+          if (update.docChanged) {
+            const content = update.state.doc.toString();
+            setPreview(content);
+            setSaved(false);
+            broadcastDocChange(content);
+
+            // スラッシュコマンド検知
+            const pos = update.state.selection.main.from;
+            const line = update.state.doc.lineAt(pos);
+            const textBefore = line.text.slice(0, pos - line.from);
+
+            // 行頭のスラッシュ、または空白直後のスラッシュをトリガー
+            const match = /(?:^|\s)\/([a-zA-Z0-9_-]*)$/.exec(textBefore);
+            if (match) {
+              setSlashFilter(match[1] || '');
+              setSlashSelectedIndex(0);
+              setSlashMenuOpen(true);
+            } else {
+              setSlashMenuOpen(false);
+            }
+          }
+        }),
+      ],
+    });
+
+    const view = new EditorView({ state: startState, parent: editorRef.current });
+    viewRef.current = view;
+    setPreview(page.content ?? '');
+
+    return () => {
+      view.destroy();
+      viewRef.current = null;
+    };
+  }, [page]);
+
+  // キーバインドの動的切り替え
+  const handleToggleKeybinding = (newMode: 'standard' | 'vim') => {
+    setKeybinding(newMode);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('klados_editor_keybinding', newMode);
+    }
+
+    if (viewRef.current && keybindingCompartmentRef.current) {
+      viewRef.current.dispatch({
+        effects: keybindingCompartmentRef.current.reconfigure(
+          newMode === 'vim' ? vim() : []
+        ),
+      });
+    }
+  };
+
+  // 自動保存 (5秒ごと)
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (!saved && viewRef.current) {
+        updateMutation.mutate(viewRef.current.state.doc.toString());
+      }
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [saved, updateMutation]);
+
+  const handleManualSave = () => {
+    if (viewRef.current) {
+      updateMutation.mutate(viewRef.current.state.doc.toString());
+    }
+  };
+
+  // バージョン復元処理
+  const handleRestoreVersion = async (targetVer: PageVersion) => {
+    if (
+      !confirm(
+        `バージョン v${targetVer.version} に復元しますか？\n現在のドキュメントは新バージョンとして保存された上でロールバックされます。`
+      )
+    ) {
+      return;
+    }
+
+    try {
+      setIsReverting(true);
+      try {
+        await pagesApi.revert(id, targetVer.version);
+      } catch (err) {
+        console.warn('Direct revert API fallback to update:', err);
+        await pagesApi.update(id, { content: targetVer.content });
+      }
+
+      if (viewRef.current) {
+        viewRef.current.dispatch({
+          changes: {
+            from: 0,
+            to: viewRef.current.state.doc.length,
+            insert: targetVer.content,
+          },
+        });
+      }
+
+      setPreview(targetVer.content);
+      setSaved(true);
+      broadcastDocChange(targetVer.content);
+      queryClient.invalidateQueries({ queryKey: ['page', id] });
+      queryClient.invalidateQueries({ queryKey: ['page-versions', id] });
+
+      setRevertSuccessMsg(`バージョン v${targetVer.version} を復元しました`);
+      setTimeout(() => setRevertSuccessMsg(null), 4000);
+      setHistoryOpen(false);
+    } catch (err: any) {
+      console.error('Revert error:', err);
+      alert('バージョンの復元に失敗しました: ' + (err?.response?.data?.error || err.message));
+    } finally {
+      setIsReverting(false);
+    }
   };
 
   // 画像アップロード処理
@@ -320,6 +739,26 @@ export default function PageEditPage() {
     }
   };
 
+  // スラッシュコマンド メニューのキーボードナビゲーション
+  const handleEditorKeyDown = (e: React.KeyboardEvent) => {
+    if (!slashMenuOpen || filteredCommands.length === 0) return;
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setSlashSelectedIndex((prev) => (prev + 1) % filteredCommands.length);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setSlashSelectedIndex((prev) => (prev - 1 + filteredCommands.length) % filteredCommands.length);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const selected = filteredCommands[slashSelectedIndex];
+      if (selected) executeSlashCommand(selected);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setSlashMenuOpen(false);
+    }
+  };
+
   const currentDocContent = viewRef.current
     ? viewRef.current.state.doc.toString()
     : page?.content || '';
@@ -352,7 +791,9 @@ export default function PageEditPage() {
           </button>
           <div className="h-4 w-px bg-border hidden sm:block" />
           <div className="flex flex-col">
-            <span className="font-semibold text-sm leading-tight">{page?.title ?? '読み込み中...'}</span>
+            <span className="font-semibold text-sm leading-tight">
+              {page?.title ?? '読み込み中...'}
+            </span>
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               {site && <span>{site.title}</span>}
               {page?.slug && <span>/{page.slug}</span>}
@@ -370,7 +811,79 @@ export default function PageEditPage() {
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        {/* コラボレーター アバター表示 & ツール群 */}
+        <div className="flex items-center gap-2.5">
+          {/* コラボレーター アバター一覧 */}
+          <div className="flex items-center gap-1.5 pl-2">
+            <div className="flex -space-x-2 overflow-hidden items-center">
+              {collaborators.map((c) => {
+                const initial = c.name.charAt(0).toUpperCase() || 'U';
+                return (
+                  <div
+                    key={c.id}
+                    title={`${c.name} (編集中)`}
+                    className={`size-7 rounded-full flex items-center justify-center text-[10px] font-bold border-2 ring-1 ring-background shadow-xs transition-transform hover:scale-110 cursor-default ${c.color}`}
+                  >
+                    {initial}
+                  </div>
+                );
+              })}
+            </div>
+            {collaborators.length > 1 && (
+              <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-800">
+                <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                <span className="hidden md:inline">{collaborators.length}人が編集</span>
+              </span>
+            )}
+          </div>
+
+          <div className="h-4 w-px bg-border hidden sm:block" />
+
+          {/* キーバインド切り替え (通常 / Vim) */}
+          <div className="flex border border-border rounded-lg overflow-hidden text-xs bg-muted/20 p-0.5">
+            <button
+              type="button"
+              onClick={() => handleToggleKeybinding('standard')}
+              className={`px-2 py-1 rounded transition-colors cursor-pointer text-[11px] font-medium ${
+                keybinding === 'standard'
+                  ? 'bg-background shadow-xs text-foreground'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+              title="標準エディタ操作"
+            >
+              標準
+            </button>
+            <button
+              type="button"
+              onClick={() => handleToggleKeybinding('vim')}
+              className={`px-2 py-1 rounded transition-colors cursor-pointer text-[11px] font-medium flex items-center gap-1 ${
+                keybinding === 'vim'
+                  ? 'bg-primary text-primary-foreground shadow-xs font-bold'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+              title="Vim キーバインド (Normal, Insert, Visualモード対応)"
+            >
+              <Terminal className="size-3" />
+              <span>Vim</span>
+            </button>
+          </div>
+
+          {/* コメント ドロワー開閉ボタン */}
+          <button
+            type="button"
+            onClick={() => setCommentsOpen(true)}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground border border-border hover:bg-muted rounded-lg transition-colors cursor-pointer relative"
+            title="コメント & フィードバックを開く"
+          >
+            <MessageSquare className="size-3.5" />
+            <span className="hidden md:inline">コメント</span>
+            {commentList.length > 0 && (
+              <span className="size-4 rounded-full bg-primary text-primary-foreground text-[10px] font-bold flex items-center justify-center -mr-1">
+                {commentList.length}
+              </span>
+            )}
+          </button>
+
           {/* 履歴 (History) ボタン */}
           <button
             type="button"
@@ -393,7 +906,7 @@ export default function PageEditPage() {
             title="サイトのメディア一覧を開く"
           >
             <Images className="size-3.5" />
-            <span className="hidden md:inline">メディア一覧</span>
+            <span className="hidden md:inline">メディア</span>
           </button>
 
           {/* 公開プレビューリンク */}
@@ -406,7 +919,7 @@ export default function PageEditPage() {
               title="公開ページを別タブで確認"
             >
               <ExternalLink className="size-3.5" />
-              <span className="hidden lg:inline">公開サイトを開く</span>
+              <span className="hidden lg:inline">公開サイト</span>
             </Link>
           )}
 
@@ -455,7 +968,11 @@ export default function PageEditPage() {
             disabled={saved || updateMutation.isPending}
             className="flex items-center gap-1 px-3 py-1.5 text-xs bg-secondary hover:bg-secondary/80 text-secondary-foreground rounded-lg disabled:opacity-40 transition-colors font-medium cursor-pointer"
           >
-            {updateMutation.isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
+            {updateMutation.isPending ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <Save className="size-3.5" />
+            )}
             <span>保存</span>
           </button>
 
@@ -487,6 +1004,23 @@ export default function PageEditPage() {
       {/* Markdown 書式ツールバー */}
       {(tab === 'edit' || tab === 'split') && (
         <div className="flex items-center gap-1 px-4 py-1.5 border-b border-border bg-muted/20 text-xs overflow-x-auto">
+          {/* スラッシュコマンド トリガーヒント */}
+          <button
+            type="button"
+            onClick={() => {
+              insertText('/');
+              setSlashFilter('');
+              setSlashMenuOpen(true);
+            }}
+            className="flex items-center gap-1 px-2 py-1 rounded bg-primary/10 text-primary hover:bg-primary/20 transition-colors font-medium cursor-pointer"
+            title="スラッシュコマンド (/ を入力)"
+          >
+            <Sparkles className="size-3.5" />
+            <span>/ コマンド</span>
+          </button>
+
+          <div className="h-4 w-px bg-border mx-1" />
+
           <button
             type="button"
             onClick={() => wrapText('**', '**', '太字テキスト')}
@@ -636,7 +1170,7 @@ export default function PageEditPage() {
       )}
 
       {/* エディタ & プレビュー本体 */}
-      <div className="flex-1 flex overflow-hidden relative">
+      <div className="flex-1 flex overflow-hidden relative" onKeyDown={handleEditorKeyDown}>
         {/* エディタ領域 */}
         {(tab === 'edit' || tab === 'split') && (
           <div
@@ -654,13 +1188,81 @@ export default function PageEditPage() {
                 <p className="font-semibold text-blue-600 dark:text-blue-400">
                   ここに画像をドロップしてアップロード
                 </p>
-                <p className="text-xs text-muted-foreground mt-1">PNG, JPEG, GIF, WebP, SVG に対応</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  PNG, JPEG, GIF, WebP, SVG に対応
+                </p>
               </div>
             )}
+
+            {/* スラッシュコマンド ポップアップ メニュー */}
+            {slashMenuOpen && filteredCommands.length > 0 && (
+              <div
+                ref={slashMenuRef}
+                className="absolute top-12 left-10 z-30 w-72 bg-card text-card-foreground border border-border rounded-2xl shadow-2xl overflow-hidden animate-in fade-in-0 zoom-in-95 duration-100"
+              >
+                <div className="p-2 border-b border-border bg-muted/20 text-[11px] font-semibold text-muted-foreground flex items-center justify-between">
+                  <span>スラッシュコマンド (/ を入力)</span>
+                  <kbd className="px-1.5 py-0.5 rounded bg-muted border border-border text-[9px] font-mono">
+                    ESCで閉じる
+                  </kbd>
+                </div>
+                <div className="max-h-60 overflow-y-auto p-1.5 space-y-0.5">
+                  {filteredCommands.map((cmd, idx) => {
+                    const Icon = cmd.icon;
+                    const isSelected = idx === slashSelectedIndex;
+                    return (
+                      <button
+                        key={cmd.id}
+                        type="button"
+                        onClick={() => executeSlashCommand(cmd)}
+                        onMouseEnter={() => setSlashSelectedIndex(idx)}
+                        className={`w-full text-left p-2 rounded-xl transition-colors flex items-center gap-2.5 cursor-pointer ${
+                          isSelected
+                            ? 'bg-primary text-primary-foreground'
+                            : 'hover:bg-muted text-foreground'
+                        }`}
+                      >
+                        <div
+                          className={`size-7 rounded-lg flex items-center justify-center shrink-0 ${
+                            isSelected ? 'bg-white/20 text-white' : 'bg-muted text-muted-foreground'
+                          }`}
+                        >
+                          <Icon className="size-3.5" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-bold text-xs leading-tight">{cmd.label}</p>
+                          <p
+                            className={`text-[10px] truncate leading-tight ${
+                              isSelected ? 'text-white/80' : 'text-muted-foreground'
+                            }`}
+                          >
+                            {cmd.description}
+                          </p>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             <div
               ref={editorRef}
               className="flex-1 overflow-auto focus:outline-none [&_.cm-editor]:h-full [&_.cm-editor]:text-base [&_.cm-scroller]:font-mono [&_.cm-content]:p-6"
             />
+
+            {/* Vim モード インジケーター */}
+            {keybinding === 'vim' && (
+              <div className="px-4 py-1 border-t border-border bg-muted/40 flex items-center justify-between text-[11px] font-mono text-muted-foreground">
+                <div className="flex items-center gap-2">
+                  <span className="px-1.5 py-0.5 rounded bg-primary text-primary-foreground font-bold text-[10px]">
+                    VIM ON
+                  </span>
+                  <span>Esc: Normal | i: Insert | :w: 保存</span>
+                </div>
+                <span>Vim エミュレーション有効</span>
+              </div>
+            )}
           </div>
         )}
 
@@ -688,7 +1290,19 @@ export default function PageEditPage() {
         )}
       </div>
 
-      {/* バージョン履歴 & 差分表示モーダル / ドロワー */}
+      {/* コメント ドロワー */}
+      <CommentsDrawer
+        pageId={id}
+        pageTitle={page?.title}
+        isOpen={commentsOpen}
+        onClose={() => setCommentsOpen(false)}
+        currentUser={{
+          name: currentUser.name,
+          avatar: currentUser.avatar,
+        }}
+      />
+
+      {/* バージョン履歴 & 差分表示モーダル */}
       {historyOpen && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 sm:p-6"
@@ -720,7 +1334,7 @@ export default function PageEditPage() {
               </button>
             </div>
 
-            {/* モーダルコンテンツ (左: バージョンリスト, 右: 差分ビュー) */}
+            {/* モーダルコンテンツ */}
             <div className="flex-1 flex overflow-hidden">
               {/* バージョンリスト サイドバー */}
               <div className="w-72 sm:w-80 border-r border-border flex flex-col bg-muted/10 shrink-0">
@@ -736,7 +1350,8 @@ export default function PageEditPage() {
                     </div>
                   ) : !versions || versions.length === 0 ? (
                     <div className="p-8 text-center text-muted-foreground text-xs">
-                      まだ過去のバージョン履歴がありません。<br />
+                      まだ過去のバージョン履歴がありません。
+                      <br />
                       エディタで保存を行うと自動的に履歴が作成されます。
                     </div>
                   ) : (
@@ -824,7 +1439,9 @@ export default function PageEditPage() {
                       <DiffViewer
                         oldText={selectedVersion.content ?? ''}
                         newText={currentDocContent}
-                        oldTitle={`v${selectedVersion.version} (${new Date(selectedVersion.created_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })})`}
+                        oldTitle={`v${selectedVersion.version} (${new Date(
+                          selectedVersion.created_at
+                        ).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })})`}
                         newTitle="現在のドキュメント (最新)"
                         initialMode="side-by-side"
                       />
@@ -833,7 +1450,9 @@ export default function PageEditPage() {
                 ) : (
                   <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground">
                     <HistoryIcon className="size-12 stroke-[1.2] mb-3 text-muted-foreground/40" />
-                    <p className="font-semibold text-sm">左側のリストからバージョンを選択してください</p>
+                    <p className="font-semibold text-sm">
+                      左側のリストからバージョンを選択してください
+                    </p>
                     <p className="text-xs text-muted-foreground/80 mt-1">
                       選択したバージョンと現在の内容の差分を比較できます
                     </p>
