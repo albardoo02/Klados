@@ -58,6 +58,13 @@ export const authApi = {
     api.post('/auth/google', data || {}),
   githubLogin: (data?: { email?: string; name?: string; token?: string }) =>
     api.post('/auth/github', data || {}),
+  uploadAvatar: (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return api.post('/auth/avatar', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
 };
 
 // --- Sites ---

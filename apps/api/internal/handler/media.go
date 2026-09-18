@@ -119,3 +119,79 @@ func (h *MediaHandler) Delete(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
+
+func (h *MediaHandler) UploadAvatar(c *gin.Context) {
+	userIDStr := c.GetString("user_id")
+	uUID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid user"})
+		return
+	}
+
+	file, header, err := c.Request.FormFile("file")
+	if err != nil {
+		file, header, err = c.Request.FormFile("avatar")
+	}
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "画像ファイルを指定してください"})
+		return
+	}
+	defer file.Close()
+
+	mimeType := header.Header.Get("Content-Type")
+	if !strings.HasPrefix(mimeType, "image/") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "画像ファイル (JPEG, PNG, WebP, GIF) を指定してください"})
+		return
+	}
+
+	if header.Size > 5*1024*1024 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ファイルサイズは最大5MBまでです"})
+		return
+	}
+
+	ext := filepath.Ext(header.Filename)
+	if ext == "" {
+		ext = ".png"
+	}
+	filename := fmt.Sprintf("%s%s", uuid.New().String()[:8], ext)
+	storageKey := fmt.Sprintf("avatars/%s-%s", userIDStr, filename)
+
+	_, err = h.Minio.PutObject(
+		context.Background(),
+		h.Bucket,
+		storageKey,
+		file,
+		header.Size,
+		minio.PutObjectOptions{ContentType: mimeType},
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "アバターのアップロードに失敗しました"})
+		return
+	}
+
+	scheme := "http"
+	if !strings.Contains(h.Endpoint, "localhost") {
+		scheme = "https"
+	}
+	avatarURL := fmt.Sprintf("%s://%s/%s/%s", scheme, h.Endpoint, h.Bucket, storageKey)
+
+	var user model.User
+	if err := h.DB.Where("id = ?", uUID).First(&user).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "ユーザーが見つかりません"})
+		return
+	}
+
+	user.AvatarURL = avatarURL
+	if err := h.DB.Save(&user).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "ユーザー情報の更新に失敗しました"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"avatar_url": avatarURL,
+			"user":       user,
+		},
+	})
+}

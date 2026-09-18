@@ -112,6 +112,7 @@ func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
 		protected.GET("/auth/me", authH.Me)
 		protected.PATCH("/auth/profile", authH.UpdateProfile)
 		protected.PATCH("/auth/password", authH.ChangePassword)
+		protected.POST("/auth/avatar", mediaH.UploadAvatar)
 
 		// Sites
 		protected.GET("/sites", siteH.List)

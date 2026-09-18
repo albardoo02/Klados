@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useAuthStore } from '@/store/auth';
 import { authApi } from '@/lib/api';
@@ -15,6 +15,9 @@ import {
   Sparkles,
   Save,
   Lock,
+  Camera,
+  Upload,
+  Loader2,
 } from 'lucide-react';
 
 export default function ProfileSettingsPage() {
@@ -26,6 +29,8 @@ export default function ProfileSettingsPage() {
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileSuccess, setProfileSuccess] = useState('');
   const [profileError, setProfileError] = useState('');
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
 
   // パスワード変更 state
   const [currentPassword, setCurrentPassword] = useState('');
@@ -41,6 +46,44 @@ export default function ProfileSettingsPage() {
       setAvatarUrl(user.avatar_url || '');
     }
   }, [user]);
+
+  // アバター画像アップロード処理
+  const handleAvatarFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      setProfileError('画像ファイル (JPEG, PNG, WebP, GIF) を選択してください');
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      setProfileError('ファイルサイズは最大5MBまでです');
+      return;
+    }
+
+    setAvatarUploading(true);
+    setProfileError('');
+    setProfileSuccess('');
+
+    try {
+      const res = await authApi.uploadAvatar(file);
+      const newUrl = res.data?.data?.avatar_url;
+      if (newUrl) {
+        setAvatarUrl(newUrl);
+        updateUser({ avatar_url: newUrl });
+        setProfileSuccess('プロフィールアイコンを更新しました！');
+        setTimeout(() => setProfileSuccess(''), 4000);
+      }
+    } catch (err: any) {
+      setProfileError(err?.response?.data?.error || 'アイコンのアップロードに失敗しました');
+    } finally {
+      setAvatarUploading(false);
+      if (avatarInputRef.current) {
+        avatarInputRef.current.value = '';
+      }
+    }
+  };
 
   // プロフィール更新処理
   const handleUpdateProfile = async (e: React.FormEvent) => {
@@ -142,9 +185,60 @@ export default function ProfileSettingsPage() {
         {/* 左カラム: アカウント概要カード */}
         <div className="md:col-span-1 space-y-6">
           <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs text-center space-y-4">
-            <div className="size-20 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-600 text-white flex items-center justify-center text-3xl font-extrabold mx-auto shadow-md">
-              {(displayName || user.username || 'U').charAt(0).toUpperCase()}
+            <input
+              ref={avatarInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/gif"
+              onChange={handleAvatarFileSelect}
+              className="hidden"
+            />
+
+            <div className="relative group mx-auto size-24">
+              {avatarUrl ? (
+                <img
+                  src={avatarUrl}
+                  alt={displayName || user.username}
+                  className="size-24 rounded-full object-cover shadow-md border-2 border-white ring-2 ring-slate-200"
+                />
+              ) : (
+                <div className="size-24 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-600 text-white flex items-center justify-center text-3xl font-extrabold shadow-md">
+                  {(displayName || user.username || 'U').charAt(0).toUpperCase()}
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={() => avatarInputRef.current?.click()}
+                disabled={avatarUploading}
+                className="absolute inset-0 rounded-full bg-black/40 text-white flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer backdrop-blur-xs"
+                title="アイコン画像を変更"
+              >
+                {avatarUploading ? (
+                  <Loader2 className="size-6 animate-spin" />
+                ) : (
+                  <>
+                    <Camera className="size-5" />
+                    <span className="text-[10px] font-medium mt-0.5">変更</span>
+                  </>
+                )}
+              </button>
             </div>
+
+            <div>
+              <button
+                type="button"
+                onClick={() => avatarInputRef.current?.click()}
+                disabled={avatarUploading}
+                className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-100 hover:bg-slate-200/80 text-slate-700 rounded-xl text-xs font-medium transition-colors cursor-pointer"
+              >
+                {avatarUploading ? (
+                  <Loader2 className="size-3 animate-spin text-blue-600" />
+                ) : (
+                  <Upload className="size-3 text-blue-600" />
+                )}
+                <span>{avatarUploading ? 'アップロード中...' : 'アイコン画像を変更'}</span>
+              </button>
+            </div>
+
             <div>
               <h2 className="text-lg font-bold text-slate-900">
                 {displayName || user.username}
