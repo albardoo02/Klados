@@ -135,7 +135,23 @@ func (h *SiteHandler) GetBySlug(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"success": true, "data": site})
+	var pages []model.Page
+	h.DB.Where("site_id = ? AND status = ? AND deleted_at IS NULL", site.ID, model.PageStatusPublished).
+		Order("position asc, created_at asc").
+		Find(&pages)
+
+	type publicSiteWithPages struct {
+		model.Site
+		Pages []model.Page `json:"pages"`
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": publicSiteWithPages{
+			Site:  site,
+			Pages: pages,
+		},
+	})
 }
 
 // UpdateCustomDomain sets the custom domain for a site (protected endpoint)

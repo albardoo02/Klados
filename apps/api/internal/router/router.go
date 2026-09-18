@@ -68,6 +68,7 @@ func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
 		public.GET("/sites/:slug/sitemap.xml", siteH.GetSitemap)
 		public.GET("/sites/:slug/robots.txt", siteH.GetRobotsTxt)
 		public.POST("/sites/:slug/view", analyticsH.RecordView)
+		public.POST("/sites/:slug/views", analyticsH.RecordView)
 		public.GET("/sites/:slug/pages", pageH.ListPublicBySlug)
 		public.GET("/sites/:slug/pages/*pageSlug", pageH.GetPublicPage)
 	}
