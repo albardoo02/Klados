@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Next.js
+apps/web/.next/
+apps/web/out/
+
+# Go
+apps/api/bin/
+
+# Env files
+.env
+.env.local
+apps/api/.env
+apps/web/.env.local
+
+# Docker volumes
+postgres_data/
+redis_data/
+minio_data/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp

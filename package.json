@@ -1,0 +1,16 @@
+{
+  "name": "klados",
+  "private": true,
+  "scripts": {
+    "infra": "powershell -ExecutionPolicy Bypass -NoProfile -File ./scripts/infra.ps1",
+    "infra:down": "powershell -ExecutionPolicy Bypass -NoProfile -File ./scripts/infra-down.ps1",
+    "dev:api": "powershell -ExecutionPolicy Bypass -NoProfile -File ./scripts/dev-api.ps1",
+    "dev:web": "pnpm --filter web dev",
+    "dev": "powershell -ExecutionPolicy Bypass -NoProfile -File ./dev.ps1",
+    "build:web": "pnpm --filter web build",
+    "lint": "pnpm --filter web lint"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.5"
+  }
+}
