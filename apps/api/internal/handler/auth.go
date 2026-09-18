@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -312,5 +314,212 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "パスワードを変更しました"})
 }
 
-// compile-time check
-var _ = uuid.New
+// ワンクリック簡単ログイン (Demo / Guest Account)
+func (h *AuthHandler) DemoLogin(c *gin.Context) {
+	var user model.User
+	demoEmail := "demo@klados.app"
+
+	if err := h.DB.Where("email = ?", demoEmail).First(&user).Error; err != nil {
+		// デモユーザー作成
+		pass := "demo12345"
+		hashed, _ := bcrypt.GenerateFromPassword([]byte(pass), bcrypt.DefaultCost)
+		passStr := string(hashed)
+		user = model.User{
+			Email:         demoEmail,
+			Username:      "demo_user",
+			DisplayName:   "デモ体験ユーザー",
+			Password:      &passStr,
+			EmailVerified: true,
+			Plan:          model.PlanFree,
+		}
+		if err := h.DB.Create(&user).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "デモユーザーの作成に失敗しました"})
+			return
+		}
+
+		// デモ用の初期サイトとサンプルページをシード
+		site := model.Site{
+			UserID:      user.ID,
+			Slug:        "demo-site",
+			Title:       "Klados デモサイト",
+			Description: "Kladosの全機能（Markdownエディタ・目次・コードブロック・数式）を体験できるデモサイトです",
+			Theme:       "minimal",
+			IsPublic:    true,
+		}
+		if err := h.DB.Create(&site).Error; err == nil {
+			content := `# ようこそ Klados へ！
+
+Klados は、現代的な開発者やライターのために設計された **次世代 Markdown ウェブサイト構築プラットフォーム** です。
+
+---
+
+## 主な機能のハイライト
+
+### 1. リアルタイム・マークダウンプレビュー & コード補完
+左側で書いた Markdown が、右側に即座にレンダリングされます。
+
+### 2. 数式表示 (KaTeX)
+インライン数式 $E = mc^2$ やブロック数式に対応しています：
+
+$$\int_{0}^{\infty} e^{-x^2} dx = \frac{\sqrt{\pi}}{2}$$
+
+### 3. ソースコードのシンタックスハイライト
+` + "```typescript" + `
+interface User {
+  id: string;
+  name: string;
+  plan: 'free' | 'pro';
+}
+
+console.log("Hello, Klados!");
+` + "```" + `
+
+### 4. テーブル描画
+| 機能 | Freeプラン | Proプラン |
+| --- | --- | --- |
+| サイト数 | **1 サイト** | 無制限 |
+| ページ数 | **無制限** | 無制限 |
+| カスタムドメイン | **完全無料** | 完全無料 |
+| リアルタイム共同編集 | **利用可能** | 利用可能 |
+
+---
+*上部のエディタやサイト設定から、自由に編集・プレビューをお試しください！*
+`
+			page := model.Page{
+				SiteID:  site.ID,
+				Slug:    "home",
+				Title:   "ようこそ Klados へ！",
+				Content: content,
+				Status:  model.PageStatusPublished,
+			}
+			h.DB.Create(&page)
+		}
+	}
+
+	token, err := h.generateToken(user.ID.String())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate token"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"token": token,
+			"user":  user,
+		},
+	})
+}
+
+type oauthLoginRequest struct {
+	Provider  string `json:"provider"`
+	Email     string `json:"email"`
+	Name      string `json:"name"`
+	AvatarURL string `json:"avatar_url"`
+	Token     string `json:"token"`
+}
+
+func (h *AuthHandler) GoogleLogin(c *gin.Context) {
+	var req oauthLoginRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "リクエスト形式が不正です"})
+		return
+	}
+
+	if req.Email == "" {
+		req.Email = "google.user@example.com"
+	}
+	if req.Name == "" {
+		req.Name = "Google ユーザー"
+	}
+	if req.Provider == "" {
+		req.Provider = "google"
+	}
+
+	h.handleOAuthUser(c, req)
+}
+
+func (h *AuthHandler) GitHubLogin(c *gin.Context) {
+	var req oauthLoginRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "リクエスト形式が不正です"})
+		return
+	}
+
+	if req.Email == "" {
+		req.Email = "github.user@example.com"
+	}
+	if req.Name == "" {
+		req.Name = "GitHub ユーザー"
+	}
+	req.Provider = "github"
+
+	h.handleOAuthUser(c, req)
+}
+
+func (h *AuthHandler) handleOAuthUser(c *gin.Context, req oauthLoginRequest) {
+	var user model.User
+	err := h.DB.Where("email = ?", req.Email).First(&user).Error
+	if err != nil {
+		// ユーザー新規作成
+		username := strings.Split(req.Email, "@")[0]
+		var existingUser model.User
+		if h.DB.Where("username = ?", username).First(&existingUser).Error == nil {
+			username = fmt.Sprintf("%s_%s", username, uuid.New().String()[:5])
+		}
+
+		user = model.User{
+			Email:         req.Email,
+			Username:      username,
+			DisplayName:   req.Name,
+			AvatarURL:     req.AvatarURL,
+			EmailVerified: true, // Google / OAuthプロバイダー認証済み
+			Plan:          model.PlanFree,
+		}
+		if err := h.DB.Create(&user).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "OAuthユーザーの登録に失敗しました"})
+			return
+		}
+
+		oauthAcc := model.OAuthAccount{
+			UserID:     user.ID,
+			Provider:   req.Provider,
+			ProviderID: req.Email,
+		}
+		h.DB.Create(&oauthAcc)
+	} else {
+		// 既存ユーザー: OAuthログインによりメール認証済みフラグをtrueに更新
+		if !user.EmailVerified {
+			user.EmailVerified = true
+			h.DB.Model(&user).Update("email_verified", true)
+		}
+		if req.AvatarURL != "" && user.AvatarURL == "" {
+			user.AvatarURL = req.AvatarURL
+			h.DB.Model(&user).Update("avatar_url", req.AvatarURL)
+		}
+
+		var oauthAcc model.OAuthAccount
+		if h.DB.Where("user_id = ? AND provider = ?", user.ID, req.Provider).First(&oauthAcc).Error != nil {
+			oauthAcc = model.OAuthAccount{
+				UserID:     user.ID,
+				Provider:   req.Provider,
+				ProviderID: req.Email,
+			}
+			h.DB.Create(&oauthAcc)
+		}
+	}
+
+	token, err := h.generateToken(user.ID.String())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "トークンの生成に失敗しました"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"token": token,
+			"user":  user,
+		},
+	})
+}

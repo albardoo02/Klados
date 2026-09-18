@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { authApi } from '@/lib/api';
 import { useAuthStore } from '@/store/auth';
+import { SocialLogin } from '@/components/social-login';
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -30,14 +31,24 @@ export default function RegisterPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50">
-      <div className="w-full max-w-md bg-white rounded-2xl shadow-lg p-8">
-        <h1 className="text-2xl font-bold text-center mb-6">新規登録</h1>
+    <div className="min-h-screen flex items-center justify-center bg-slate-50 px-4 py-12">
+      <div className="w-full max-w-md bg-white rounded-3xl shadow-xl border border-slate-200/80 p-8">
+        <div className="text-center mb-6">
+          <Link href="/" className="text-2xl font-black tracking-tight inline-block mb-1">
+            Kla<span className="text-blue-600">dos</span>
+          </Link>
+          <h1 className="text-xl font-bold text-slate-900">アカウント作成</h1>
+          <p className="text-xs text-slate-500 mt-1">無料ですぐにMarkdownサイトを作成できます</p>
+        </div>
+
         {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg p-3 mb-4 text-sm">
+          <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-3 mb-5 text-xs">
             {error}
           </div>
         )}
+
+        <SocialLogin mode="register" onError={(msg) => setError(msg)} />
+
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-sm font-medium mb-1">表示名</label>

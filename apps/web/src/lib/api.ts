@@ -52,6 +52,12 @@ export const authApi = {
     api.post('/auth/verify-email', { token }),
   resendVerification: (email?: string) =>
     api.post('/auth/resend-verification', { email }),
+  demoLogin: () =>
+    api.post('/auth/demo-login'),
+  googleLogin: (data?: { email?: string; name?: string; token?: string; credential?: string }) =>
+    api.post('/auth/google', data || {}),
+  githubLogin: (data?: { email?: string; name?: string; token?: string }) =>
+    api.post('/auth/github', data || {}),
 };
 
 // --- Sites ---
