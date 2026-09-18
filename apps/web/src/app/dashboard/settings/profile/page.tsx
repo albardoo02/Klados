@@ -19,6 +19,7 @@ import {
   Upload,
   Loader2,
 } from 'lucide-react';
+import { UserAvatar } from '@/components/user-avatar';
 
 export default function ProfileSettingsPage() {
   const { user, updateUser } = useAuthStore();
@@ -194,17 +195,12 @@ export default function ProfileSettingsPage() {
             />
 
             <div className="relative group mx-auto size-24">
-              {avatarUrl ? (
-                <img
-                  src={avatarUrl}
-                  alt={displayName || user.username}
-                  className="size-24 rounded-full object-cover shadow-md border-2 border-white ring-2 ring-slate-200"
-                />
-              ) : (
-                <div className="size-24 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-600 text-white flex items-center justify-center text-3xl font-extrabold shadow-md">
-                  {(displayName || user.username || 'U').charAt(0).toUpperCase()}
-                </div>
-              )}
+              <UserAvatar
+                src={avatarUrl}
+                name={displayName || user.username}
+                size="xl"
+                className="border-2 border-white ring-2 ring-slate-200"
+              />
               <button
                 type="button"
                 onClick={() => avatarInputRef.current?.click()}

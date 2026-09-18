@@ -195,3 +195,25 @@ func (h *MediaHandler) UploadAvatar(c *gin.Context) {
 		},
 	})
 }
+
+func (h *MediaHandler) ServeFile(c *gin.Context) {
+	key := c.Param("key")
+	key = strings.TrimPrefix(key, "/")
+
+	obj, err := h.Minio.GetObject(c.Request.Context(), h.Bucket, key, minio.GetObjectOptions{})
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "file not found"})
+		return
+	}
+	defer obj.Close()
+
+	stat, err := obj.Stat()
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "file not found"})
+		return
+	}
+
+	c.Header("Cache-Control", "public, max-age=86400")
+	c.Header("Content-Disposition", "inline")
+	c.DataFromReader(http.StatusOK, stat.Size, stat.ContentType, obj, nil)
+}

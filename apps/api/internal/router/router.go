@@ -10,6 +10,7 @@ import (
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"gorm.io/gorm"
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"strings"
@@ -42,11 +43,23 @@ func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
 		log.Fatalf("failed to init minio: %v", err)
 	}
 
-	// バケット作成（存在しない場合）
+	// バケット作成（存在しない場合）および公開読み取りポリシーの設定
 	exists, _ := minioClient.BucketExists(context.Background(), cfg.MinioBucket)
 	if !exists {
-		minioClient.MakeBucket(context.Background(), cfg.MinioBucket, minio.MakeBucketOptions{})
+		_ = minioClient.MakeBucket(context.Background(), cfg.MinioBucket, minio.MakeBucketOptions{})
 	}
+	policy := fmt.Sprintf(`{
+		"Version": "2012-10-17",
+		"Statement": [
+			{
+				"Effect": "Allow",
+				"Principal": {"AWS": ["*"]},
+				"Action": ["s3:GetObject"],
+				"Resource": ["arn:aws:s3:::%s/*"]
+			}
+		]
+	}`, cfg.MinioBucket)
+	_ = minioClient.SetBucketPolicy(context.Background(), cfg.MinioBucket, policy)
 
 	// ハンドラー
 	authH := &handler.AuthHandler{DB: db, JWTSecret: cfg.JWTSecret}
@@ -92,6 +105,7 @@ func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
 			}
 			c.JSON(http.StatusNotFound, gin.H{"error": "route not found"})
 		})
+		public.GET("/media/file/*key", mediaH.ServeFile)
 	}
 
 	// 認証 (Public)

@@ -18,6 +18,7 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 import { authApi } from '@/lib/api';
+import { UserAvatar } from '@/components/user-avatar';
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -114,17 +115,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               aria-expanded={userMenuOpen}
               aria-haspopup="true"
             >
-              {user.avatar_url ? (
-                <img
-                  src={user.avatar_url}
-                  alt={user.display_name || user.username}
-                  className="size-8 rounded-full object-cover shadow-2xs border border-slate-200"
-                />
-              ) : (
-                <div className="size-8 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-600 text-white flex items-center justify-center text-xs font-bold shadow-2xs">
-                  {(user.display_name || user.username || 'U').charAt(0).toUpperCase()}
-                </div>
-              )}
+              <UserAvatar
+                src={user.avatar_url}
+                name={user.display_name || user.username}
+                size="sm"
+              />
               <div className="hidden sm:flex flex-col text-left">
                 <span className="text-xs font-semibold text-slate-800 leading-tight">
                   {user.display_name || user.username}
@@ -142,17 +137,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 {/* ユーザー情報ヘッダー */}
                 <div className="px-4 py-3 border-b border-slate-100">
                   <div className="flex items-center gap-2.5">
-                    {user.avatar_url ? (
-                      <img
-                        src={user.avatar_url}
-                        alt={user.display_name || user.username}
-                        className="size-9 rounded-full object-cover shadow-2xs border border-slate-200 shrink-0"
-                      />
-                    ) : (
-                      <div className="size-9 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-600 text-white flex items-center justify-center text-sm font-bold shrink-0">
-                        {(user.display_name || user.username || 'U').charAt(0).toUpperCase()}
-                      </div>
-                    )}
+                    <UserAvatar
+                      src={user.avatar_url}
+                      name={user.display_name || user.username}
+                      size="md"
+                    />
                     <div className="min-w-0 flex-1">
                       <p className="text-xs font-bold text-slate-900 truncate">
                         {user.display_name || user.username}
