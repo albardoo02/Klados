@@ -66,6 +66,23 @@ func (h *SiteHandler) Create(c *gin.Context) {
 	}
 
 	uid, _ := uuid.Parse(userID)
+
+	// プラン制限チェック: Freeプランは最大1サイトまで（その他機能は無制限）
+	var user model.User
+	if err := h.DB.Where("id = ?", uid).First(&user).Error; err == nil {
+		if user.Plan == "" || user.Plan == model.PlanFree {
+			var count int64
+			h.DB.Model(&model.Site{}).Where("user_id = ?", uid).Count(&count)
+			if count >= 1 {
+				c.JSON(http.StatusForbidden, gin.H{
+					"error": "無料プランでは作成できるサイト数は最大1つまでです。既存のサイトを削除するか、プランをアップグレードしてください。",
+					"code":  "PLAN_SITE_LIMIT_REACHED",
+				})
+				return
+			}
+		}
+	}
+
 	theme := req.Theme
 	if theme == "" {
 		theme = "minimal"
