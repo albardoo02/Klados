@@ -85,6 +85,17 @@ function preprocessMarkdown(content: string): string {
   return result;
 }
 
+function extractText(node: React.ReactNode): string {
+  if (typeof node === 'string') return node;
+  if (typeof node === 'number') return String(node);
+  if (!node) return '';
+  if (Array.isArray(node)) return node.map(extractText).join('');
+  if (React.isValidElement(node) && (node.props as any)?.children) {
+    return extractText((node.props as any).children);
+  }
+  return '';
+}
+
 export function MarkdownRenderer({ content, className = '' }: MarkdownRendererProps) {
   const processedContent = React.useMemo(() => preprocessMarkdown(content), [content]);
 
@@ -94,6 +105,10 @@ export function MarkdownRenderer({ content, className = '' }: MarkdownRendererPr
         remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={[rehypeHighlight, rehypeKatex]}
         components={{
+          pre({ children }) {
+            // 不要な二重外枠 pre タグの生成を防ぎフラグメントとして子要素を直接展開
+            return <>{children}</>;
+          },
           em({ children, ...props }) {
             return (
               <em className="italic" style={{ fontStyle: 'italic' }} {...props}>
@@ -103,16 +118,16 @@ export function MarkdownRenderer({ content, className = '' }: MarkdownRendererPr
           },
           code({ className, children, ...props }) {
             const hasLang = /language-(\w+)/.exec(className || '');
-            const isBlock = Boolean(hasLang) || String(children).includes('\n');
+            const codeText = extractText(children);
+            const isBlock = Boolean(hasLang) || codeText.includes('\n');
 
-            if (isBlock && hasLang) {
-              const lang = hasLang[1];
-              const codeText = String(children).replace(/\n$/, '');
+            if (isBlock) {
+              const lang = hasLang ? hasLang[1] : '';
               return (
-                <div className="relative group my-4 rounded-xl overflow-hidden border border-slate-700 shadow-sm">
+                <div className="relative group my-4 rounded-xl overflow-hidden border border-slate-700/80 shadow-md bg-slate-950">
                   <div className="flex items-center justify-between px-4 py-2 bg-slate-900 text-slate-300 text-xs font-mono border-b border-slate-800">
-                    <span className="font-semibold text-slate-300">{lang}</span>
-                    <CopyButton text={codeText} />
+                    <span className="font-semibold text-slate-300">{lang || 'code'}</span>
+                    <CopyButton text={codeText.replace(/\n$/, '')} />
                   </div>
                   <pre className="!m-0 !rounded-none !p-4 bg-slate-950 text-slate-100 overflow-x-auto text-sm font-mono leading-relaxed">
                     <code className={className} {...props}>

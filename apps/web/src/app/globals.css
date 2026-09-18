@@ -201,12 +201,11 @@
 }
 
 .markdown-body pre {
-  border-radius: 0.5rem;
-  padding: 1rem;
+  border-radius: 0.75rem;
   overflow-x: auto;
   font-family: var(--font-mono), monospace;
-  background-color: #181825 !important;
-  color: #cdd6f4 !important;
+  background-color: #0f172a;
+  color: #f1f5f9;
   margin: 1.25rem 0;
 }
 
