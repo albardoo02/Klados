@@ -117,5 +117,80 @@ func (h *AuthHandler) generateToken(userID string) (string, error) {
 	return jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString([]byte(h.JWTSecret))
 }
 
+type updateProfileRequest struct {
+	DisplayName string `json:"display_name"`
+	AvatarURL   string `json:"avatar_url"`
+}
+
+func (h *AuthHandler) UpdateProfile(c *gin.Context) {
+	userID := c.GetString("user_id")
+
+	var user model.User
+	if err := h.DB.Where("id = ?", userID).First(&user).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		return
+	}
+
+	var req updateProfileRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	user.DisplayName = req.DisplayName
+	user.AvatarURL = req.AvatarURL
+
+	if err := h.DB.Save(&user).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update profile"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": user})
+}
+
+type changePasswordRequest struct {
+	CurrentPassword string `json:"current_password" binding:"required"`
+	NewPassword     string `json:"new_password" binding:"required,min=8"`
+}
+
+func (h *AuthHandler) ChangePassword(c *gin.Context) {
+	userID := c.GetString("user_id")
+
+	var user model.User
+	if err := h.DB.Where("id = ?", userID).First(&user).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		return
+	}
+
+	var req changePasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if user.Password != nil && *user.Password != "" {
+		if err := bcrypt.CompareHashAndPassword([]byte(*user.Password), []byte(req.CurrentPassword)); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "現在のパスワードが正しくありません"})
+			return
+		}
+	}
+
+	hashed, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "パスワードのハッシュ化に失敗しました"})
+		return
+	}
+
+	passStr := string(hashed)
+	user.Password = &passStr
+
+	if err := h.DB.Save(&user).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "パスワードの保存に失敗しました"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "パスワードを変更しました"})
+}
+
 // compile-time check
 var _ = uuid.New
