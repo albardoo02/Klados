@@ -29,6 +29,7 @@ import {
   Palette,
   Type,
   Code2,
+  Users,
 } from 'lucide-react';
 
 interface SiteDetails {
@@ -365,6 +366,13 @@ export default function SiteSettingsPage() {
           >
             <BarChart3 className="size-4" />
             <span>アクセス解析</span>
+          </Link>
+          <Link
+            href={`/dashboard/sites/${id}/members`}
+            className="flex items-center gap-2 px-4 py-2.5 text-muted-foreground hover:text-foreground transition-colors border-b-2 border-transparent"
+          >
+            <Users className="size-4" />
+            <span>メンバー管理</span>
           </Link>
           <button
             type="button"

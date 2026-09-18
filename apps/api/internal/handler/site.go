@@ -3,6 +3,7 @@ package handler
 import (
 	"archive/zip"
 	"bytes"
+	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"net"
@@ -47,14 +48,48 @@ type SitemapURLSet struct {
 	URLs    []SitemapURL `xml:"url"`
 }
 
+type SiteResponseItem struct {
+	model.Site
+	Role    model.SiteRole `json:"role"`
+	IsOwner bool           `json:"is_owner"`
+}
+
 func (h *SiteHandler) List(c *gin.Context) {
-	userID := c.GetString("user_id")
-	var sites []model.Site
-	if err := h.DB.Where("user_id = ?", userID).Find(&sites).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+	userIDStr := c.GetString("user_id")
+	userID, _ := uuid.Parse(userIDStr)
+
+	// オーナーとして所有しているサイト
+	var ownedSites []model.Site
+	h.DB.Where("user_id = ?", userID).Order("created_at desc").Find(&ownedSites)
+
+	// メンバーとして招待されたサイト
+	var memberRecords []model.SiteMember
+	h.DB.Preload("Site").Where("user_id = ?", userID).Find(&memberRecords)
+
+	var results []SiteResponseItem
+	siteMap := make(map[uuid.UUID]bool)
+
+	for _, s := range ownedSites {
+		siteMap[s.ID] = true
+		results = append(results, SiteResponseItem{
+			Site:    s,
+			Role:    model.RoleOwner,
+			IsOwner: true,
+		})
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "data": sites})
+
+	for _, m := range memberRecords {
+		if !siteMap[m.SiteID] && m.Site.ID != uuid.Nil {
+			siteMap[m.SiteID] = true
+			results = append(results, SiteResponseItem{
+				Site:    m.Site,
+				Role:    m.Role,
+				IsOwner: false,
+			})
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": results})
 }
 
 func (h *SiteHandler) Create(c *gin.Context) {
@@ -116,26 +151,79 @@ func (h *SiteHandler) Create(c *gin.Context) {
 }
 
 func (h *SiteHandler) Get(c *gin.Context) {
-	userID := c.GetString("user_id")
+	userIDStr := c.GetString("user_id")
+	userID, _ := uuid.Parse(userIDStr)
 	id := c.Param("id")
 
 	var site model.Site
-	if err := h.DB.Where("id = ? AND user_id = ?", id, userID).First(&site).Error; err != nil {
+	if err := h.DB.Where("id = ?", id).First(&site).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "site not found"})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"success": true, "data": site})
+	// オーナーかメンバーか確認
+	role := model.RoleOwner
+	isOwner := site.UserID == userID
+
+	if !isOwner {
+		var member model.SiteMember
+		if err := h.DB.Where("site_id = ? AND user_id = ?", site.ID, userID).First(&member).Error; err != nil {
+			c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+			return
+		}
+		role = member.Role
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"id":            site.ID,
+			"user_id":       site.UserID,
+			"slug":          site.Slug,
+			"custom_domain": site.CustomDomain,
+			"title":         site.Title,
+			"description":   site.Description,
+			"theme":         site.Theme,
+			"is_public":     site.IsPublic,
+			"is_protected":  site.IsProtected,
+			"settings":      site.Settings,
+			"created_at":    site.CreatedAt,
+			"updated_at":    site.UpdatedAt,
+			"role":          role,
+			"is_owner":      isOwner,
+		},
+	})
 }
 
 func (h *SiteHandler) Update(c *gin.Context) {
-	userID := c.GetString("user_id")
+	userIDStr := c.GetString("user_id")
+	userID, _ := uuid.Parse(userIDStr)
 	id := c.Param("id")
 
 	var site model.Site
-	if err := h.DB.Where("id = ? AND user_id = ?", id, userID).First(&site).Error; err != nil {
+	if err := h.DB.Where("id = ?", id).First(&site).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "site not found"})
 		return
+	}
+
+	// オーナーまたは管理者・設定変更権限を持つカスタムメンバー
+	if site.UserID != userID {
+		var member model.SiteMember
+		if err := h.DB.Where("site_id = ? AND user_id = ?", site.ID, userID).First(&member).Error; err != nil {
+			c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+			return
+		}
+		canManage := member.Role == model.RoleAdmin
+		if member.Role == model.RoleCustom && len(member.Permissions) > 0 {
+			var perms model.SitePermissions
+			if json.Unmarshal(member.Permissions, &perms) == nil && perms.CanManageSettings {
+				canManage = true
+			}
+		}
+		if !canManage {
+			c.JSON(http.StatusForbidden, gin.H{"error": "サイト設定を変更する権限がありません"})
+			return
+		}
 	}
 
 	if err := c.ShouldBindJSON(&site); err != nil {

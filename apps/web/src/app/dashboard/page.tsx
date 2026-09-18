@@ -14,6 +14,8 @@ interface Site {
   description: string;
   theme: string;
   is_public: boolean;
+  role?: string;
+  is_owner?: boolean;
   created_at: string;
 }
 
@@ -30,7 +32,8 @@ export default function DashboardPage() {
   const [errorMessage, setErrorMessage] = useState('');
   const [showPlanModal, setShowPlanModal] = useState(false);
 
-  const siteCount = data?.length || 0;
+  const ownedSites = data?.filter((s) => s.is_owner !== false) || [];
+  const siteCount = ownedSites.length;
   const isFreePlan = !user?.plan || user?.plan === 'free';
   const hasReachedSiteLimit = isFreePlan && siteCount >= 1;
 
@@ -182,15 +185,26 @@ export default function DashboardPage() {
                 <h2 className="font-semibold text-lg text-slate-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
                   {site.title}
                 </h2>
-                <span
-                  className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ${
-                    site.is_public
-                      ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400'
-                      : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
-                  }`}
-                >
-                  {site.is_public ? '公開中' : '下書き'}
-                </span>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {site.is_owner === false ? (
+                    <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-purple-100 text-purple-700 dark:bg-purple-950/60 dark:text-purple-300 border border-purple-200 dark:border-purple-800">
+                      {site.role === 'admin' ? '管理者' : site.role === 'editor' ? '編集者' : site.role === 'viewer' ? '閲覧者' : '自由権限'} (参加中)
+                    </span>
+                  ) : (
+                    <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                      オーナー
+                    </span>
+                  )}
+                  <span
+                    className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ${
+                      site.is_public
+                        ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400'
+                        : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
+                    }`}
+                  >
+                    {site.is_public ? '公開中' : '下書き'}
+                  </span>
+                </div>
               </div>
               <p className="text-xs font-mono text-blue-600 dark:text-blue-400 mb-3">
                 {site.slug}.klados.app

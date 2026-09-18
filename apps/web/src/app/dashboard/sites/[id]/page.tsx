@@ -20,6 +20,7 @@ import {
   Check,
   Loader2,
   AlertCircle,
+  Users,
 } from 'lucide-react';
 
 interface Page {
@@ -257,6 +258,13 @@ export default function SiteDetailPage() {
           >
             <BarChart3 className="size-4" />
             <span>アクセス解析</span>
+          </Link>
+          <Link
+            href={`/dashboard/sites/${id}/members`}
+            className="flex items-center gap-2 px-4 py-2.5 text-slate-600 hover:text-slate-900 transition-colors border-b-2 border-transparent"
+          >
+            <Users className="size-4" />
+            <span>メンバー管理</span>
           </Link>
           <Link
             href={`/dashboard/sites/${id}/settings`}

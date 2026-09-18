@@ -51,6 +51,7 @@ func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
 	// ハンドラー
 	authH := &handler.AuthHandler{DB: db, JWTSecret: cfg.JWTSecret}
 	siteH := &handler.SiteHandler{DB: db}
+	memberH := &handler.MemberHandler{DB: db}
 	pageH := &handler.PageHandler{DB: db}
 	commentH := &handler.CommentHandler{DB: db}
 	apiKeyH := &handler.APIKeyHandler{DB: db}
@@ -127,6 +128,12 @@ func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
 		protected.GET("/sites/:id/trash", pageH.ListTrash)
 		protected.GET("/sites/:id/export", siteH.Export)
 		protected.POST("/sites/:id/password", siteH.SetPassword)
+
+		// Site Members
+		protected.GET("/sites/:id/members", memberH.List)
+		protected.POST("/sites/:id/members", memberH.Add)
+		protected.PATCH("/sites/:id/members/:memberId", memberH.Update)
+		protected.DELETE("/sites/:id/members/:memberId", memberH.Remove)
 
 		// Pages
 		protected.GET("/sites/:id/pages", pageH.List)

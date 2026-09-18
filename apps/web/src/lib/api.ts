@@ -106,6 +106,45 @@ export const sitesApi = {
     api.get(`/sites/${id}/export`, { responseType: 'blob' }),
 };
 
+// --- Members & RBAC ---
+export type SiteRole = 'owner' | 'admin' | 'editor' | 'viewer' | 'custom';
+
+export interface SitePermissions {
+  can_edit_pages: boolean;
+  can_publish_pages: boolean;
+  can_delete_pages: boolean;
+  can_manage_settings: boolean;
+  can_invite_members: boolean;
+  can_manage_media: boolean;
+}
+
+export interface SiteMemberItem {
+  id: string;
+  site_id: string;
+  user_id: string;
+  role: SiteRole;
+  is_owner: boolean;
+  permissions?: SitePermissions;
+  created_at: string;
+  user: {
+    id: string;
+    email: string;
+    username: string;
+    display_name?: string;
+    avatar_url?: string;
+  };
+}
+
+export const membersApi = {
+  list: (siteId: string) => api.get(`/sites/${siteId}/members`),
+  add: (siteId: string, data: { identifier: string; role: SiteRole; permissions?: Partial<SitePermissions> }) =>
+    api.post(`/sites/${siteId}/members`, data),
+  update: (siteId: string, memberId: string, data: { role?: SiteRole; permissions?: Partial<SitePermissions> }) =>
+    api.patch(`/sites/${siteId}/members/${memberId}`, data),
+  remove: (siteId: string, memberId: string) =>
+    api.delete(`/sites/${siteId}/members/${memberId}`),
+};
+
 // --- Pages ---
 export interface PageVersion {
   id: string;

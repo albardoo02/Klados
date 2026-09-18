@@ -212,6 +212,13 @@ export default function SiteAnalyticsPage() {
             <span>アクセス解析</span>
           </button>
           <Link
+            href={`/dashboard/sites/${id}/members`}
+            className="flex items-center gap-2 px-4 py-2.5 text-muted-foreground hover:text-foreground transition-colors border-b-2 border-transparent"
+          >
+            <Users className="size-4" />
+            <span>メンバー管理</span>
+          </Link>
+          <Link
             href={`/dashboard/sites/${id}/settings`}
             className="flex items-center gap-2 px-4 py-2.5 text-muted-foreground hover:text-foreground transition-colors border-b-2 border-transparent"
           >
