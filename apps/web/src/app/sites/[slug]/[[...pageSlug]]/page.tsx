@@ -272,13 +272,37 @@ export default function PublicSitePage() {
 
   // テーマ切り替え
   const siteThemePreset = site.theme || 'minimal';
-  const [theme, setTheme] = useState<'minimal' | 'dark'>(() => {
-    if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem('klados_viewer_theme');
-      if (stored === 'dark' || stored === 'minimal') return stored;
+  const [theme, setTheme] = useState<'minimal' | 'dark'>('minimal');
+
+  // サイトデータ取得時、サイト設定のテーマを同期
+  useEffect(() => {
+    if (siteData) {
+      const stored = typeof window !== 'undefined' ? localStorage.getItem(`klados_theme_${siteSlug}`) : null;
+      if (stored === 'dark' || stored === 'minimal') {
+        setTheme(stored);
+      } else {
+        const isSiteDark = siteData.theme === 'dark';
+        setTheme(isSiteDark ? 'dark' : 'minimal');
+      }
     }
-    return siteThemePreset === 'dark' ? 'dark' : 'minimal';
-  });
+  }, [siteData, siteSlug]);
+
+  // html タグへの dark クラス適用
+  const isDark = theme === 'dark';
+  useEffect(() => {
+    if (typeof document !== 'undefined') {
+      if (isDark) {
+        document.documentElement.classList.add('dark');
+      } else {
+        document.documentElement.classList.remove('dark');
+      }
+    }
+    return () => {
+      if (typeof document !== 'undefined') {
+        document.documentElement.classList.remove('dark');
+      }
+    };
+  }, [isDark]);
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -286,7 +310,7 @@ export default function PublicSitePage() {
     const nextTheme = theme === 'minimal' ? 'dark' : 'minimal';
     setTheme(nextTheme);
     if (typeof window !== 'undefined') {
-      localStorage.setItem('klados_viewer_theme', nextTheme);
+      localStorage.setItem(`klados_theme_${siteSlug}`, nextTheme);
     }
   };
 
@@ -294,8 +318,6 @@ export default function PublicSitePage() {
   const currentIndex = pages.findIndex((p) => p.id === activePage?.id || p.slug === activePage?.slug);
   const prevPage = currentIndex > 0 ? pages[currentIndex - 1] : null;
   const nextPage = currentIndex >= 0 && currentIndex < pages.length - 1 ? pages[currentIndex + 1] : null;
-
-  const isDark = theme === 'dark';
 
   // 動的メタタグ値の計算
   const pageTitle = activePage ? `${activePage.title} - ${site.title}` : site.title;
