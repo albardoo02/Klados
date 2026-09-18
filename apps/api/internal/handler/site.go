@@ -140,16 +140,21 @@ func (h *SiteHandler) GetBySlug(c *gin.Context) {
 		Order("position asc, created_at asc").
 		Find(&pages)
 
-	type publicSiteWithPages struct {
-		model.Site
-		Pages []model.Page `json:"pages"`
-	}
-
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data": publicSiteWithPages{
-			Site:  site,
-			Pages: pages,
+		"data": gin.H{
+			"id":            site.ID,
+			"user_id":       site.UserID,
+			"slug":          site.Slug,
+			"custom_domain": site.CustomDomain,
+			"title":         site.Title,
+			"description":   site.Description,
+			"theme":         site.Theme,
+			"is_public":     site.IsPublic,
+			"settings":      site.Settings,
+			"created_at":    site.CreatedAt,
+			"updated_at":    site.UpdatedAt,
+			"pages":         pages,
 		},
 	})
 }
