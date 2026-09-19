@@ -28,11 +28,14 @@ import {
   Printer,
   Link2,
   Info,
+  LogIn,
+  UserPlus,
 } from 'lucide-react';
 import { PageActionTabs } from '@/components/wiki/page-action-tabs';
 import { SidebarEditorModal } from '@/components/wiki/sidebar-editor-modal';
 import { PageInfoModal } from '@/components/wiki/page-info-modal';
 import { SidebarSection, generateDefaultSidebar } from '@/types/sidebar';
+import { useAuthStore } from '@/store/auth';
 
 interface PublicPage {
   id: string;
@@ -47,6 +50,7 @@ interface PublicPage {
 
 interface PublicSite {
   id: string;
+  user_id?: string;
   slug: string;
   title: string;
   description?: string;
@@ -54,6 +58,9 @@ interface PublicSite {
   custom_font?: string;
   primary_color?: string;
   custom_css?: string;
+  can_edit?: boolean;
+  is_owner?: boolean;
+  role?: string;
   settings?: {
     ogp_title?: string;
     ogp_description?: string;
@@ -231,6 +238,16 @@ export default function SitePageClient() {
     ? rawPageSlug.join('/')
     : rawPageSlug || '';
 
+  // 認証および権限判定
+  const { user, token } = useAuthStore();
+  const [isClientMounted, setIsClientMounted] = useState(false);
+  useEffect(() => {
+    setIsClientMounted(true);
+  }, []);
+
+  // ゲスト（非ログイン）判定: クライアントマウント前またはトークン/ユーザー不在時はゲスト
+  const isGuest = !isClientMounted || !token || !user;
+
   // 1. PV記録 (Analytics Tracking)
   useEffect(() => {
     if (siteSlug) {
@@ -272,6 +289,13 @@ export default function SitePageClient() {
       : isFallback
       ? DEMO_PAGES
       : [];
+
+  // 編集権限判定:
+  // 1. ゲストユーザーは常に編集不可
+  // 2. ログインユーザーの場合、バックエンドから返された can_edit を判定
+  // 3. または、サイトのオーナー (site.user_id === user.id) であれば編集可能
+  const isOwner = !isGuest && !!site.user_id && site.user_id === user?.id;
+  const canEdit = !isGuest && (site.can_edit !== undefined ? site.can_edit : isOwner);
 
   const targetSlug =
     currentSlug ||
@@ -585,18 +609,41 @@ export default function SitePageClient() {
               {isDark ? <Sun className="size-4" /> : <Moon className="size-4" />}
             </button>
 
-            {/* ダッシュボードへのリンク */}
-            <Link
-              href="/dashboard"
-              className={`hidden sm:inline-flex items-center gap-1 text-xs px-3 py-1.5 rounded-xl border transition-colors ${
-                isDark
-                  ? 'border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-                  : 'border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-              }`}
-            >
-              <span>ダッシュボード</span>
-              <ExternalLink className="size-3" />
-            </Link>
+            {/* ログイン／ダッシュボードへのリンク (ゲスト時とログイン時で最適化) */}
+            {isGuest ? (
+              <div className="hidden sm:flex items-center gap-2">
+                <Link
+                  href="/login"
+                  className={`inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-xl border transition-colors ${
+                    isDark
+                      ? 'border-slate-800 text-slate-300 hover:text-white hover:bg-slate-800'
+                      : 'border-slate-200 text-slate-700 hover:text-slate-900 hover:bg-slate-100'
+                  }`}
+                >
+                  <LogIn className="size-3.5 text-slate-400" />
+                  <span>ログイン</span>
+                </Link>
+                <Link
+                  href="/register"
+                  className="inline-flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-xl text-white shadow-2xs hover:opacity-90 transition-opacity"
+                  style={{ backgroundColor: brandPrimaryColor }}
+                >
+                  <span>新規登録</span>
+                </Link>
+              </div>
+            ) : (
+              <Link
+                href={canEdit && site.id && site.id !== 'demo-site' ? `/dashboard/sites/${site.id}` : '/dashboard'}
+                className={`hidden sm:inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-xl border transition-colors ${
+                  isDark
+                    ? 'border-slate-800 text-slate-300 hover:text-white hover:bg-slate-800'
+                    : 'border-slate-200 text-slate-700 hover:text-slate-900 hover:bg-slate-50'
+                }`}
+              >
+                <span>{canEdit ? 'サイト管理' : 'ダッシュボード'}</span>
+                <ExternalLink className="size-3 text-slate-400" />
+              </Link>
+            )}
           </div>
         </div>
       </header>
@@ -606,20 +653,22 @@ export default function SitePageClient() {
         {/* デスクトップ用サイドバー (MediaWiki:Sidebar) */}
         <aside className="hidden md:block w-64 shrink-0">
           <div className="sticky top-24 space-y-5">
-            {/* サイドバーヘッダー & 編集ボタン */}
+            {/* サイドバーヘッダー & 編集ボタン (関係者のみ) */}
             <div className="flex items-center justify-between pb-2 border-b border-border">
               <span className="text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
                 ナビゲーション
               </span>
-              <button
-                type="button"
-                onClick={() => setSidebarEditorOpen(true)}
-                className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors p-1 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
-                title="サイドバーを編集 (MediaWiki:Sidebar)"
-              >
-                <Settings2 className="size-3.5" />
-                <span>編集</span>
-              </button>
+              {canEdit && (
+                <button
+                  type="button"
+                  onClick={() => setSidebarEditorOpen(true)}
+                  className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors p-1 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                  title="サイドバーを編集 (MediaWiki:Sidebar)"
+                >
+                  <Settings2 className="size-3.5" />
+                  <span>編集</span>
+                </button>
+              )}
             </div>
 
             {/* セクション別ナビゲーション一覧 */}
@@ -736,17 +785,19 @@ export default function SitePageClient() {
               )}
             </div>
 
-            {/* サイドバーカスタマイズリンク */}
-            <div className="pt-3 border-t border-slate-100 dark:border-slate-800/80">
-              <button
-                type="button"
-                onClick={() => setSidebarEditorOpen(true)}
-                className="w-full flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl border border-dashed border-slate-200 dark:border-slate-800 hover:border-blue-400 hover:bg-blue-50/50 dark:hover:bg-blue-950/20 text-slate-500 hover:text-blue-600 dark:hover:text-blue-400 text-xs font-medium transition-colors cursor-pointer"
-              >
-                <Settings2 className="size-3.5" />
-                <span>サイドバーをカスタマイズ</span>
-              </button>
-            </div>
+            {/* サイドバーカスタマイズリンク (関係者のみ) */}
+            {canEdit && (
+              <div className="pt-3 border-t border-slate-100 dark:border-slate-800/80">
+                <button
+                  type="button"
+                  onClick={() => setSidebarEditorOpen(true)}
+                  className="w-full flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl border border-dashed border-slate-200 dark:border-slate-800 hover:border-blue-400 hover:bg-blue-50/50 dark:hover:bg-blue-950/20 text-slate-500 hover:text-blue-600 dark:hover:text-blue-400 text-xs font-medium transition-colors cursor-pointer"
+                >
+                  <Settings2 className="size-3.5" />
+                  <span>サイドバーをカスタマイズ</span>
+                </button>
+              </div>
+            )}
 
             {isFallback && (
               <div className="p-3.5 rounded-xl bg-blue-50/70 dark:bg-blue-950/30 border border-blue-100 dark:border-blue-900/50 text-xs text-blue-600 dark:text-blue-300">
@@ -860,6 +911,46 @@ export default function SitePageClient() {
                     </Link>
                   </div>
                 )}
+
+                {/* モバイル用アカウント・管理ナビゲーション */}
+                <div className="pt-4 border-t border-border space-y-2">
+                  <div className="text-xs font-bold text-slate-400 uppercase tracking-wider px-2">
+                    アカウント
+                  </div>
+                  {isGuest ? (
+                    <div className="space-y-1.5 pt-1">
+                      <Link
+                        href="/login"
+                        onClick={() => setMobileMenuOpen(false)}
+                        className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium border border-border text-foreground hover:bg-muted transition-colors"
+                      >
+                        <LogIn className="size-4 text-primary" />
+                        <span>ログイン</span>
+                      </Link>
+                      <Link
+                        href="/register"
+                        onClick={() => setMobileMenuOpen(false)}
+                        className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium text-white shadow-xs transition-opacity hover:opacity-90"
+                        style={{ backgroundColor: brandPrimaryColor }}
+                      >
+                        <UserPlus className="size-4" />
+                        <span>新規アカウント登録</span>
+                      </Link>
+                    </div>
+                  ) : (
+                    <Link
+                      href={canEdit && site.id && site.id !== 'demo-site' ? `/dashboard/sites/${site.id}` : '/dashboard'}
+                      onClick={() => setMobileMenuOpen(false)}
+                      className="flex items-center justify-between px-3 py-2 rounded-xl text-sm font-medium border border-border text-foreground hover:bg-muted transition-colors"
+                    >
+                      <div className="flex items-center gap-2">
+                        <ExternalLink className="size-4 text-primary" />
+                        <span>{canEdit ? 'サイト管理' : 'ダッシュボード'}</span>
+                      </div>
+                      <ChevronRight className="size-4 text-muted-foreground" />
+                    </Link>
+                  )}
+                </div>
               </div>
             </div>
           </div>
@@ -883,6 +974,7 @@ export default function SitePageClient() {
                 site={site}
                 onOpenComments={() => setCommentsOpen(true)}
                 commentsCount={comments.length}
+                canEdit={canEdit}
               />
 
               {/* パンくずリスト */}
@@ -1052,6 +1144,8 @@ export default function SitePageClient() {
         pages={pages}
         isOpen={searchOpen}
         onClose={() => setSearchOpen(false)}
+        canEdit={canEdit}
+        isGuest={isGuest}
       />
 
       {/* コメント ドロワー */}
@@ -1061,23 +1155,27 @@ export default function SitePageClient() {
           pageTitle={activePage.title}
           isOpen={commentsOpen}
           onClose={() => setCommentsOpen(false)}
+          currentUser={user ? { name: user.display_name || user.username } : undefined}
+          canManage={canEdit}
         />
       )}
 
-      {/* サイドバー編集モーダル (MediaWiki:Sidebar) */}
-      <SidebarEditorModal
-        isOpen={sidebarEditorOpen}
-        onClose={() => setSidebarEditorOpen(false)}
-        siteId={site.id}
-        siteSlug={siteSlug}
-        currentSections={activeSidebarSections}
-        showToolsSection={showToolsSection}
-        availablePages={pages}
-        onSaved={(newSections, newShowTools) => {
-          setSidebarSections(newSections);
-          setShowToolsSection(newShowTools);
-        }}
-      />
+      {/* サイドバー編集モーダル (MediaWiki:Sidebar - 関係者のみ) */}
+      {canEdit && (
+        <SidebarEditorModal
+          isOpen={sidebarEditorOpen}
+          onClose={() => setSidebarEditorOpen(false)}
+          siteId={site.id}
+          siteSlug={siteSlug}
+          currentSections={activeSidebarSections}
+          showToolsSection={showToolsSection}
+          availablePages={pages}
+          onSaved={(newSections, newShowTools) => {
+            setSidebarSections(newSections);
+            setShowToolsSection(newShowTools);
+          }}
+        />
+      )}
 
       {/* ページ情報モーダル (MediaWiki:PageInfo) */}
       {activePage && (

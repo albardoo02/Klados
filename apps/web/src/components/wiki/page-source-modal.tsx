@@ -13,9 +13,10 @@ interface PageSourceModalProps {
     title: string;
     content: string;
   };
+  canEdit?: boolean;
 }
 
-export function PageSourceModal({ isOpen, onClose, page }: PageSourceModalProps) {
+export function PageSourceModal({ isOpen, onClose, page, canEdit = false }: PageSourceModalProps) {
   const [copied, setCopied] = useState(false);
 
   if (!isOpen) return null;
@@ -51,13 +52,15 @@ export function PageSourceModal({ isOpen, onClose, page }: PageSourceModalProps)
                 </>
               )}
             </button>
-            <Link
-              href={`/dashboard/pages/${page.id}/edit`}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white transition-colors"
-            >
-              <span>エディタで編集</span>
-              <ExternalLink className="size-3" />
-            </Link>
+            {canEdit && (
+              <Link
+                href={`/dashboard/pages/${page.id}/edit`}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white transition-colors"
+              >
+                <span>エディタで編集</span>
+                <ExternalLink className="size-3" />
+              </Link>
+            )}
             <button
               onClick={onClose}
               className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer ml-1"

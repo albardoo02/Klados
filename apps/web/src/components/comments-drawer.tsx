@@ -25,6 +25,7 @@ interface CommentsDrawerProps {
     name?: string;
     avatar?: string;
   };
+  canManage?: boolean;
 }
 
 // ユーザー名から背景色を決定するヘルパー
@@ -72,6 +73,7 @@ export function CommentsDrawer({
   isOpen,
   onClose,
   currentUser,
+  canManage = false,
 }: CommentsDrawerProps) {
   const queryClient = useQueryClient();
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -248,18 +250,24 @@ export function CommentsDrawer({
                       </div>
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (confirm('このコメントを削除しますか？')) {
-                          deleteMutation.mutate(comment.id);
-                        }
-                      }}
-                      className="opacity-0 group-hover:opacity-100 p-1 text-muted-foreground hover:text-rose-600 rounded transition-all cursor-pointer"
-                      title="コメントを削除"
-                    >
-                      <Trash2 className="size-3.5" />
-                    </button>
+                    {/* 削除ボタン: サイト管理者/編集者、または自身が投稿したコメントのみ */}
+                    {(canManage ||
+                      (currentUser?.name && comment.author_name === currentUser.name) ||
+                      (typeof window !== 'undefined' &&
+                        comment.author_name === localStorage.getItem('klados_comment_author'))) && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (confirm('このコメントを削除しますか？')) {
+                            deleteMutation.mutate(comment.id);
+                          }
+                        }}
+                        className="opacity-0 group-hover:opacity-100 p-1 text-muted-foreground hover:text-rose-600 rounded transition-all cursor-pointer"
+                        title="コメントを削除"
+                      >
+                        <Trash2 className="size-3.5" />
+                      </button>
+                    )}
                   </div>
 
                   {/* Markdown コメント本文 */}

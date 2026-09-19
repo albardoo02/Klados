@@ -17,9 +17,10 @@ interface PageHistoryModalProps {
     content: string;
     updated_at?: string;
   };
+  canEdit?: boolean;
 }
 
-export function PageHistoryModal({ isOpen, onClose, page }: PageHistoryModalProps) {
+export function PageHistoryModal({ isOpen, onClose, page, canEdit = false }: PageHistoryModalProps) {
   const [selectedVersion, setSelectedVersion] = useState<PageVersion | null>(null);
   const [compareMode, setCompareMode] = useState<'with-current' | 'raw'>('with-current');
 
@@ -76,13 +77,15 @@ export function PageHistoryModal({ isOpen, onClose, page }: PageHistoryModalProp
           </div>
 
           <div className="flex items-center gap-2">
-            <Link
-              href={`/dashboard/pages/${page.id}/edit`}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white transition-colors"
-            >
-              <span>エディタで復元/編集</span>
-              <ExternalLink className="size-3" />
-            </Link>
+            {canEdit && (
+              <Link
+                href={`/dashboard/pages/${page.id}/edit`}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white transition-colors"
+              >
+                <span>エディタで復元/編集</span>
+                <ExternalLink className="size-3" />
+              </Link>
+            )}
             <button
               onClick={onClose}
               className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer ml-1"

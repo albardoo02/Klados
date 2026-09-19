@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/klados/api/internal/model"
 	"golang.org/x/crypto/bcrypt"
@@ -21,6 +22,7 @@ import (
 type SiteHandler struct {
 	DB          *gorm.DB
 	LookupCNAME func(host string) (string, error)
+	JWTSecret   string
 }
 
 type createSiteRequest struct {
@@ -248,6 +250,16 @@ func (h *SiteHandler) Delete(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
+func extractTokenFromHeaderOrCookie(c *gin.Context) string {
+	if h := c.GetHeader("Authorization"); strings.HasPrefix(h, "Bearer ") {
+		return strings.TrimPrefix(h, "Bearer ")
+	}
+	if cookie, err := c.Cookie("access_token"); err == nil {
+		return cookie
+	}
+	return ""
+}
+
 func (h *SiteHandler) GetBySlug(c *gin.Context) {
 	slug := c.Param("slug")
 	var site model.Site
@@ -258,6 +270,43 @@ func (h *SiteHandler) GetBySlug(c *gin.Context) {
 
 	if !CheckSiteAccess(c, &site) {
 		return
+	}
+
+	// オプショナル認証: トークンが存在する場合、現在のユーザーの権限をチェック
+	canEdit := false
+	isOwner := false
+	var role string
+
+	token := extractTokenFromHeaderOrCookie(c)
+	if token != "" && h.JWTSecret != "" {
+		claims := jwt.MapClaims{}
+		t, err := jwt.ParseWithClaims(token, claims, func(t *jwt.Token) (interface{}, error) {
+			return []byte(h.JWTSecret), nil
+		})
+		if err == nil && t.Valid {
+			if sub, ok := claims["sub"].(string); ok {
+				if uid, err := uuid.Parse(sub); err == nil {
+					if site.UserID == uid {
+						canEdit = true
+						isOwner = true
+						role = string(model.RoleOwner)
+					} else {
+						var member model.SiteMember
+						if err := h.DB.Where("site_id = ? AND user_id = ?", site.ID, uid).First(&member).Error; err == nil {
+							role = string(member.Role)
+							if member.Role == model.RoleAdmin || member.Role == model.RoleEditor {
+								canEdit = true
+							} else if member.Role == model.RoleCustom && len(member.Permissions) > 0 {
+								var perms model.SitePermissions
+								if json.Unmarshal(member.Permissions, &perms) == nil && perms.CanEditPages {
+									canEdit = true
+								}
+							}
+						}
+					}
+				}
+			}
+		}
 	}
 
 	var pages []model.Page
@@ -280,6 +329,9 @@ func (h *SiteHandler) GetBySlug(c *gin.Context) {
 			"settings":      site.Settings,
 			"created_at":    site.CreatedAt,
 			"updated_at":    site.UpdatedAt,
+			"can_edit":      canEdit,
+			"is_owner":      isOwner,
+			"role":          role,
 			"pages":         pages,
 		},
 	})

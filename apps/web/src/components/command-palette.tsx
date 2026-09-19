@@ -35,6 +35,8 @@ interface CommandPaletteProps {
   isOpen?: boolean;
   onClose?: () => void;
   pages?: Array<{ id: string; slug: string; title: string; content?: string }>;
+  canEdit?: boolean;
+  isGuest?: boolean;
 }
 
 export function CommandPalette({
@@ -43,6 +45,8 @@ export function CommandPalette({
   isOpen: controlledIsOpen,
   onClose: controlledOnClose,
   pages: initialPages,
+  canEdit = false,
+  isGuest = false,
 }: CommandPaletteProps) {
   const router = useRouter();
   const [internalIsOpen, setInternalIsOpen] = useState(false);
@@ -107,38 +111,86 @@ export function CommandPalette({
     }
   }, [isOpen]);
 
-  // デフォルトのアクション一覧
+  // デフォルトのアクション一覧（権限・閲覧モードに応じた最適化）
   const quickActions = useMemo<SearchResultItem[]>(() => {
-    const actions: SearchResultItem[] = [
-      {
-        id: 'action-dashboard',
-        title: 'ダッシュボード ホーム',
-        slug: 'dashboard',
-        type: 'action',
-        snippet: 'サイト一覧やアカウントの管理',
-        href: '/dashboard',
-      },
-      {
-        id: 'action-api-keys',
-        title: '開発者 API キー設定',
-        slug: 'settings/api-keys',
-        type: 'action',
-        snippet: '外部連携用の REST API トークンを発行・管理',
-        href: '/dashboard/settings/api-keys',
-      },
-    ];
+    const actions: SearchResultItem[] = [];
+
     if (siteSlug) {
-      actions.unshift({
+      // 公開サイト閲覧中
+      actions.push({
         id: 'action-public-root',
-        title: `公開サイトのトップ (${siteSlug}.klados.app)`,
+        title: `公開サイトのトップ (${siteSlug})`,
         slug: 'home',
         type: 'action',
         snippet: '公開中のトップページを表示',
         href: `/sites/${siteSlug}`,
       });
+
+      if (canEdit) {
+        // サイト関係者・編集者の場合のみ管理アクションを表示
+        if (siteId) {
+          actions.push({
+            id: 'action-site-manage',
+            title: 'サイト管理ダッシュボード',
+            slug: 'dashboard/sites',
+            type: 'action',
+            snippet: 'ページの追加・削除、設定変更、分析を確認',
+            href: `/dashboard/sites/${siteId}`,
+          });
+        }
+        actions.push({
+          id: 'action-dashboard',
+          title: 'ダッシュボード ホーム',
+          slug: 'dashboard',
+          type: 'action',
+          snippet: 'サイト一覧やアカウントの管理',
+          href: '/dashboard',
+        });
+      } else if (isGuest) {
+        // ゲストユーザー向けの親切なアクション
+        actions.push(
+          {
+            id: 'action-login',
+            title: 'ログイン',
+            slug: 'login',
+            type: 'action',
+            snippet: 'アカウントにログインして編集権限を確認',
+            href: '/login',
+          },
+          {
+            id: 'action-register',
+            title: 'アカウント作成 (無料)',
+            slug: 'register',
+            type: 'action',
+            snippet: '新規登録して自分専用のWikiサイトを作成',
+            href: '/register',
+          }
+        );
+      }
+    } else {
+      // ダッシュボードなど管理者画面の場合
+      actions.push(
+        {
+          id: 'action-dashboard',
+          title: 'ダッシュボード ホーム',
+          slug: 'dashboard',
+          type: 'action',
+          snippet: 'サイト一覧やアカウントの管理',
+          href: '/dashboard',
+        },
+        {
+          id: 'action-api-keys',
+          title: '開発者 API キー設定',
+          slug: 'settings/api-keys',
+          type: 'action',
+          snippet: '外部連携用の REST API トークンを発行・管理',
+          href: '/dashboard/settings/api-keys',
+        }
+      );
     }
+
     return actions;
-  }, [siteSlug]);
+  }, [siteSlug, siteId, canEdit, isGuest]);
 
   // 検索クエリ実行 (デバウンス)
   useEffect(() => {

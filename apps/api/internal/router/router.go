@@ -63,7 +63,7 @@ func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
 
 	// ハンドラー
 	authH := &handler.AuthHandler{DB: db, JWTSecret: cfg.JWTSecret}
-	siteH := &handler.SiteHandler{DB: db}
+	siteH := &handler.SiteHandler{DB: db, JWTSecret: cfg.JWTSecret}
 	memberH := &handler.MemberHandler{DB: db}
 	pageH := &handler.PageHandler{DB: db}
 	commentH := &handler.CommentHandler{DB: db}

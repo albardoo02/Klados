@@ -38,6 +38,7 @@ interface PageActionTabsProps {
   };
   onOpenComments?: () => void;
   commentsCount?: number;
+  canEdit?: boolean;
 }
 
 export function PageActionTabs({
@@ -45,6 +46,7 @@ export function PageActionTabs({
   site,
   onOpenComments,
   commentsCount = 0,
+  canEdit = false,
 }: PageActionTabsProps) {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [sourceOpen, setSourceOpen] = useState(false);
@@ -138,15 +140,17 @@ export function PageActionTabs({
             <span>閲覧</span>
           </span>
 
-          {/* 編集タブ */}
-          <Link
-            href={`/dashboard/pages/${page.id}/edit`}
-            className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/60 rounded-t-xl transition-colors cursor-pointer"
-            title="エディタを開いてこのページを編集"
-          >
-            <Edit3 className="size-3.5" />
-            <span>編集</span>
-          </Link>
+          {/* 編集タブ (関係者・編集権限がある場合のみ表示) */}
+          {canEdit && (
+            <Link
+              href={`/dashboard/pages/${page.id}/edit`}
+              className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/60 rounded-t-xl transition-colors cursor-pointer"
+              title="エディタを開いてこのページを編集"
+            >
+              <Edit3 className="size-3.5" />
+              <span>編集</span>
+            </Link>
+          )}
 
           {/* ソースを表示タブ */}
           <button
@@ -282,12 +286,14 @@ export function PageActionTabs({
         isOpen={historyOpen}
         onClose={() => setHistoryOpen(false)}
         page={page}
+        canEdit={canEdit}
       />
 
       <PageSourceModal
         isOpen={sourceOpen}
         onClose={() => setSourceOpen(false)}
         page={page}
+        canEdit={canEdit}
       />
 
       <PageInfoModal
