@@ -104,21 +104,21 @@ func (h *PageHandler) Update(c *gin.Context) {
 		return
 	}
 
-	// バージョン保存
-	var maxVer struct{ Max int }
-	h.DB.Model(&model.PageVersion{}).Select("COALESCE(MAX(version), 0) as max").Where("page_id = ?", page.ID).Scan(&maxVer)
-	h.DB.Create(&model.PageVersion{
-		PageID:  page.ID,
-		UserID:  userID,
-		Content: page.Content,
-		Version: maxVer.Max + 1,
-	})
+	// コンテンツに変更がある場合のみ新しいバージョンとして履歴を保存
+	if req.Content != "" && req.Content != page.Content {
+		var maxVer struct{ Max int }
+		h.DB.Model(&model.PageVersion{}).Select("COALESCE(MAX(version), 0) as max").Where("page_id = ?", page.ID).Scan(&maxVer)
+		h.DB.Create(&model.PageVersion{
+			PageID:  page.ID,
+			UserID:  userID,
+			Content: page.Content,
+			Version: maxVer.Max + 1,
+		})
+		page.Content = req.Content
+	}
 
 	if req.Title != "" {
 		page.Title = req.Title
-	}
-	if req.Content != "" {
-		page.Content = req.Content
 	}
 	if req.Status != "" {
 		page.Status = req.Status

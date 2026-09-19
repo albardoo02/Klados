@@ -677,15 +677,24 @@ export default function PageEditPage() {
   useEffect(() => {
     const timer = setInterval(() => {
       if (!saved && viewRef.current) {
-        updateMutation.mutate(viewRef.current.state.doc.toString());
+        const currentDoc = viewRef.current.state.doc.toString();
+        if (currentDoc !== (page?.content ?? '')) {
+          updateMutation.mutate(currentDoc);
+        } else {
+          setSaved(true);
+        }
       }
     }, 5000);
     return () => clearInterval(timer);
-  }, [saved, updateMutation]);
+  }, [saved, page?.content, updateMutation]);
 
   const handleManualSave = () => {
     if (viewRef.current) {
-      updateMutation.mutate(viewRef.current.state.doc.toString());
+      const currentDoc = viewRef.current.state.doc.toString();
+      if (saved && currentDoc === (page?.content ?? '')) {
+        return;
+      }
+      updateMutation.mutate(currentDoc);
     }
   };
 
