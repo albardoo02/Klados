@@ -223,16 +223,18 @@ export default function PageEditPage() {
     const view = viewRef.current;
     const { state, dispatch } = view;
 
-    let from = 0;
-    let to = 0;
+    let from = state.doc.length;
+    let to = state.doc.length;
 
     if (typeof explicitPos === 'number' && explicitPos >= 0 && explicitPos <= state.doc.length) {
       from = explicitPos;
       to = explicitPos;
-    } else if (view.hasFocus) {
-      const selection = state.selection.main;
-      from = selection.from;
-      to = selection.to;
+    } else if (lastSelectionRef.current && lastSelectionRef.current.from > 0) {
+      from = Math.min(lastSelectionRef.current.from, state.doc.length);
+      to = Math.min(lastSelectionRef.current.to, state.doc.length);
+    } else if (state.selection.main.from > 0) {
+      from = state.selection.main.from;
+      to = state.selection.main.to;
     } else if (lastSelectionRef.current) {
       from = Math.min(lastSelectionRef.current.from, state.doc.length);
       to = Math.min(lastSelectionRef.current.to, state.doc.length);
@@ -421,7 +423,15 @@ export default function PageEditPage() {
         label: '画像挿入',
         description: 'メディアライブラリまたは画像ファイルを選択',
         icon: ImageIcon,
-        action: () => setMediaLibraryOpen(true),
+        action: () => {
+          if (viewRef.current) {
+            lastSelectionRef.current = {
+              from: viewRef.current.state.selection.main.from,
+              to: viewRef.current.state.selection.main.to,
+            };
+          }
+          setMediaLibraryOpen(true);
+        },
       },
     ],
     []
@@ -997,11 +1007,13 @@ export default function PageEditPage() {
   useEffect(() => {
     if (!editorRef.current || !page || viewRef.current) return;
 
+    const initialContent = page.content ?? '';
     const keybindingCompartment = new Compartment();
     keybindingCompartmentRef.current = keybindingCompartment;
 
     const startState = EditorState.create({
-      doc: page.content ?? '',
+      doc: initialContent,
+      selection: { anchor: initialContent.length }, // 初期カーソル位置を末尾に設定
       extensions: [
         basicSetup,
         markdown(),
@@ -1039,13 +1051,14 @@ export default function PageEditPage() {
 
     const view = new EditorView({ state: startState, parent: editorRef.current });
     viewRef.current = view;
-    setPreview(page.content ?? '');
+    setPreview(initialContent);
+    lastSelectionRef.current = { from: initialContent.length, to: initialContent.length };
 
     return () => {
       view.destroy();
       viewRef.current = null;
     };
-  }, [page]);
+  }, [id, Boolean(page)]);
 
   // キーバインドの動的切り替え
   const handleToggleKeybinding = (newMode: 'standard' | 'vim' | 'nano') => {
@@ -1166,7 +1179,13 @@ export default function PageEditPage() {
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (files && files.length > 0) {
-      handleUploadFile(files[0]);
+      const targetPos =
+        lastSelectionRef.current && lastSelectionRef.current.from > 0
+          ? lastSelectionRef.current.from
+          : viewRef.current?.state.selection.main.from && viewRef.current.state.selection.main.from > 0
+          ? viewRef.current.state.selection.main.from
+          : lastSelectionRef.current?.from ?? viewRef.current?.state.doc.length;
+      handleUploadFile(files[0], targetPos);
     }
   };
 
@@ -1188,13 +1207,17 @@ export default function PageEditPage() {
     e.stopPropagation();
     setIsDragging(false);
 
-    // ドロップされた正確な座標位置を取得
+    // ドロップされた正確な座標位置を取得 (precise = false で余白や行末へのドロップもカバー)
     let dropPos: number | undefined;
     if (viewRef.current) {
-      const pos = viewRef.current.posAtCoords({ x: e.clientX, y: e.clientY });
-      if (pos !== null) {
+      const pos = viewRef.current.posAtCoords({ x: e.clientX, y: e.clientY }, false);
+      if (typeof pos === 'number' && !isNaN(pos)) {
         dropPos = pos;
         lastSelectionRef.current = { from: pos, to: pos };
+      } else if (lastSelectionRef.current) {
+        dropPos = lastSelectionRef.current.from;
+      } else {
+        dropPos = viewRef.current.state.doc.length;
       }
     }
 
@@ -1220,7 +1243,13 @@ export default function PageEditPage() {
         const file = item.getAsFile();
         if (file) {
           e.preventDefault();
-          await handleUploadFile(file);
+          const targetPos =
+            lastSelectionRef.current && lastSelectionRef.current.from > 0
+              ? lastSelectionRef.current.from
+              : viewRef.current?.state.selection.main.from && viewRef.current.state.selection.main.from > 0
+              ? viewRef.current.state.selection.main.from
+              : lastSelectionRef.current?.from ?? viewRef.current?.state.doc.length;
+          await handleUploadFile(file, targetPos);
           break;
         }
       }
@@ -1807,6 +1836,15 @@ export default function PageEditPage() {
           />
           <button
             type="button"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              if (viewRef.current) {
+                lastSelectionRef.current = {
+                  from: viewRef.current.state.selection.main.from,
+                  to: viewRef.current.state.selection.main.to,
+                };
+              }
+            }}
             onClick={() => {
               if (viewRef.current) {
                 lastSelectionRef.current = {
@@ -1831,6 +1869,15 @@ export default function PageEditPage() {
           {/* メディアライブラリから選択 */}
           <button
             type="button"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              if (viewRef.current) {
+                lastSelectionRef.current = {
+                  from: viewRef.current.state.selection.main.from,
+                  to: viewRef.current.state.selection.main.to,
+                };
+              }
+            }}
             onClick={() => {
               if (viewRef.current) {
                 lastSelectionRef.current = {
@@ -1948,7 +1995,7 @@ export default function PageEditPage() {
 
             <div
               ref={editorRef}
-              className="flex-1 overflow-auto focus:outline-none [&_.cm-editor]:h-full [&_.cm-editor]:text-base [&_.cm-scroller]:font-mono [&_.cm-content]:p-6"
+              className="flex-1 overflow-auto focus:outline-none [&_.cm-editor]:h-full [&_.cm-editor]:text-base [&_.cm-scroller]:font-mono [&_.cm-scroller]:min-h-full [&_.cm-content]:min-h-full [&_.cm-content]:p-6"
             />
 
             {/* Vim モード インジケーター */}
@@ -2465,7 +2512,13 @@ export default function PageEditPage() {
           siteId={page.site_id}
           onSelectImage={(url, filename) => {
             const alt = filename.replace(/\.[^/.]+$/, '');
-            insertText(`\n![${alt}](${url})\n`);
+            const targetPos =
+              lastSelectionRef.current && lastSelectionRef.current.from > 0
+                ? lastSelectionRef.current.from
+                : viewRef.current?.state.selection.main.from && viewRef.current.state.selection.main.from > 0
+                ? viewRef.current.state.selection.main.from
+                : lastSelectionRef.current?.from ?? viewRef.current?.state.doc.length;
+            insertText(`\n![${alt}](${url})\n`, targetPos);
           }}
         />
       )}
