@@ -85,14 +85,26 @@ const DEMO_PAGES: PublicPage[] = [
 
 Klados は、Markdownで書かれたドキュメントや記事を美しく高速に配信するモダンなWebパブリッシングプラットフォームです。
 
+## 目次 (ページ内リンクの例)
+
+- [主な特徴へジャンプ](#主な特徴)
+- [コードハイライト例へジャンプ](#コードハイライト例)
+- [数式表現へジャンプ](#数式表現-katex)
+- [チェックリスト & 引用へジャンプ](#チェックリスト--引用)
+- [[#内部wikiリンク|Wikiリンク記法でジャンプ]]
+
+---
+
 ## 主な特徴
 
 | 機能 | 説明 | 状態 |
 | :--- | :--- | :---: |
 | **GFM 完全対応** | テーブル、チェックリスト、取り消し線など | ✅ サポート |
+| **ページ内リンク** | 見出しアンカー自動付与 & スムーズスクロール | ✅ サポート |
+| **Wiki リンク** | \`[[slug]]\` や \`[[#見出し]]\` による相互リンク | ✅ サポート |
+| **永続メディアID** | \`media:UUID\` による絶対に壊れない画像挿入 | ✅ サポート |
 | **シンタックスハイライト** | 多彩な言語に対応したコードブロック | ✅ サポート |
 | **KaTeX 数式表示** | インラインおよびブロック数式の美麗なレンダリング | ✅ サポート |
-| **画像最適化** | MinIO & CDN による高速画像配信 | ✅ サポート |
 | **マルチテーマ & カスタムCSS** | Minimal, Dark, Google Fonts, 独自CSS | ✅ サポート |
 
 ---
@@ -137,6 +149,14 @@ $$
 - [x] バージョン履歴と差分ロールバック
 - [x] アクセス解析 (PV & UU)
 - [x] グローバル検索 (Ctrl+K) & コメント
+
+## 内部Wikiリンク
+
+Obsidian や Scrapbox、MediaWiki と同様に、\`[[slug]]\` や \`[[slug|表示名]]\`、さらに \`[[#見出し名]]\` の記法でサイト内を相互リンクできます。
+
+- [[#目次 (ページ内リンクの例)|ページ先頭の目次へ戻る]]
+- [[guide|スタートガイドを読む (Wikiリンク)]]
+- [[features|機能詳細を見る (Wikiリンク)]]
 `,
   },
   {
@@ -1062,7 +1082,10 @@ export default function SitePageClient() {
 
               {/* Markdown コンテンツ */}
               <div className="py-4">
-                <MarkdownRenderer content={cleanArticleContent(activePage.content, activePage.title)} />
+                <MarkdownRenderer
+                  content={cleanArticleContent(activePage.content, activePage.title)}
+                  siteSlug={siteSlug}
+                />
               </div>
 
               {/* 記事下部コメントエリア */}

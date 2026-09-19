@@ -2319,7 +2319,7 @@ export default function PageEditPage() {
           >
             <div className="max-w-3xl mx-auto">
               {preview ? (
-                <MarkdownRenderer content={preview} />
+                <MarkdownRenderer content={preview} siteSlug={site?.slug} />
               ) : (
                 <div className="flex flex-col items-center justify-center py-24 text-muted-foreground">
                   <FileEdit className="size-12 stroke-[1.2] mb-3 text-muted-foreground/50" />
