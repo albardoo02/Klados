@@ -6,7 +6,7 @@ import { sitesApi } from '@/lib/api';
 import { useAuthStore } from '@/store/auth';
 import Link from 'next/link';
 import { useState } from 'react';
-import { Sparkles, AlertCircle, Globe } from 'lucide-react';
+import { AlertCircle, Globe } from 'lucide-react';
 
 interface Site {
   id: string;
@@ -72,26 +72,6 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      {/* OSSフリーバナー */}
-      <div className="bg-gradient-to-r from-blue-500/10 via-indigo-500/10 to-purple-500/10 border border-blue-200/60 dark:border-blue-800/40 rounded-2xl p-4 sm:p-5 flex items-center gap-3">
-        <div className="p-2.5 bg-blue-500/15 text-blue-600 dark:text-blue-400 rounded-xl">
-          <Sparkles className="w-5 h-5" />
-        </div>
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="font-semibold text-slate-900 dark:text-white">
-              {t('oss_banner.title')}
-            </span>
-            <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/60 dark:text-blue-300 font-medium">
-              {t('oss_banner.sites_count', { count: siteCount })}
-            </span>
-          </div>
-          <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 mt-0.5">
-            {t('oss_banner.desc')}
-          </p>
-        </div>
-      </div>
-
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-slate-900 dark:text-white">{t('dashboard.my_sites')}</h1>
         <button
