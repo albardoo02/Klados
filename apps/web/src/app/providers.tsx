@@ -5,7 +5,7 @@ import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { useState, useEffect } from 'react';
 import { NextIntlClientProvider } from 'next-intl';
 import { LocaleProvider, useLocale } from '@/store/locale';
-import type { Locale } from '@/i18n/config';
+import { defaultTimeZone, type Locale } from '@/i18n/config';
 
 import jaMessages from '@/messages/ja.json';
 import enMessages from '@/messages/en.json';
@@ -29,7 +29,11 @@ function IntlWrapper({ children }: { children: React.ReactNode }) {
   const activeLocale = mounted ? locale : 'ja';
 
   return (
-    <NextIntlClientProvider locale={activeLocale} messages={messages[activeLocale]}>
+    <NextIntlClientProvider
+      locale={activeLocale}
+      messages={messages[activeLocale]}
+      timeZone={defaultTimeZone}
+    >
       {children}
     </NextIntlClientProvider>
   );
