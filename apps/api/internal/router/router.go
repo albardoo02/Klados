@@ -105,8 +105,15 @@ func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
 			}
 			c.JSON(http.StatusNotFound, gin.H{"error": "route not found"})
 		})
+		public.GET("/media/:id", mediaH.ServeByID)
+		public.GET("/media/:id/content", mediaH.ServeByID)
 		public.GET("/media/file/*key", mediaH.ServeFile)
 	}
+
+	// Direct media access by ID
+	api.GET("/media/:id", mediaH.ServeByID)
+	api.GET("/media/:id/content", mediaH.ServeByID)
+
 
 	// 認証 (Public)
 	auth := api.Group("/auth")

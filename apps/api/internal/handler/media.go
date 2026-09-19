@@ -217,3 +217,56 @@ func (h *MediaHandler) ServeFile(c *gin.Context) {
 	c.Header("Content-Disposition", "inline")
 	c.DataFromReader(http.StatusOK, stat.Size, stat.ContentType, obj, nil)
 }
+
+func (h *MediaHandler) ServeByID(c *gin.Context) {
+	idStr := c.Param("id")
+	idStr = strings.TrimPrefix(idStr, "/")
+	cleanID := strings.TrimSuffix(idStr, filepath.Ext(idStr))
+
+	uUID, err := uuid.Parse(cleanID)
+	if err != nil {
+		uUID, err = uuid.Parse(idStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid media id"})
+			return
+		}
+	}
+
+	var media model.MediaFile
+	if err := h.DB.Where("id = ?", uUID).First(&media).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "media not found"})
+		return
+	}
+
+	if c.Query("format") == "json" {
+		c.JSON(http.StatusOK, gin.H{"success": true, "data": media})
+		return
+	}
+
+	// Try serving from MinIO directly
+	if h.Minio != nil && h.Bucket != "" && media.StorageKey != "" {
+		obj, err := h.Minio.GetObject(c.Request.Context(), h.Bucket, media.StorageKey, minio.GetObjectOptions{})
+		if err == nil {
+			defer obj.Close()
+			stat, err := obj.Stat()
+			if err == nil {
+				contentType := media.MimeType
+				if contentType == "" {
+					contentType = stat.ContentType
+				}
+				c.Header("Cache-Control", "public, max-age=86400")
+				c.Header("Content-Disposition", "inline")
+				c.DataFromReader(http.StatusOK, stat.Size, contentType, obj, nil)
+				return
+			}
+		}
+	}
+
+	// Fallback to CDNURL redirect if MinIO direct stream fails
+	if media.CDNURL != "" {
+		c.Redirect(http.StatusFound, media.CDNURL)
+		return
+	}
+
+	c.JSON(http.StatusNotFound, gin.H{"error": "media content not found"})
+}

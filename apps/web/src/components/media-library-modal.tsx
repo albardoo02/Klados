@@ -21,7 +21,7 @@ interface MediaLibraryModalProps {
   isOpen: boolean;
   onClose: () => void;
   siteId: string;
-  onSelectImage?: (url: string, filename: string) => void;
+  onSelectImage?: (url: string, filename: string, item?: MediaItem) => void;
 }
 
 function formatBytes(bytes?: number, decimals = 1) {
@@ -106,7 +106,8 @@ export function MediaLibraryModal({
 
   const handleCopyUrl = (id: string, url: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    navigator.clipboard.writeText(url);
+    const textToCopy = id ? `media:${id}` : url;
+    navigator.clipboard.writeText(textToCopy);
     setCopiedId(id);
     setTimeout(() => setCopiedId(null), 2000);
   };
@@ -257,7 +258,8 @@ export function MediaLibraryModal({
                     key={item.id}
                     onClick={() => {
                       if (onSelectImage) {
-                        onSelectImage(item.cdn_url, displayName);
+                        const targetRef = item.id ? `media:${item.id}` : item.cdn_url;
+                        onSelectImage(targetRef, displayName, item);
                         onClose();
                       }
                     }}
@@ -287,7 +289,7 @@ export function MediaLibraryModal({
                           type="button"
                           onClick={(e) => handleCopyUrl(item.id, item.cdn_url, e)}
                           className="p-1.5 bg-background/90 hover:bg-background text-foreground rounded-md shadow-xs transition-colors cursor-pointer"
-                          title="CDN URLをコピー"
+                          title="永続メディアID (media:UUID) をコピー"
                         >
                           {copiedId === item.id ? (
                             <Check className="size-3.5 text-emerald-600" />

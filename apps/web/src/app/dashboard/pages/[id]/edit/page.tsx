@@ -14,6 +14,7 @@ import { DiffViewer } from '@/components/diff-viewer';
 import { MediaLibraryModal } from '@/components/media-library-modal';
 import { CommentsDrawer } from '@/components/comments-drawer';
 import { useAuthStore } from '@/store/auth';
+import { formatMediaRef } from '@/lib/media';
 import Link from 'next/link';
 import {
   ArrowLeft,
@@ -1155,14 +1156,17 @@ export default function PageEditPage() {
       setIsUploading(true);
       const res = await mediaApi.upload(siteId, file);
       const data = res.data?.data || res.data;
+      const mediaId = data?.id;
       const cdnUrl = data?.cdn_url || data?.CDNURL || data?.url;
 
-      if (!cdnUrl) {
-        throw new Error('CDN URLが取得できませんでした');
+      const altText = file.name.replace(/\.[^/.]+$/, '');
+      const mediaRef = formatMediaRef(mediaId, cdnUrl);
+
+      if (!mediaRef) {
+        throw new Error('メディアURLの取得に失敗しました');
       }
 
-      const altText = file.name.replace(/\.[^/.]+$/, '');
-      const markdownImage = `\n![${altText}](${cdnUrl})\n`;
+      const markdownImage = `\n![${altText}](${mediaRef})\n`;
       insertText(markdownImage, targetPos);
     } catch (err: any) {
       console.error('画像アップロード失敗:', err);
@@ -2510,7 +2514,7 @@ export default function PageEditPage() {
           isOpen={mediaLibraryOpen}
           onClose={() => setMediaLibraryOpen(false)}
           siteId={page.site_id}
-          onSelectImage={(url, filename) => {
+          onSelectImage={(targetRef, filename, item) => {
             const alt = filename.replace(/\.[^/.]+$/, '');
             const targetPos =
               lastSelectionRef.current && lastSelectionRef.current.from > 0
@@ -2518,7 +2522,8 @@ export default function PageEditPage() {
                 : viewRef.current?.state.selection.main.from && viewRef.current.state.selection.main.from > 0
                 ? viewRef.current.state.selection.main.from
                 : lastSelectionRef.current?.from ?? viewRef.current?.state.doc.length;
-            insertText(`\n![${alt}](${url})\n`, targetPos);
+            const ref = item?.id ? formatMediaRef(item.id, targetRef) : targetRef;
+            insertText(`\n![${alt}](${ref})\n`, targetPos);
           }}
         />
       )}

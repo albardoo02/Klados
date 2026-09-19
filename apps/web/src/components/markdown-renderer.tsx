@@ -7,6 +7,7 @@ import remarkMath from 'remark-math';
 import rehypeHighlight from 'rehype-highlight';
 import rehypeKatex from 'rehype-katex';
 import { Check, Copy } from 'lucide-react';
+import { resolveMediaUrl } from '@/lib/media';
 
 interface MarkdownRendererProps {
   content: string;
@@ -219,13 +220,22 @@ export function MarkdownRenderer({ content, className = '' }: MarkdownRendererPr
             );
           },
           img({ src, alt, ...props }) {
+            const rawSrc = typeof src === 'string' ? src : '';
+            const resolvedSrc = resolveMediaUrl(rawSrc);
             return (
               <figure className="my-6">
                 <img
-                  src={src}
+                  src={resolvedSrc}
                   alt={alt || 'image'}
                   className="rounded-xl shadow-md max-w-full h-auto mx-auto border border-border transition-transform hover:scale-[1.01]"
                   loading="lazy"
+                  onError={(e) => {
+                    const target = e.currentTarget;
+                    if (rawSrc && target.src !== rawSrc && !target.dataset.triedFallback) {
+                      target.dataset.triedFallback = 'true';
+                      target.src = rawSrc;
+                    }
+                  }}
                   {...props}
                 />
                 {alt && (

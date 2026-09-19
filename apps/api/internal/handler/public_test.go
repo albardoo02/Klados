@@ -101,3 +101,48 @@ func TestPublicRoutesSetup(t *testing.T) {
 		}
 	}
 }
+
+func TestMediaServeByIDRoute(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+
+	api := r.Group("/v1")
+	public := api.Group("/public")
+	{
+		public.GET("/media/:id", func(c *gin.Context) {
+			id := c.Param("id")
+			c.JSON(http.StatusOK, gin.H{"id": id, "served": true})
+		})
+	}
+	api.GET("/media/:id", func(c *gin.Context) {
+		id := c.Param("id")
+		c.JSON(http.StatusOK, gin.H{"id": id, "served_api": true})
+	})
+
+	testID := "e5e77619-5287-4c1a-9831-1e639159bf67"
+	// Test 1: GET /v1/public/media/:id
+	{
+		req, _ := http.NewRequest("GET", "/v1/public/media/"+testID, nil)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d", w.Code)
+		}
+		var resp map[string]interface{}
+		_ = json.Unmarshal(w.Body.Bytes(), &resp)
+		if resp["id"] != testID || resp["served"] != true {
+			t.Fatalf("unexpected response: %+v", resp)
+		}
+	}
+
+	// Test 2: GET /v1/media/:id
+	{
+		req, _ := http.NewRequest("GET", "/v1/media/"+testID, nil)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d", w.Code)
+		}
+	}
+}
+
