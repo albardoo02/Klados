@@ -1,7 +1,11 @@
 import type { Metadata } from 'next';
 import SitePageClient from './SitePageClient';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8080/v1';
+const API_BASE =
+  process.env.INTERNAL_API_URL ||
+  (process.env.NEXT_PUBLIC_API_URL && !process.env.NEXT_PUBLIC_API_URL.startsWith('/')
+    ? process.env.NEXT_PUBLIC_API_URL
+    : 'http://127.0.0.1:8080/v1');
 
 interface Props {
   params: Promise<{ slug: string; pageSlug?: string[] }>;

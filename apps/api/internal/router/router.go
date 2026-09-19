@@ -28,9 +28,25 @@ func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
 	// CORS
 	origins := strings.Split(cfg.AllowOrigins, ",")
 	r.Use(cors.New(cors.Config{
-		AllowOrigins:     origins,
+		AllowOriginFunc: func(origin string) bool {
+			// 設定されたオリジンを検証
+			for _, o := range origins {
+				trimmed := strings.TrimSpace(o)
+				if trimmed == "*" || trimmed == origin {
+					return true
+				}
+			}
+			// ローカルおよびCloudflare Tunnel等のトンネルアクセスを許容
+			if strings.HasSuffix(origin, ".trycloudflare.com") ||
+				strings.Contains(origin, "localhost") ||
+				strings.Contains(origin, "127.0.0.1") {
+				return true
+			}
+			return false
+		},
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization", "Accept", "X-Requested-With"},
+		ExposeHeaders:    []string{"Content-Length"},
 		AllowCredentials: true,
 	}))
 

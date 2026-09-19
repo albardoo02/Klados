@@ -595,9 +595,22 @@ export default function PageEditPage() {
     });
 
     // 2. WebSocket (バックエンド ws://localhost:8080/v1/ws/pages/:id)
-    const wsHost = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
-    const wsUrl =
-      process.env.NEXT_PUBLIC_WS_URL || `ws://${wsHost}:8080/v1/ws/pages/${id}`;
+    const isBrowser = typeof window !== 'undefined';
+    const isSecure = isBrowser && window.location.protocol === 'https:';
+    const wsProto = isSecure ? 'wss:' : 'ws:';
+    const wsHost = isBrowser ? window.location.hostname : 'localhost';
+    
+    let wsUrl = process.env.NEXT_PUBLIC_WS_URL;
+    if (!wsUrl) {
+      if (isBrowser && (wsHost === 'localhost' || wsHost === '127.0.0.1')) {
+        wsUrl = `ws://${wsHost}:8080/v1/ws/pages/${id}`;
+      } else if (isBrowser) {
+        // Cloudflare Tunnel 等の外部ホスト時 (同一ポート/プロキシを試行)
+        wsUrl = `${wsProto}//${window.location.host}/v1/ws/pages/${id}`;
+      } else {
+        wsUrl = `ws://localhost:8080/v1/ws/pages/${id}`;
+      }
+    }
 
     let ws: WebSocket | null = null;
     try {

@@ -1,7 +1,25 @@
 import axios from 'axios';
 import JSZip from 'jszip';
 
-export const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8080/v1';
+const getApiBase = () => {
+  if (typeof window !== 'undefined') {
+    // ブラウザ上: Next.js の rewrites プロキシを経由する相対パス '/v1' を使用
+    // これにより、Cloudflare Tunnel や外部ホストからのアクセス時でも Mixed Content や CORS が発生しない
+    if (process.env.NEXT_PUBLIC_API_URL && !process.env.NEXT_PUBLIC_API_URL.includes('localhost:8080')) {
+      return process.env.NEXT_PUBLIC_API_URL;
+    }
+    return '/v1';
+  }
+  // サーバーサイド (SSR): Node.js の fetch 用にローカルの内部完全URLを使用
+  return (
+    process.env.INTERNAL_API_URL ||
+    (process.env.NEXT_PUBLIC_API_URL && !process.env.NEXT_PUBLIC_API_URL.startsWith('/')
+      ? process.env.NEXT_PUBLIC_API_URL
+      : 'http://127.0.0.1:8080/v1')
+  );
+};
+
+export const API_BASE = getApiBase();
 
 export const api = axios.create({
   baseURL: API_BASE,
