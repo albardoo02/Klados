@@ -90,6 +90,7 @@ export default function PageEditPage() {
   const viewRef = useRef<EditorView | null>(null);
   const keybindingCompartmentRef = useRef<Compartment | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const lastSelectionRef = useRef<{ from: number; to: number } | null>(null);
 
   const [preview, setPreview] = useState('');
   const [tab, setTab] = useState<'edit' | 'preview' | 'split'>('split');
@@ -204,19 +205,38 @@ export default function PageEditPage() {
   });
 
   // --- テキスト挿入ユーティリティ ---
-  const insertText = (textToInsert: string) => {
+  const insertText = (textToInsert: string, explicitPos?: number) => {
     if (!viewRef.current) return;
     const view = viewRef.current;
     const { state, dispatch } = view;
-    const selection = state.selection.main;
-    const from = selection.from;
-    const to = selection.to;
+
+    let from = 0;
+    let to = 0;
+
+    if (typeof explicitPos === 'number' && explicitPos >= 0 && explicitPos <= state.doc.length) {
+      from = explicitPos;
+      to = explicitPos;
+    } else if (view.hasFocus) {
+      const selection = state.selection.main;
+      from = selection.from;
+      to = selection.to;
+    } else if (lastSelectionRef.current) {
+      from = Math.min(lastSelectionRef.current.from, state.doc.length);
+      to = Math.min(lastSelectionRef.current.to, state.doc.length);
+    } else {
+      from = state.doc.length;
+      to = state.doc.length;
+    }
 
     dispatch({
       changes: { from, to, insert: textToInsert },
       selection: { anchor: from + textToInsert.length },
       scrollIntoView: true,
     });
+    lastSelectionRef.current = {
+      from: from + textToInsert.length,
+      to: from + textToInsert.length,
+    };
     view.focus();
   };
 
@@ -622,6 +642,10 @@ export default function PageEditPage() {
         EditorView.lineWrapping,
         keybindingCompartment.of(keybinding === 'vim' ? vim() : []),
         EditorView.updateListener.of((update) => {
+          lastSelectionRef.current = {
+            from: update.state.selection.main.from,
+            to: update.state.selection.main.to,
+          };
           if (update.docChanged) {
             const content = update.state.doc.toString();
             setPreview(content);
@@ -745,7 +769,7 @@ export default function PageEditPage() {
   };
 
   // 画像アップロード処理
-  const handleUploadFile = async (file: File) => {
+  const handleUploadFile = async (file: File, targetPos?: number) => {
     const siteId = page?.site_id || page?.siteId;
     if (!siteId) {
       alert('サイトIDが見つかりません');
@@ -769,7 +793,7 @@ export default function PageEditPage() {
 
       const altText = file.name.replace(/\.[^/.]+$/, '');
       const markdownImage = `\n![${altText}](${cdnUrl})\n`;
-      insertText(markdownImage);
+      insertText(markdownImage, targetPos);
     } catch (err: any) {
       console.error('画像アップロード失敗:', err);
       const msg = err.response?.data?.error || err.message || '画像のアップロードに失敗しました';
@@ -807,12 +831,22 @@ export default function PageEditPage() {
     e.stopPropagation();
     setIsDragging(false);
 
+    // ドロップされた正確な座標位置を取得
+    let dropPos: number | undefined;
+    if (viewRef.current) {
+      const pos = viewRef.current.posAtCoords({ x: e.clientX, y: e.clientY });
+      if (pos !== null) {
+        dropPos = pos;
+        lastSelectionRef.current = { from: pos, to: pos };
+      }
+    }
+
     const files = e.dataTransfer.files;
     if (files && files.length > 0) {
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
         if (file.type.startsWith('image/')) {
-          await handleUploadFile(file);
+          await handleUploadFile(file, dropPos);
         }
       }
     }
@@ -1403,7 +1437,15 @@ export default function PageEditPage() {
           />
           <button
             type="button"
-            onClick={() => fileInputRef.current?.click()}
+            onClick={() => {
+              if (viewRef.current) {
+                lastSelectionRef.current = {
+                  from: viewRef.current.state.selection.main.from,
+                  to: viewRef.current.state.selection.main.to,
+                };
+              }
+              fileInputRef.current?.click();
+            }}
             disabled={isUploading}
             className="flex items-center gap-1.5 px-2 py-1 rounded bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors cursor-pointer font-medium disabled:opacity-50"
             title="画像を直接アップロードして挿入"
@@ -1419,7 +1461,15 @@ export default function PageEditPage() {
           {/* メディアライブラリから選択 */}
           <button
             type="button"
-            onClick={() => setMediaLibraryOpen(true)}
+            onClick={() => {
+              if (viewRef.current) {
+                lastSelectionRef.current = {
+                  from: viewRef.current.state.selection.main.from,
+                  to: viewRef.current.state.selection.main.to,
+                };
+              }
+              setMediaLibraryOpen(true);
+            }}
             className="flex items-center gap-1.5 px-2 py-1 rounded bg-secondary hover:bg-secondary/80 text-secondary-foreground transition-colors cursor-pointer font-medium"
             title="アップロード済みメディアから選択"
           >

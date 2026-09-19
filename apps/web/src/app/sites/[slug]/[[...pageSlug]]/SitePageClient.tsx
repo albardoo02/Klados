@@ -229,6 +229,47 @@ const FONT_CONFIG: Record<string, { url: string; family: string }> = {
   },
 };
 
+/**
+ * 記事ヘッダーに既にページタイトル(H1)が表示されているため、
+ * 本文中の先頭またはタイトルと同一のH1見出しをスマートに除去してタイトル重複を防ぐ
+ */
+function cleanArticleContent(content?: string, pageTitle?: string): string {
+  if (!content) return '';
+
+  const normalizedTitle = (pageTitle || '').trim().toLowerCase();
+  const lines = content.split('\n');
+  let removed = false;
+  const filteredLines: string[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    // まだ見出しを除去していない状態で H1 見出し（# 見出し）に遭遇した場合
+    if (!removed && trimmed.startsWith('# ')) {
+      const headingText = trimmed.replace(/^#\s+/, '').trim().toLowerCase();
+      // 1) ページタイトルと一致している場合、確実に除去
+      // 2) または、これまでに本文テキスト（画像・空行・HTMLコメント等以外）がまだ出現していない最初の見出しの場合も除去
+      const hasPriorText = filteredLines.some(
+        (l) =>
+          l.trim().length > 0 &&
+          !l.trim().startsWith('![') &&
+          !l.trim().startsWith('<img') &&
+          !l.trim().startsWith('<!--')
+      );
+
+      if ((normalizedTitle && headingText === normalizedTitle) || !hasPriorText) {
+        removed = true;
+        continue;
+      }
+    }
+
+    filteredLines.push(line);
+  }
+
+  return filteredLines.join('\n');
+}
+
 export default function SitePageClient() {
   const params = useParams<{ slug: string; pageSlug?: string[] }>();
   const siteSlug = params.slug;
@@ -1021,7 +1062,7 @@ export default function SitePageClient() {
 
               {/* Markdown コンテンツ */}
               <div className="py-4">
-                <MarkdownRenderer content={activePage.content.replace(/^#[^\n]*\n?/, '')} />
+                <MarkdownRenderer content={cleanArticleContent(activePage.content, activePage.title)} />
               </div>
 
               {/* 記事下部コメントエリア */}
