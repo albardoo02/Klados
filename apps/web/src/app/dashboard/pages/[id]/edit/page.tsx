@@ -8,6 +8,7 @@ import { EditorView, basicSetup } from 'codemirror';
 import { markdown } from '@codemirror/lang-markdown';
 import { EditorState, Compartment } from '@codemirror/state';
 import { vim } from '@replit/codemirror-vim';
+import { keymap } from '@codemirror/view';
 import { MarkdownRenderer } from '@/components/markdown-renderer';
 import { DiffViewer } from '@/components/diff-viewer';
 import { MediaLibraryModal } from '@/components/media-library-modal';
@@ -106,8 +107,20 @@ export default function PageEditPage() {
   const [isReverting, setIsReverting] = useState(false);
   const [revertSuccessMsg, setRevertSuccessMsg] = useState<string | null>(null);
 
-  // エディタ設定: Vim / Standard
-  const [keybinding, setKeybinding] = useState<'standard' | 'vim'>('standard');
+  // エディタ設定: Vim / Standard / nano
+  const [keybinding, setKeybinding] = useState<'standard' | 'vim' | 'nano'>('standard');
+
+  // nano エディタ用ステート & Ref
+  const [nanoStatusMessage, setNanoStatusMessage] = useState<string>(
+    'GNU nano 7.2 へようこそ - ^G でヘルプを表示'
+  );
+  const [nanoPrompt, setNanoPrompt] = useState<{
+    type: 'search' | 'goto' | 'replace' | 'exit';
+    value: string;
+    replaceValue?: string;
+  } | null>(null);
+  const [nanoHelpOpen, setNanoHelpOpen] = useState(false);
+  const nanoCutBufferRef = useRef<string>('');
 
   // スラッシュコマンド メニューステート
   const [slashMenuOpen, setSlashMenuOpen] = useState(false);
@@ -155,7 +168,7 @@ export default function PageEditPage() {
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const stored = localStorage.getItem('klados_editor_keybinding');
-      if (stored === 'vim' || stored === 'standard') {
+      if (stored === 'vim' || stored === 'standard' || stored === 'nano') {
         setKeybinding(stored);
       }
     }
@@ -627,6 +640,359 @@ export default function PageEditPage() {
     }
   };
 
+  // 手動保存処理
+  const handleManualSave = () => {
+    if (viewRef.current) {
+      const currentDoc = viewRef.current.state.doc.toString();
+      if (saved && currentDoc === (page?.content ?? '')) {
+        return;
+      }
+      updateMutation.mutate(currentDoc);
+    }
+  };
+
+  // --- nano コマンド実装 ---
+  const executeNanoWriteOut = () => {
+    if (viewRef.current) {
+      const currentDoc = viewRef.current.state.doc.toString();
+      const lines = viewRef.current.state.doc.lines;
+      if (!saved || currentDoc !== (page?.content ?? '')) {
+        updateMutation.mutate(currentDoc);
+        setNanoStatusMessage(`[ ${lines} 行を書き込みました ]`);
+      } else {
+        setNanoStatusMessage(`[ 変更はありません (${lines} 行) ]`);
+      }
+    }
+  };
+
+  const executeNanoExit = () => {
+    if (!saved && viewRef.current && viewRef.current.state.doc.toString() !== (page?.content ?? '')) {
+      setNanoPrompt({ type: 'exit', value: '' });
+    } else {
+      const siteId = page?.site_id || page?.siteId;
+      if (siteId) {
+        router.push(`/dashboard/sites/${siteId}`);
+      }
+    }
+  };
+
+  const executeNanoCut = (view: EditorView) => {
+    const selection = view.state.selection.main;
+    if (selection.from !== selection.to) {
+      const text = view.state.sliceDoc(selection.from, selection.to);
+      nanoCutBufferRef.current = text;
+      view.dispatch({
+        changes: { from: selection.from, to: selection.to, insert: '' },
+        selection: { anchor: selection.from },
+      });
+      setNanoStatusMessage(`[ 選択範囲 (${text.length} 文字) をカットバッファに切り取りました ]`);
+    } else {
+      const line = view.state.doc.lineAt(selection.from);
+      let from = line.from;
+      let to = line.to;
+      if (to < view.state.doc.length) {
+        to += 1;
+      } else if (from > 0) {
+        from -= 1;
+      }
+      const text = view.state.sliceDoc(from, to);
+      nanoCutBufferRef.current = text;
+      view.dispatch({
+        changes: { from, to, insert: '' },
+        selection: { anchor: from },
+      });
+      setNanoStatusMessage(`[ 1 行をカットバッファに切り取りました ]`);
+    }
+  };
+
+  const executeNanoPaste = (view: EditorView) => {
+    if (!nanoCutBufferRef.current) {
+      setNanoStatusMessage('[ カットバッファは空です ]');
+      return;
+    }
+    const text = nanoCutBufferRef.current;
+    const pos = view.state.selection.main.from;
+    view.dispatch({
+      changes: { from: pos, to: pos, insert: text },
+      selection: { anchor: pos + text.length },
+      scrollIntoView: true,
+    });
+    setNanoStatusMessage(`[ カットバッファから ${text.length} 文字を貼り付けました ]`);
+  };
+
+  const executeNanoCurPos = (view: EditorView) => {
+    const pos = view.state.selection.main.from;
+    const line = view.state.doc.lineAt(pos);
+    const lineNo = line.number;
+    const totalLines = view.state.doc.lines;
+    const col = pos - line.from + 1;
+    const totalChars = view.state.doc.length;
+    const pct = totalLines > 0 ? Math.round((lineNo / totalLines) * 100) : 100;
+    setNanoStatusMessage(
+      `行 ${lineNo}/${totalLines} (${pct}%), 列 ${col}/${line.length + 1}, 文字 ${pos}/${totalChars}`
+    );
+  };
+
+  const openNanoSearch = () => {
+    setNanoPrompt({ type: 'search', value: '' });
+  };
+
+  const executeNanoSearchNext = (query: string) => {
+    if (!viewRef.current || !query) return;
+    const view = viewRef.current;
+    const doc = view.state.doc.toString();
+    const currentPos = view.state.selection.main.to;
+    let idx = doc.toLowerCase().indexOf(query.toLowerCase(), currentPos);
+    if (idx === -1) {
+      idx = doc.toLowerCase().indexOf(query.toLowerCase(), 0);
+    }
+    if (idx !== -1) {
+      view.dispatch({
+        selection: { anchor: idx, head: idx + query.length },
+        scrollIntoView: true,
+      });
+      setNanoStatusMessage(`[ "${query}" の一致箇所へ移動しました ]`);
+    } else {
+      setNanoStatusMessage(`[ "${query}" は見つかりませんでした ]`);
+    }
+  };
+
+  const openNanoReplace = () => {
+    setNanoPrompt({ type: 'replace', value: '', replaceValue: '' });
+  };
+
+  const executeNanoReplaceOne = (query: string, replaceWith: string) => {
+    if (!viewRef.current || !query) return;
+    const view = viewRef.current;
+    const doc = view.state.doc.toString();
+    const currentPos = view.state.selection.main.from;
+    let idx = doc.indexOf(query, currentPos);
+    if (idx === -1) {
+      idx = doc.indexOf(query, 0);
+    }
+    if (idx !== -1) {
+      view.dispatch({
+        changes: { from: idx, to: idx + query.length, insert: replaceWith },
+        selection: { anchor: idx + replaceWith.length },
+        scrollIntoView: true,
+      });
+      setNanoStatusMessage(`[ "${query}" を "${replaceWith}" に置換しました ]`);
+    } else {
+      setNanoStatusMessage(`[ "${query}" は見つかりませんでした ]`);
+    }
+  };
+
+  const executeNanoReplaceAll = (query: string, replaceWith: string) => {
+    if (!viewRef.current || !query) return;
+    const view = viewRef.current;
+    const doc = view.state.doc.toString();
+    const count = doc.split(query).length - 1;
+    if (count > 0) {
+      const newDoc = doc.split(query).join(replaceWith);
+      view.dispatch({
+        changes: { from: 0, to: doc.length, insert: newDoc },
+        scrollIntoView: true,
+      });
+      setNanoStatusMessage(`[ ${count} 箇所を一括置換しました ]`);
+      setNanoPrompt(null);
+    } else {
+      setNanoStatusMessage(`[ "${query}" は見つかりませんでした ]`);
+    }
+  };
+
+  const openNanoGoto = () => {
+    setNanoPrompt({ type: 'goto', value: '' });
+  };
+
+  const executeNanoGoToLine = (lineNum: number) => {
+    if (!viewRef.current || isNaN(lineNum)) return;
+    const view = viewRef.current;
+    const totalLines = view.state.doc.lines;
+    const clamped = Math.max(1, Math.min(lineNum, totalLines));
+    const targetLine = view.state.doc.line(clamped);
+    view.dispatch({
+      selection: { anchor: targetLine.from },
+      scrollIntoView: true,
+    });
+    setNanoStatusMessage(`[ 行 ${clamped} に移動しました ]`);
+    setNanoPrompt(null);
+    view.focus();
+  };
+
+  const executeNanoPrevPage = (view: EditorView) => {
+    const pos = view.state.selection.main.from;
+    const currentLine = view.state.doc.lineAt(pos);
+    const targetLineNum = Math.max(1, currentLine.number - 20);
+    const target = view.state.doc.line(targetLineNum);
+    view.dispatch({
+      selection: { anchor: target.from },
+      scrollIntoView: true,
+    });
+    setNanoStatusMessage(`[ 前ページへスクロール (行 ${targetLineNum}) ]`);
+  };
+
+  const executeNanoNextPage = (view: EditorView) => {
+    const pos = view.state.selection.main.from;
+    const currentLine = view.state.doc.lineAt(pos);
+    const targetLineNum = Math.min(view.state.doc.lines, currentLine.number + 20);
+    const target = view.state.doc.line(targetLineNum);
+    view.dispatch({
+      selection: { anchor: target.from },
+      scrollIntoView: true,
+    });
+    setNanoStatusMessage(`[ 次ページへスクロール (行 ${targetLineNum}) ]`);
+  };
+
+  const executeNanoJustify = (view: EditorView) => {
+    const pos = view.state.selection.main.from;
+    const line = view.state.doc.lineAt(pos);
+    const trimmed = line.text.trimEnd();
+    if (trimmed !== line.text) {
+      view.dispatch({
+        changes: { from: line.from, to: line.to, insert: trimmed },
+      });
+    }
+    setNanoStatusMessage('[ 行末の余白を整形しました ]');
+  };
+
+  const nanoActionsRef = useRef({
+    executeNanoWriteOut,
+    executeNanoExit,
+    executeNanoCut,
+    executeNanoPaste,
+    executeNanoCurPos,
+    openNanoSearch,
+    openNanoReplace,
+    openNanoGoto,
+    executeNanoPrevPage,
+    executeNanoNextPage,
+    executeNanoJustify,
+  });
+
+  useEffect(() => {
+    nanoActionsRef.current = {
+      executeNanoWriteOut,
+      executeNanoExit,
+      executeNanoCut,
+      executeNanoPaste,
+      executeNanoCurPos,
+      openNanoSearch,
+      openNanoReplace,
+      openNanoGoto,
+      executeNanoPrevPage,
+      executeNanoNextPage,
+      executeNanoJustify,
+    };
+  });
+
+  const getNanoKeymapExtension = () => {
+    return keymap.of([
+      {
+        key: 'Mod-o',
+        run: () => {
+          nanoActionsRef.current.executeNanoWriteOut();
+          return true;
+        },
+      },
+      {
+        key: 'Mod-s',
+        run: () => {
+          nanoActionsRef.current.executeNanoWriteOut();
+          return true;
+        },
+      },
+      {
+        key: 'Mod-k',
+        run: (view) => {
+          nanoActionsRef.current.executeNanoCut(view);
+          return true;
+        },
+      },
+      {
+        key: 'Mod-u',
+        run: (view) => {
+          nanoActionsRef.current.executeNanoPaste(view);
+          return true;
+        },
+      },
+      {
+        key: 'Mod-w',
+        run: () => {
+          nanoActionsRef.current.openNanoSearch();
+          return true;
+        },
+      },
+      {
+        key: 'Mod-\\',
+        run: () => {
+          nanoActionsRef.current.openNanoReplace();
+          return true;
+        },
+      },
+      {
+        key: 'Mod-g',
+        run: () => {
+          setNanoHelpOpen(true);
+          return true;
+        },
+      },
+      {
+        key: 'Mod-c',
+        run: (view) => {
+          if (view.state.selection.main.from !== view.state.selection.main.to) {
+            return false;
+          }
+          nanoActionsRef.current.executeNanoCurPos(view);
+          return true;
+        },
+      },
+      {
+        key: 'Mod-x',
+        run: (view) => {
+          if (view.state.selection.main.from !== view.state.selection.main.to) {
+            return false;
+          }
+          nanoActionsRef.current.executeNanoExit();
+          return true;
+        },
+      },
+      {
+        key: 'Mod-_',
+        run: () => {
+          nanoActionsRef.current.openNanoGoto();
+          return true;
+        },
+      },
+      {
+        key: 'Alt-g',
+        run: () => {
+          nanoActionsRef.current.openNanoGoto();
+          return true;
+        },
+      },
+      {
+        key: 'Mod-y',
+        run: (view) => {
+          nanoActionsRef.current.executeNanoPrevPage(view);
+          return true;
+        },
+      },
+      {
+        key: 'Mod-j',
+        run: (view) => {
+          nanoActionsRef.current.executeNanoJustify(view);
+          return true;
+        },
+      },
+    ]);
+  };
+
+  const getKeybindingExtension = (mode: 'standard' | 'vim' | 'nano') => {
+    if (mode === 'vim') return vim();
+    if (mode === 'nano') return getNanoKeymapExtension();
+    return [];
+  };
+
   // CodeMirror エディタ初期化
   useEffect(() => {
     if (!editorRef.current || !page || viewRef.current) return;
@@ -640,7 +1006,7 @@ export default function PageEditPage() {
         basicSetup,
         markdown(),
         EditorView.lineWrapping,
-        keybindingCompartment.of(keybinding === 'vim' ? vim() : []),
+        keybindingCompartment.of(getKeybindingExtension(keybinding)),
         EditorView.updateListener.of((update) => {
           lastSelectionRef.current = {
             from: update.state.selection.main.from,
@@ -682,7 +1048,7 @@ export default function PageEditPage() {
   }, [page]);
 
   // キーバインドの動的切り替え
-  const handleToggleKeybinding = (newMode: 'standard' | 'vim') => {
+  const handleToggleKeybinding = (newMode: 'standard' | 'vim' | 'nano') => {
     setKeybinding(newMode);
     if (typeof window !== 'undefined') {
       localStorage.setItem('klados_editor_keybinding', newMode);
@@ -691,7 +1057,7 @@ export default function PageEditPage() {
     if (viewRef.current && keybindingCompartmentRef.current) {
       viewRef.current.dispatch({
         effects: keybindingCompartmentRef.current.reconfigure(
-          newMode === 'vim' ? vim() : []
+          getKeybindingExtension(newMode)
         ),
       });
     }
@@ -712,15 +1078,6 @@ export default function PageEditPage() {
     return () => clearInterval(timer);
   }, [saved, page?.content, updateMutation]);
 
-  const handleManualSave = () => {
-    if (viewRef.current) {
-      const currentDoc = viewRef.current.state.doc.toString();
-      if (saved && currentDoc === (page?.content ?? '')) {
-        return;
-      }
-      updateMutation.mutate(currentDoc);
-    }
-  };
 
   // バージョン復元処理
   const handleRestoreVersion = async (targetVer: PageVersion) => {
@@ -970,7 +1327,7 @@ export default function PageEditPage() {
 
           <div className="h-4 w-px bg-border hidden sm:block" />
 
-          {/* キーバインド切り替え (通常 / Vim) */}
+          {/* キーバインド切り替え (通常 / Vim / nano) */}
           <div className="flex border border-border rounded-lg overflow-hidden text-xs bg-muted/20 p-0.5">
             <button
               type="button"
@@ -996,6 +1353,19 @@ export default function PageEditPage() {
             >
               <Terminal className="size-3" />
               <span>Vim</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleToggleKeybinding('nano')}
+              className={`px-2 py-1 rounded transition-colors cursor-pointer text-[11px] font-medium flex items-center gap-1 ${
+                keybinding === 'nano'
+                  ? 'bg-emerald-600 text-white shadow-xs font-bold'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+              title="GNU nano キーバインド (^O: 保存, ^K: 切り取り, ^U: 貼り付け, ^W: 検索, ^X: 終了)"
+            >
+              <Terminal className="size-3" />
+              <span>nano</span>
             </button>
           </div>
 
@@ -1556,6 +1926,26 @@ export default function PageEditPage() {
               </div>
             )}
 
+            {/* Nano ヘッダー */}
+            {keybinding === 'nano' && (
+              <div className="px-4 py-1.5 bg-slate-900 text-slate-200 dark:bg-black border-b border-slate-800 font-mono text-xs flex items-center justify-between select-none">
+                <span className="font-bold text-emerald-400 flex items-center gap-1.5">
+                  <Terminal className="size-3.5" />
+                  <span>GNU nano 7.2</span>
+                </span>
+                <span className="font-medium text-slate-300 truncate max-w-[200px] sm:max-w-xs">
+                  {page?.slug ? `${page.slug}.md` : '新規ページ.md'}
+                </span>
+                <span className="text-[11px]">
+                  {saved ? (
+                    <span className="text-slate-400">未変更</span>
+                  ) : (
+                    <span className="text-amber-400 font-bold">[ 変更あり ]</span>
+                  )}
+                </span>
+              </div>
+            )}
+
             <div
               ref={editorRef}
               className="flex-1 overflow-auto focus:outline-none [&_.cm-editor]:h-full [&_.cm-editor]:text-base [&_.cm-scroller]:font-mono [&_.cm-content]:p-6"
@@ -1571,6 +1961,299 @@ export default function PageEditPage() {
                   <span>Esc: Normal | i: Insert | :w: 保存</span>
                 </div>
                 <span>Vim エミュレーション有効</span>
+              </div>
+            )}
+
+            {/* nano コマンドバー & ショートカット */}
+            {keybinding === 'nano' && (
+              <div className="bg-slate-900 text-slate-100 dark:bg-black border-t border-slate-800 font-mono select-none">
+                {/* ステータス / プロンプト行 */}
+                <div className="px-3 py-1 bg-slate-950 border-b border-slate-800 text-xs flex items-center justify-between min-h-[30px]">
+                  {nanoPrompt?.type === 'search' ? (
+                    <div className="flex items-center gap-2 w-full text-slate-200">
+                      <span className="text-emerald-400 font-semibold shrink-0">検索 (Where Is):</span>
+                      <input
+                        type="text"
+                        autoFocus
+                        value={nanoPrompt.value}
+                        onChange={(e) => setNanoPrompt({ ...nanoPrompt, value: e.target.value })}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            executeNanoSearchNext(nanoPrompt.value);
+                          } else if (e.key === 'Escape') {
+                            setNanoPrompt(null);
+                            viewRef.current?.focus();
+                          }
+                        }}
+                        placeholder="検索文字列..."
+                        className="bg-slate-800 text-white text-xs px-2 py-0.5 rounded border border-slate-700 outline-none flex-1 max-w-sm"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => executeNanoSearchNext(nanoPrompt.value)}
+                        className="px-2 py-0.5 bg-emerald-700 hover:bg-emerald-600 text-white rounded text-[11px] cursor-pointer"
+                      >
+                        次へ (Enter)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNanoPrompt(null);
+                          viewRef.current?.focus();
+                        }}
+                        className="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-[11px] cursor-pointer"
+                      >
+                        取消 (Esc)
+                      </button>
+                    </div>
+                  ) : nanoPrompt?.type === 'goto' ? (
+                    <div className="flex items-center gap-2 w-full text-slate-200">
+                      <span className="text-emerald-400 font-semibold shrink-0">行番号を入力:</span>
+                      <input
+                        type="number"
+                        autoFocus
+                        value={nanoPrompt.value}
+                        onChange={(e) => setNanoPrompt({ ...nanoPrompt, value: e.target.value })}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            executeNanoGoToLine(parseInt(nanoPrompt.value, 10));
+                          } else if (e.key === 'Escape') {
+                            setNanoPrompt(null);
+                            viewRef.current?.focus();
+                          }
+                        }}
+                        placeholder="1"
+                        className="bg-slate-800 text-white text-xs px-2 py-0.5 rounded border border-slate-700 outline-none w-24"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => executeNanoGoToLine(parseInt(nanoPrompt.value, 10))}
+                        className="px-2 py-0.5 bg-emerald-700 hover:bg-emerald-600 text-white rounded text-[11px] cursor-pointer"
+                      >
+                        移動 (Enter)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNanoPrompt(null);
+                          viewRef.current?.focus();
+                        }}
+                        className="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-[11px] cursor-pointer"
+                      >
+                        取消 (Esc)
+                      </button>
+                    </div>
+                  ) : nanoPrompt?.type === 'replace' ? (
+                    <div className="flex items-center gap-2 w-full text-slate-200 flex-wrap">
+                      <span className="text-emerald-400 font-semibold shrink-0">置換元:</span>
+                      <input
+                        type="text"
+                        autoFocus
+                        value={nanoPrompt.value}
+                        onChange={(e) => setNanoPrompt({ ...nanoPrompt, value: e.target.value })}
+                        placeholder="検索..."
+                        className="bg-slate-800 text-white text-xs px-2 py-0.5 rounded border border-slate-700 outline-none w-32"
+                      />
+                      <span className="text-emerald-400 font-semibold shrink-0">置換先:</span>
+                      <input
+                        type="text"
+                        value={nanoPrompt.replaceValue || ''}
+                        onChange={(e) => setNanoPrompt({ ...nanoPrompt, replaceValue: e.target.value })}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            executeNanoReplaceOne(nanoPrompt.value, nanoPrompt.replaceValue || '');
+                          } else if (e.key === 'Escape') {
+                            setNanoPrompt(null);
+                            viewRef.current?.focus();
+                          }
+                        }}
+                        placeholder="置換後..."
+                        className="bg-slate-800 text-white text-xs px-2 py-0.5 rounded border border-slate-700 outline-none w-32"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => executeNanoReplaceOne(nanoPrompt.value, nanoPrompt.replaceValue || '')}
+                        className="px-2 py-0.5 bg-emerald-700 hover:bg-emerald-600 text-white rounded text-[11px] cursor-pointer"
+                      >
+                        1件置換
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => executeNanoReplaceAll(nanoPrompt.value, nanoPrompt.replaceValue || '')}
+                        className="px-2 py-0.5 bg-emerald-800 hover:bg-emerald-700 text-white rounded text-[11px] cursor-pointer"
+                      >
+                        全て置換
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNanoPrompt(null);
+                          viewRef.current?.focus();
+                        }}
+                        className="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-[11px] cursor-pointer"
+                      >
+                        取消
+                      </button>
+                    </div>
+                  ) : nanoPrompt?.type === 'exit' ? (
+                    <div className="flex items-center gap-2 w-full text-slate-200">
+                      <span className="text-amber-400 font-semibold shrink-0">
+                        変更を保存して終了しますか？
+                      </span>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          handleManualSave();
+                          const siteId = page?.site_id || page?.siteId;
+                          if (siteId) router.push(`/dashboard/sites/${siteId}`);
+                        }}
+                        className="px-2 py-0.5 bg-emerald-700 hover:bg-emerald-600 text-white rounded text-[11px] font-bold cursor-pointer"
+                      >
+                        保存して終了 (Y)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const siteId = page?.site_id || page?.siteId;
+                          if (siteId) router.push(`/dashboard/sites/${siteId}`);
+                        }}
+                        className="px-2 py-0.5 bg-red-700 hover:bg-red-600 text-white rounded text-[11px] cursor-pointer"
+                      >
+                        破棄して終了 (N)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNanoPrompt(null);
+                          viewRef.current?.focus();
+                        }}
+                        className="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-[11px] cursor-pointer"
+                      >
+                        キャンセル (Esc)
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <span className="text-emerald-400 font-medium truncate">
+                        {nanoStatusMessage}
+                      </span>
+                      <span className="text-[10px] text-slate-400 hidden sm:inline">
+                        ^G: ヘルプ | ^O: 保存 | ^X: 終了
+                      </span>
+                    </>
+                  )}
+                </div>
+
+                {/* 2行ショートカットキーバー */}
+                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-x-2 gap-y-1 p-2 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setNanoHelpOpen(true)}
+                    className="flex items-center text-left py-0.5 px-1 rounded hover:bg-slate-800 transition-colors cursor-pointer"
+                  >
+                    <span className="bg-slate-100 text-slate-900 font-bold px-1 rounded text-[10px] mr-1.5 shrink-0">^G</span>
+                    <span className="text-slate-300 text-[11px] truncate">ヘルプ</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={executeNanoWriteOut}
+                    className="flex items-center text-left py-0.5 px-1 rounded hover:bg-slate-800 transition-colors cursor-pointer"
+                  >
+                    <span className="bg-slate-100 text-slate-900 font-bold px-1 rounded text-[10px] mr-1.5 shrink-0">^O</span>
+                    <span className="text-slate-300 text-[11px] truncate">保存</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={openNanoSearch}
+                    className="flex items-center text-left py-0.5 px-1 rounded hover:bg-slate-800 transition-colors cursor-pointer"
+                  >
+                    <span className="bg-slate-100 text-slate-900 font-bold px-1 rounded text-[10px] mr-1.5 shrink-0">^W</span>
+                    <span className="text-slate-300 text-[11px] truncate">検索</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (viewRef.current) executeNanoCut(viewRef.current);
+                    }}
+                    className="flex items-center text-left py-0.5 px-1 rounded hover:bg-slate-800 transition-colors cursor-pointer"
+                  >
+                    <span className="bg-slate-100 text-slate-900 font-bold px-1 rounded text-[10px] mr-1.5 shrink-0">^K</span>
+                    <span className="text-slate-300 text-[11px] truncate">行切取</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (viewRef.current) executeNanoJustify(viewRef.current);
+                    }}
+                    className="flex items-center text-left py-0.5 px-1 rounded hover:bg-slate-800 transition-colors cursor-pointer"
+                  >
+                    <span className="bg-slate-100 text-slate-900 font-bold px-1 rounded text-[10px] mr-1.5 shrink-0">^J</span>
+                    <span className="text-slate-300 text-[11px] truncate">段落整形</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (viewRef.current) executeNanoCurPos(viewRef.current);
+                    }}
+                    className="flex items-center text-left py-0.5 px-1 rounded hover:bg-slate-800 transition-colors cursor-pointer"
+                  >
+                    <span className="bg-slate-100 text-slate-900 font-bold px-1 rounded text-[10px] mr-1.5 shrink-0">^C</span>
+                    <span className="text-slate-300 text-[11px] truncate">位置表示</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={executeNanoExit}
+                    className="flex items-center text-left py-0.5 px-1 rounded hover:bg-slate-800 transition-colors cursor-pointer"
+                  >
+                    <span className="bg-slate-100 text-slate-900 font-bold px-1 rounded text-[10px] mr-1.5 shrink-0">^X</span>
+                    <span className="text-slate-300 text-[11px] truncate">終了</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMediaLibraryOpen(true)}
+                    className="flex items-center text-left py-0.5 px-1 rounded hover:bg-slate-800 transition-colors cursor-pointer"
+                  >
+                    <span className="bg-slate-100 text-slate-900 font-bold px-1 rounded text-[10px] mr-1.5 shrink-0">^R</span>
+                    <span className="text-slate-300 text-[11px] truncate">メディア</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={openNanoReplace}
+                    className="flex items-center text-left py-0.5 px-1 rounded hover:bg-slate-800 transition-colors cursor-pointer"
+                  >
+                    <span className="bg-slate-100 text-slate-900 font-bold px-1 rounded text-[10px] mr-1.5 shrink-0">^\</span>
+                    <span className="text-slate-300 text-[11px] truncate">置換</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (viewRef.current) executeNanoPaste(viewRef.current);
+                    }}
+                    className="flex items-center text-left py-0.5 px-1 rounded hover:bg-slate-800 transition-colors cursor-pointer"
+                  >
+                    <span className="bg-slate-100 text-slate-900 font-bold px-1 rounded text-[10px] mr-1.5 shrink-0">^U</span>
+                    <span className="text-slate-300 text-[11px] truncate">貼付け</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (viewRef.current) executeNanoPrevPage(viewRef.current);
+                    }}
+                    className="flex items-center text-left py-0.5 px-1 rounded hover:bg-slate-800 transition-colors cursor-pointer"
+                  >
+                    <span className="bg-slate-100 text-slate-900 font-bold px-1 rounded text-[10px] mr-1.5 shrink-0">^Y</span>
+                    <span className="text-slate-300 text-[11px] truncate">前頁</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={openNanoGoto}
+                    className="flex items-center text-left py-0.5 px-1 rounded hover:bg-slate-800 transition-colors cursor-pointer"
+                  >
+                    <span className="bg-slate-100 text-slate-900 font-bold px-1 rounded text-[10px] mr-1.5 shrink-0">^_</span>
+                    <span className="text-slate-300 text-[11px] truncate">指定行</span>
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -1785,6 +2468,83 @@ export default function PageEditPage() {
             insertText(`\n![${alt}](${url})\n`);
           }}
         />
+      )}
+
+      {/* GNU nano ヘルプモーダル */}
+      {nanoHelpOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-slate-900 text-slate-100 border border-slate-700 rounded-2xl w-full max-w-xl shadow-2xl overflow-hidden font-mono">
+            <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-950">
+              <div className="flex items-center gap-2">
+                <Terminal className="size-4 text-emerald-400" />
+                <h3 className="font-bold text-sm text-emerald-400">GNU nano 7.2 ヘルプガイド</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setNanoHelpOpen(false)}
+                className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition-colors cursor-pointer"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+            <div className="p-5 max-h-[70vh] overflow-y-auto space-y-4 text-xs">
+              <p className="text-slate-300">
+                nanoモードでは、ターミナル標準の GNU nano / Pico エディタと同様のキーボード操作が可能です。各キー、または下部ショートカットバーのクリックで実行できます。
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
+                <div className="p-2.5 rounded bg-slate-800/60 border border-slate-700/50">
+                  <span className="font-bold text-emerald-400">^O (Ctrl+O)</span>
+                  <p className="text-slate-300 mt-0.5">WriteOut: 現在の内容を保存</p>
+                </div>
+                <div className="p-2.5 rounded bg-slate-800/60 border border-slate-700/50">
+                  <span className="font-bold text-emerald-400">^X (Ctrl+X)</span>
+                  <p className="text-slate-300 mt-0.5">Exit: ページ編集を終了して戻る</p>
+                </div>
+                <div className="p-2.5 rounded bg-slate-800/60 border border-slate-700/50">
+                  <span className="font-bold text-emerald-400">^K (Ctrl+K)</span>
+                  <p className="text-slate-300 mt-0.5">Cut: 現在行または選択範囲を切り取り</p>
+                </div>
+                <div className="p-2.5 rounded bg-slate-800/60 border border-slate-700/50">
+                  <span className="font-bold text-emerald-400">^U (Ctrl+U)</span>
+                  <p className="text-slate-300 mt-0.5">Uncut: カットバッファを貼り付け</p>
+                </div>
+                <div className="p-2.5 rounded bg-slate-800/60 border border-slate-700/50">
+                  <span className="font-bold text-emerald-400">^W (Ctrl+W)</span>
+                  <p className="text-slate-300 mt-0.5">Where Is: ドキュメント内をキーワード検索</p>
+                </div>
+                <div className="p-2.5 rounded bg-slate-800/60 border border-slate-700/50">
+                  <span className="font-bold text-emerald-400">^\ (Ctrl+\)</span>
+                  <p className="text-slate-300 mt-0.5">Replace: 文字列の置換 (単一または全件)</p>
+                </div>
+                <div className="p-2.5 rounded bg-slate-800/60 border border-slate-700/50">
+                  <span className="font-bold text-emerald-400">^C (Ctrl+C)</span>
+                  <p className="text-slate-300 mt-0.5">Cur Pos: 現在の行・列・文字位置を表示</p>
+                </div>
+                <div className="p-2.5 rounded bg-slate-800/60 border border-slate-700/50">
+                  <span className="font-bold text-emerald-400">^_ (Ctrl+_) / Alt+G</span>
+                  <p className="text-slate-300 mt-0.5">Go To Line: 指定した行番号へ直接移動</p>
+                </div>
+                <div className="p-2.5 rounded bg-slate-800/60 border border-slate-700/50">
+                  <span className="font-bold text-emerald-400">^Y / ^V</span>
+                  <p className="text-slate-300 mt-0.5">Prev/Next Page: 前または次のページへスクロール</p>
+                </div>
+                <div className="p-2.5 rounded bg-slate-800/60 border border-slate-700/50">
+                  <span className="font-bold text-emerald-400">^J (Ctrl+J)</span>
+                  <p className="text-slate-300 mt-0.5">Justify: 行末の余白を整形</p>
+                </div>
+              </div>
+            </div>
+            <div className="px-5 py-3 border-t border-slate-800 bg-slate-950 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setNanoHelpOpen(false)}
+                className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg text-xs transition-colors cursor-pointer"
+              >
+                閉じる (Esc)
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
