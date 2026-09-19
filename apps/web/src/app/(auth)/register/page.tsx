@@ -3,11 +3,13 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { useTranslations } from 'next-intl';
 import { authApi } from '@/lib/api';
 import { useAuthStore } from '@/store/auth';
 import { SocialLogin } from '@/components/social-login';
 
 export default function RegisterPage() {
+  const t = useTranslations();
   const router = useRouter();
   const setAuth = useAuthStore((s) => s.setAuth);
   const [form, setForm] = useState({ email: '', username: '', password: '', display_name: '' });
@@ -24,7 +26,7 @@ export default function RegisterPage() {
       router.push('/dashboard');
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } } };
-      setError(e.response?.data?.error ?? '登録に失敗しました');
+      setError(e.response?.data?.error ?? t('auth.register.error_default'));
     } finally {
       setLoading(false);
     }
@@ -37,8 +39,8 @@ export default function RegisterPage() {
           <Link href="/" className="text-2xl font-black tracking-tight inline-block mb-1">
             Kla<span className="text-blue-600">dos</span>
           </Link>
-          <h1 className="text-xl font-bold text-slate-900">アカウント作成</h1>
-          <p className="text-xs text-slate-500 mt-1">無料ですぐにMarkdownサイトを作成できます</p>
+          <h1 className="text-xl font-bold text-slate-900">{t('auth.register.title')}</h1>
+          <p className="text-xs text-slate-500 mt-1">{t('auth.register.subtitle')}</p>
         </div>
 
         {error && (
@@ -51,7 +53,7 @@ export default function RegisterPage() {
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium mb-1">表示名</label>
+            <label className="block text-sm font-medium mb-1">{t('auth.display_name')}</label>
             <input
               type="text"
               value={form.display_name}
@@ -60,7 +62,7 @@ export default function RegisterPage() {
             />
           </div>
           <div>
-            <label className="block text-sm font-medium mb-1">ユーザー名</label>
+            <label className="block text-sm font-medium mb-1">{t('auth.username')}</label>
             <input
               type="text"
               required
@@ -71,7 +73,7 @@ export default function RegisterPage() {
             />
           </div>
           <div>
-            <label className="block text-sm font-medium mb-1">メールアドレス</label>
+            <label className="block text-sm font-medium mb-1">{t('auth.email')}</label>
             <input
               type="email"
               required
@@ -81,7 +83,7 @@ export default function RegisterPage() {
             />
           </div>
           <div>
-            <label className="block text-sm font-medium mb-1">パスワード (8文字以上)</label>
+            <label className="block text-sm font-medium mb-1">{t('auth.register.password_hint')}</label>
             <input
               type="password"
               required
@@ -96,13 +98,13 @@ export default function RegisterPage() {
             disabled={loading}
             className="w-full bg-blue-500 hover:bg-blue-600 text-white rounded-lg py-2 font-semibold transition-colors disabled:opacity-50"
           >
-            {loading ? '登録中...' : 'アカウント作成'}
+            {loading ? t('auth.register.submitting') : t('auth.register.submit')}
           </button>
         </form>
         <p className="text-center text-sm text-slate-500 mt-4">
-          すでにアカウントをお持ちの場合は{' '}
+          {t('auth.register.already_have_account')}{' '}
           <Link href="/login" className="text-blue-500 hover:underline">
-            ログイン
+            {t('auth.register.login_link')}
           </Link>
         </p>
       </div>

@@ -30,7 +30,11 @@ import {
   Type,
   Code2,
   Users,
+  Settings2,
+  Menu,
 } from 'lucide-react';
+import { SidebarEditorModal } from '@/components/wiki/sidebar-editor-modal';
+import { SidebarSection } from '@/types/sidebar';
 
 interface SiteDetails {
   id: string;
@@ -150,6 +154,9 @@ export default function SiteSettingsPage() {
 
   // メディアライブラリ (OGP画像選択用)
   const [mediaLibraryOpen, setMediaLibraryOpen] = useState(false);
+
+  // サイドバー編集モーダル
+  const [sidebarEditorOpen, setSidebarEditorOpen] = useState(false);
 
   const { data: site, isLoading } = useQuery<SiteDetails>({
     queryKey: ['site', id],
@@ -755,7 +762,53 @@ export default function SiteSettingsPage() {
           </div>
         </div>
 
-        {/* 5. SEO & OGP 設定 */}
+        {/* 5. サイドバー・ナビゲーション設定 (MediaWiki:Sidebar) */}
+        <div className="bg-card border border-border rounded-2xl p-6 shadow-xs space-y-5">
+          <div className="flex items-center justify-between pb-3 border-b border-border">
+            <div className="flex items-center gap-2">
+              <Menu className="size-5 text-indigo-500" />
+              <div>
+                <h2 className="text-base font-bold">サイドバー・ナビゲーション設定 (MediaWiki:Sidebar)</h2>
+                <p className="text-xs text-muted-foreground">
+                  サイト閲覧時に左側に表示されるセクション見出しやリンク、外部リンクをカスタマイズします
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setSidebarEditorOpen(true)}
+              className="inline-flex items-center gap-1.5 px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl text-xs font-semibold shadow-xs transition-colors cursor-pointer"
+            >
+              <Settings2 className="size-3.5" />
+              <span>サイドバーを編集</span>
+            </button>
+          </div>
+
+          <div className="p-4 rounded-xl bg-muted/40 border border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+            <div>
+              <span className="font-semibold text-foreground block">
+                現在のサイドバー構成:
+              </span>
+              <span className="text-muted-foreground">
+                {form.settings?.sidebar_sections && form.settings.sidebar_sections.length > 0
+                  ? `${form.settings.sidebar_sections.length} 個のセクションが設定されています`
+                  : 'デフォルト (全ページを「ナビゲーション」に自動一覧表示)'}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setSidebarEditorOpen(true)}
+                className="px-3 py-1.5 rounded-lg border border-border hover:bg-muted text-foreground font-medium transition-colors cursor-pointer"
+              >
+                ビジュアル / Wikiテキスト編集を開く
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* 6. SEO & OGP 設定 */}
         <div className="bg-card border border-border rounded-2xl p-6 shadow-xs space-y-5">
           <div className="flex items-center gap-2 pb-3 border-b border-border">
             <Share2 className="size-5 text-indigo-500" />
@@ -1000,6 +1053,27 @@ export default function SiteSettingsPage() {
           setForm((prev) => ({
             ...prev,
             settings: { ...prev.settings, ogp_image: url },
+          }));
+        }}
+      />
+
+      {/* サイドバー編集モーダル (MediaWiki:Sidebar) */}
+      <SidebarEditorModal
+        isOpen={sidebarEditorOpen}
+        onClose={() => setSidebarEditorOpen(false)}
+        siteId={id}
+        siteSlug={form.slug || site?.slug || ''}
+        currentSections={form.settings?.sidebar_sections}
+        showToolsSection={form.settings?.sidebar_show_tools ?? true}
+        availablePages={pages}
+        onSaved={(newSections, newShowTools) => {
+          setForm((prev) => ({
+            ...prev,
+            settings: {
+              ...prev.settings,
+              sidebar_sections: newSections,
+              sidebar_show_tools: newShowTools,
+            },
           }));
         }}
       />

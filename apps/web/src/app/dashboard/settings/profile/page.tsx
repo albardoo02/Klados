@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
+import { useTranslations } from 'next-intl';
 import { useAuthStore } from '@/store/auth';
 import { authApi } from '@/lib/api';
 import {
@@ -12,7 +13,6 @@ import {
   Check,
   AlertCircle,
   ArrowLeft,
-  Sparkles,
   Save,
   Lock,
   Camera,
@@ -22,6 +22,7 @@ import {
 import { UserAvatar } from '@/components/user-avatar';
 
 export default function ProfileSettingsPage() {
+  const t = useTranslations('profile');
   const { user, updateUser } = useAuthStore();
 
   // プロフィール編集 state
@@ -54,12 +55,12 @@ export default function ProfileSettingsPage() {
     if (!file) return;
 
     if (!file.type.startsWith('image/')) {
-      setProfileError('画像ファイル (JPEG, PNG, WebP, GIF) を選択してください');
+      setProfileError(t('avatar_error_type'));
       return;
     }
 
     if (file.size > 5 * 1024 * 1024) {
-      setProfileError('ファイルサイズは最大5MBまでです');
+      setProfileError(t('avatar_error_size'));
       return;
     }
 
@@ -73,11 +74,11 @@ export default function ProfileSettingsPage() {
       if (newUrl) {
         setAvatarUrl(newUrl);
         updateUser({ avatar_url: newUrl });
-        setProfileSuccess('プロフィールアイコンを更新しました！');
+        setProfileSuccess(t('avatar_success'));
         setTimeout(() => setProfileSuccess(''), 4000);
       }
     } catch (err: any) {
-      setProfileError(err?.response?.data?.error || 'アイコンのアップロードに失敗しました');
+      setProfileError(err?.response?.data?.error || t('avatar_error_upload'));
     } finally {
       setAvatarUploading(false);
       if (avatarInputRef.current) {
@@ -105,10 +106,10 @@ export default function ProfileSettingsPage() {
           avatar_url: updated.avatar_url,
         });
       }
-      setProfileSuccess('プロフィールを更新しました！');
+      setProfileSuccess(t('profile_success'));
       setTimeout(() => setProfileSuccess(''), 4000);
     } catch (err: any) {
-      setProfileError(err?.response?.data?.error || 'プロフィールの更新に失敗しました');
+      setProfileError(err?.response?.data?.error || t('profile_error'));
     } finally {
       setProfileLoading(false);
     }
@@ -122,13 +123,13 @@ export default function ProfileSettingsPage() {
     setPasswordError('');
 
     if (newPassword.length < 8) {
-      setPasswordError('新しいパスワードは8文字以上で入力してください');
+      setPasswordError(t('password_too_short'));
       setPasswordLoading(false);
       return;
     }
 
     if (newPassword !== confirmPassword) {
-      setPasswordError('新しいパスワードと確認用パスワードが一致しません');
+      setPasswordError(t('password_mismatch'));
       setPasswordLoading(false);
       return;
     }
@@ -138,13 +139,13 @@ export default function ProfileSettingsPage() {
         current_password: currentPassword,
         new_password: newPassword,
       });
-      setPasswordSuccess('パスワードを正常に変更しました！');
+      setPasswordSuccess(t('password_success'));
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
       setTimeout(() => setPasswordSuccess(''), 4000);
     } catch (err: any) {
-      setPasswordError(err?.response?.data?.error || 'パスワードの変更に失敗しました');
+      setPasswordError(err?.response?.data?.error || t('password_error'));
     } finally {
       setPasswordLoading(false);
     }
@@ -159,26 +160,19 @@ export default function ProfileSettingsPage() {
         <div>
           <div className="flex items-center gap-2 text-xs text-slate-500 mb-1.5">
             <Link href="/dashboard" className="hover:text-blue-600 transition-colors inline-flex items-center gap-1">
-              <ArrowLeft className="size-3" /> ダッシュボード
+              <ArrowLeft className="size-3" /> {t('breadcrumb_dashboard')}
             </Link>
             <span>/</span>
-            <span>個人設定</span>
+            <span>{t('breadcrumb_settings')}</span>
           </div>
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900">
-            アカウント・個人設定
+            {t('page_title')}
           </h1>
           <p className="text-sm text-slate-500 mt-1">
-            プロフィール情報の確認・編集やセキュリティ設定を管理できます。
+            {t('page_desc')}
           </p>
         </div>
 
-        {/* プランバッジ */}
-        <div className="flex items-center gap-2">
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wider bg-blue-50 text-blue-700 border border-blue-200">
-            <Sparkles className="size-3 text-blue-600" />
-            {user.plan} プラン
-          </span>
-        </div>
       </div>
 
       {/* 2カラム構成 */}
@@ -206,14 +200,14 @@ export default function ProfileSettingsPage() {
                 onClick={() => avatarInputRef.current?.click()}
                 disabled={avatarUploading}
                 className="absolute inset-0 rounded-full bg-black/40 text-white flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer backdrop-blur-xs"
-                title="アイコン画像を変更"
+                title={t('avatar_change')}
               >
                 {avatarUploading ? (
                   <Loader2 className="size-6 animate-spin" />
                 ) : (
                   <>
                     <Camera className="size-5" />
-                    <span className="text-[10px] font-medium mt-0.5">変更</span>
+                    <span className="text-[10px] font-medium mt-0.5">{t('avatar_change')}</span>
                   </>
                 )}
               </button>
@@ -231,7 +225,7 @@ export default function ProfileSettingsPage() {
                 ) : (
                   <Upload className="size-3 text-blue-600" />
                 )}
-                <span>{avatarUploading ? 'アップロード中...' : 'アイコン画像を変更'}</span>
+                <span>{avatarUploading ? t('avatar_uploading') : t('avatar_upload')}</span>
               </button>
             </div>
 
@@ -250,10 +244,10 @@ export default function ProfileSettingsPage() {
           <div className="bg-slate-100/70 rounded-2xl p-4 text-xs text-slate-600 space-y-2">
             <div className="flex items-center gap-2 font-semibold text-slate-800">
               <Shield className="size-4 text-emerald-600" />
-              <span>セキュリティ状態</span>
+              <span>{t('security_title')}</span>
             </div>
             <p className="leading-relaxed">
-              パスワードは安全に bcrypt によりハッシュ化されて保存されています。
+              {t('security_desc')}
             </p>
           </div>
         </div>
@@ -264,7 +258,7 @@ export default function ProfileSettingsPage() {
           <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs space-y-6">
             <div className="flex items-center gap-2 pb-4 border-b border-slate-100">
               <User className="size-5 text-blue-600" />
-              <h2 className="text-lg font-bold text-slate-900">プロフィール編集</h2>
+              <h2 className="text-lg font-bold text-slate-900">{t('edit_section_title')}</h2>
             </div>
 
             {profileSuccess && (
@@ -284,23 +278,23 @@ export default function ProfileSettingsPage() {
             <form onSubmit={handleUpdateProfile} className="space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                  表示名 (Display Name)
+                  {t('display_name_label')}
                 </label>
                 <input
                   type="text"
                   value={displayName}
                   onChange={(e) => setDisplayName(e.target.value)}
-                  placeholder="例: 山田太郎 / Alex"
+                  placeholder={t('display_name_placeholder')}
                   className="w-full px-3.5 py-2 text-sm rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-colors"
                 />
                 <p className="text-[11px] text-slate-400 mt-1">
-                  サイトヘッダーやコメント投稿時に表示される名前です。
+                  {t('display_name_hint')}
                 </p>
               </div>
 
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                  ユーザー名 (Username)
+                  {t('username_label')}
                 </label>
                 <input
                   type="text"
@@ -309,13 +303,13 @@ export default function ProfileSettingsPage() {
                   className="w-full px-3.5 py-2 text-sm rounded-xl border border-slate-200 bg-slate-100 text-slate-500 cursor-not-allowed"
                 />
                 <p className="text-[11px] text-slate-400 mt-1">
-                  ログインやシステム内部識別用IDです（変更不可）。
+                  {t('username_hint')}
                 </p>
               </div>
 
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                  メールアドレス
+                  {t('email_label')}
                 </label>
                 <input
                   type="email"
@@ -332,7 +326,7 @@ export default function ProfileSettingsPage() {
                   className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-all disabled:opacity-50 cursor-pointer shadow-xs"
                 >
                   <Save className="size-3.5" />
-                  <span>{profileLoading ? '保存中...' : 'プロフィールを保存'}</span>
+                  <span>{profileLoading ? t('saving_profile') : t('save_profile')}</span>
                 </button>
               </div>
             </form>
@@ -342,7 +336,7 @@ export default function ProfileSettingsPage() {
           <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs space-y-6">
             <div className="flex items-center gap-2 pb-4 border-b border-slate-100">
               <Lock className="size-5 text-indigo-600" />
-              <h2 className="text-lg font-bold text-slate-900">パスワード変更</h2>
+              <h2 className="text-lg font-bold text-slate-900">{t('password_section_title')}</h2>
             </div>
 
             {passwordSuccess && (
@@ -362,7 +356,7 @@ export default function ProfileSettingsPage() {
             <form onSubmit={handleChangePassword} className="space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                  現在のパスワード
+                  {t('current_password')}
                 </label>
                 <input
                   type="password"
@@ -376,7 +370,7 @@ export default function ProfileSettingsPage() {
 
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                  新しいパスワード (8文字以上)
+                  {t('new_password')}
                 </label>
                 <input
                   type="password"
@@ -384,14 +378,14 @@ export default function ProfileSettingsPage() {
                   minLength={8}
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
-                  placeholder="8文字以上の新しいパスワード"
+                  placeholder={t('new_password_placeholder')}
                   className="w-full px-3.5 py-2 text-sm rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-colors"
                 />
               </div>
 
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                  新しいパスワードの確認
+                  {t('confirm_password')}
                 </label>
                 <input
                   type="password"
@@ -399,7 +393,7 @@ export default function ProfileSettingsPage() {
                   minLength={8}
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
-                  placeholder="もう一度入力"
+                  placeholder={t('confirm_password_placeholder')}
                   className="w-full px-3.5 py-2 text-sm rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-colors"
                 />
               </div>
@@ -411,7 +405,7 @@ export default function ProfileSettingsPage() {
                   className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold transition-all disabled:opacity-50 cursor-pointer shadow-xs"
                 >
                   <KeyRound className="size-3.5" />
-                  <span>{passwordLoading ? '変更中...' : 'パスワードを変更'}</span>
+                  <span>{passwordLoading ? t('changing_password') : t('change_password')}</span>
                 </button>
               </div>
             </form>

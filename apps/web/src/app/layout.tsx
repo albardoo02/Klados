@@ -6,7 +6,10 @@ import { Providers } from './providers';
 const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
-  title: 'Klados - Markdown Site Builder',
+  title: {
+    default: 'Klados',
+    template: '%s | Klados',
+  },
   description: 'Build beautiful Markdown-powered websites',
 };
 

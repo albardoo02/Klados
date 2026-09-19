@@ -21,7 +21,11 @@ import {
   Loader2,
   AlertCircle,
   Users,
+  Settings2,
+  UploadCloud,
 } from 'lucide-react';
+import { SidebarEditorModal } from '@/components/wiki/sidebar-editor-modal';
+import { ImportMarkdownModal } from '@/components/import-markdown-modal';
 
 interface Page {
   id: string;
@@ -39,6 +43,8 @@ export default function SiteDetailPage() {
 
   const [activeTab, setActiveTab] = useState<'pages' | 'trash'>('pages');
   const [mediaLibraryOpen, setMediaLibraryOpen] = useState(false);
+  const [sidebarEditorOpen, setSidebarEditorOpen] = useState(false);
+  const [importModalOpen, setImportModalOpen] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
@@ -184,7 +190,18 @@ export default function SiteDetailPage() {
               ) : (
                 <Download className="size-3.5 text-blue-600" />
               )}
-              <span>{isExporting ? 'エクスポート中...' : 'Export Site (ZIP)'}</span>
+              <span>{isExporting ? 'エクスポート中...' : 'Export (ZIP)'}</span>
+            </button>
+
+            {/* Markdown / ZIP インポートボタン */}
+            <button
+              type="button"
+              onClick={() => setImportModalOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-semibold rounded-xl border border-blue-200 transition-colors shadow-2xs cursor-pointer"
+              title=".md ファイルや ZIP をアップロードして一括公開"
+            >
+              <UploadCloud className="size-3.5 text-blue-600" />
+              <span>Import Markdown</span>
             </button>
 
             <button
@@ -194,6 +211,16 @@ export default function SiteDetailPage() {
             >
               <Images className="size-3.5 text-blue-600" />
               <span>メディア管理</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setSidebarEditorOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-xl border border-slate-200 transition-colors shadow-2xs cursor-pointer"
+              title="サイドバーの見出しやリンク構成を編集 (MediaWiki:Sidebar)"
+            >
+              <Settings2 className="size-3.5 text-indigo-600" />
+              <span>サイドバー編集</span>
             </button>
 
             {site?.slug && (
@@ -286,13 +313,24 @@ export default function SiteDetailPage() {
                 サイト内で公開するドキュメントや記事を管理します
               </p>
             </div>
-            <button
-              onClick={() => setShowCreate(true)}
-              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold transition-colors shadow-2xs cursor-pointer"
-            >
-              <Plus className="size-3.5" />
-              <span>新規ページ作成</span>
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setImportModalOpen(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-700 rounded-xl text-xs font-semibold border border-slate-200 transition-colors shadow-2xs cursor-pointer"
+                title=".md や .zip をアップロードしてページを追加"
+              >
+                <UploadCloud className="size-3.5 text-blue-600" />
+                <span>Markdownをインポート</span>
+              </button>
+              <button
+                onClick={() => setShowCreate(true)}
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold transition-colors shadow-2xs cursor-pointer"
+              >
+                <Plus className="size-3.5" />
+                <span>新規ページ作成</span>
+              </button>
+            </div>
           </div>
 
           {showCreate && (
@@ -487,6 +525,33 @@ export default function SiteDetailPage() {
         isOpen={mediaLibraryOpen}
         onClose={() => setMediaLibraryOpen(false)}
         siteId={id}
+      />
+
+      {/* サイドバー編集モーダル (MediaWiki:Sidebar) */}
+      <SidebarEditorModal
+        isOpen={sidebarEditorOpen}
+        onClose={() => setSidebarEditorOpen(false)}
+        siteId={id}
+        siteSlug={site?.slug || ''}
+        currentSections={site?.settings?.sidebar_sections}
+        showToolsSection={site?.settings?.sidebar_show_tools ?? true}
+        availablePages={pages || []}
+        onSaved={() => {
+          queryClient.invalidateQueries({ queryKey: ['site', id] });
+          showToast('サイドバー構成を保存しました');
+        }}
+      />
+
+      {/* Markdown / ZIP インポートモーダル */}
+      <ImportMarkdownModal
+        isOpen={importModalOpen}
+        onClose={() => setImportModalOpen(false)}
+        siteId={id}
+        existingPages={pages || []}
+        onSuccess={(count) => {
+          queryClient.invalidateQueries({ queryKey: ['pages', id] });
+          showToast(`${count} 件のページをインポートしました`);
+        }}
       />
     </div>
   );

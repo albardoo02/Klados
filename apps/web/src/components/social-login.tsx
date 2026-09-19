@@ -1,5 +1,6 @@
 'use client';
 
+import { useTranslations } from 'next-intl';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { authApi } from '@/lib/api';
@@ -12,12 +13,10 @@ interface SocialLoginProps {
 }
 
 export function SocialLogin({ mode = 'login', onError }: SocialLoginProps) {
+  const t = useTranslations('auth.social');
   const router = useRouter();
   const setAuth = useAuthStore((s) => s.setAuth);
   const [loadingType, setLoadingType] = useState<string | null>(null);
-  const [showCustomModal, setShowCustomModal] = useState<'google' | 'github' | null>(null);
-  const [customEmail, setCustomEmail] = useState('');
-  const [customName, setCustomName] = useState('');
 
   const handleDemoLogin = async () => {
     setLoadingType('demo');
@@ -26,7 +25,7 @@ export function SocialLogin({ mode = 'login', onError }: SocialLoginProps) {
       setAuth(res.data.data.user, res.data.data.token);
       router.push('/dashboard');
     } catch (err: any) {
-      const msg = err?.response?.data?.error || 'デモログインに失敗しました';
+      const msg = err?.response?.data?.error || t('demo_error');
       onError?.(msg);
       setLoadingType(null);
     }
@@ -34,25 +33,23 @@ export function SocialLogin({ mode = 'login', onError }: SocialLoginProps) {
 
   const handleOAuthLogin = async (provider: 'google' | 'github', email?: string, name?: string) => {
     setLoadingType(provider);
-    setShowCustomModal(null);
     try {
       const apiFn = provider === 'google' ? authApi.googleLogin : authApi.githubLogin;
-      const res = await apiFn({
-        email: email || undefined,
-        name: name || undefined,
-      });
+      const res = await apiFn({ email: email || undefined, name: name || undefined });
       setAuth(res.data.data.user, res.data.data.token);
       router.push('/dashboard');
     } catch (err: any) {
-      const msg = err?.response?.data?.error || `${provider} ログインに失敗しました`;
+      const msg = err?.response?.data?.error || t('oauth_error');
       onError?.(msg);
       setLoadingType(null);
     }
   };
 
+  const orLabel = mode === 'login' ? t('or_email_login') : t('or_email_register');
+
   return (
     <div className="space-y-4">
-      {/* ワンクリック簡単ログイン (登録不要のデモ体験) */}
+      {/* ワンクリック簡単ログイン */}
       <button
         type="button"
         onClick={handleDemoLogin}
@@ -67,13 +64,13 @@ export function SocialLogin({ mode = 'login', onError }: SocialLoginProps) {
             </div>
             <div>
               <div className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
-                <span>ワンクリック簡単ログイン</span>
+                <span>{t('one_click_label')}</span>
                 <span className="px-1.5 py-0.5 rounded text-[10px] bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 font-medium">
-                  登録不要
+                  {t('one_click_badge')}
                 </span>
               </div>
               <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                サンプルサイト付きで今すぐKladosを体験
+                {t('one_click_desc')}
               </p>
             </div>
           </div>
@@ -98,22 +95,10 @@ export function SocialLogin({ mode = 'login', onError }: SocialLoginProps) {
             <Loader2 className="w-4 h-4 animate-spin text-slate-400" />
           ) : (
             <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
-              <path
-                fill="#4285F4"
-                d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"
-              />
-              <path
-                fill="#34A853"
-                d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.33 24 12 24z"
-              />
-              <path
-                fill="#FBBC05"
-                d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.18 0 9.99 0 12s.45 3.82 1.25 5.42l4.03-3.15z"
-              />
-              <path
-                fill="#EA4335"
-                d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.33 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"
-              />
+              <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z" />
+              <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.33 24 12 24z" />
+              <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.18 0 9.99 0 12s.45 3.82 1.25 5.42l4.03-3.15z" />
+              <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.33 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z" />
             </svg>
           )}
           <span>Google</span>
@@ -141,7 +126,7 @@ export function SocialLogin({ mode = 'login', onError }: SocialLoginProps) {
       <div className="relative flex items-center justify-center my-4">
         <div className="border-t border-slate-200 dark:border-slate-800 w-full" />
         <span className="bg-white dark:bg-slate-900 px-3 text-[11px] text-slate-400 absolute">
-          またはメールアドレスで{mode === 'login' ? 'ログイン' : '新規登録'}
+          {orLabel}
         </span>
       </div>
     </div>

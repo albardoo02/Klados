@@ -1,16 +1,16 @@
 'use client';
 
+import { useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
 import { useAuthStore } from '@/store/auth';
 import { useEffect, useState, useRef } from 'react';
 import { CommandPalette } from '@/components/command-palette';
+import { LocaleSwitcher } from '@/components/locale-switcher';
 import {
   Search,
   KeyRound,
   LogOut,
-  ExternalLink,
-  Sparkles,
   User,
   ChevronDown,
   FolderKanban,
@@ -21,6 +21,7 @@ import { authApi } from '@/lib/api';
 import { UserAvatar } from '@/components/user-avatar';
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
+  const t = useTranslations();
   const router = useRouter();
   const pathname = usePathname();
   const { user, clearAuth } = useAuthStore();
@@ -35,9 +36,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     setResendStatus(null);
     try {
       const res = await authApi.resendVerification(user?.email);
-      setResendStatus(res.data?.dev_verification_url || '確認メールを再送しました');
+      setResendStatus(res.data?.dev_verification_url || t('email_banner.resend_button'));
     } catch {
-      setResendStatus('再送に失敗しました');
+      setResendStatus(t('email_banner.resend_failed'));
     } finally {
       setResending(false);
     }
@@ -47,7 +48,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     if (!user) router.push('/login');
   }, [user, router]);
 
-  // 外側クリックでメニューを閉じる
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (userMenuRef.current && !userMenuRef.current.contains(event.target as Node)) {
@@ -73,7 +73,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             Kla<span className="text-blue-600">dos</span>
           </Link>
 
-          {/* グローバル検索バー (クリックまたは Ctrl+K で開く) */}
+          {/* グローバル検索バー */}
           <button
             type="button"
             onClick={() => setSearchOpen(true)}
@@ -81,7 +81,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           >
             <div className="flex items-center gap-2">
               <Search className="size-3.5 text-slate-400" />
-              <span>検索またはコマンド...</span>
+              <span>{t('nav.search_placeholder')}</span>
             </div>
             <kbd className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono rounded bg-white border border-slate-200 shadow-2xs text-slate-500">
               Ctrl K
@@ -89,7 +89,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </button>
         </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
+          {/* 言語切り替え */}
+          <LocaleSwitcher />
+
+          <div className="h-4 w-px bg-slate-200 hidden sm:block" />
+
           {/* APIキー設定リンク */}
           <Link
             href="/dashboard/settings/api-keys"
@@ -98,10 +103,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 ? 'bg-blue-50 text-blue-700 border border-blue-200'
                 : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
             }`}
-            title="開発者 API キーの管理"
+            title={t('nav.api_keys_menu_title')}
           >
             <KeyRound className="size-3.5" />
-            <span className="hidden md:inline">API キー</span>
+            <span className="hidden md:inline">{t('nav.api_keys')}</span>
           </Link>
 
           <div className="h-4 w-px bg-slate-200 hidden sm:block" />
@@ -123,9 +128,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               <div className="hidden sm:flex flex-col text-left">
                 <span className="text-xs font-semibold text-slate-800 leading-tight">
                   {user.display_name || user.username}
-                </span>
-                <span className="text-[10px] text-slate-400 capitalize">
-                  {user.plan} プラン
                 </span>
               </div>
               <ChevronDown className={`size-3.5 text-slate-400 transition-transform ${userMenuOpen ? 'rotate-180' : ''}`} />
@@ -151,13 +153,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                       </p>
                     </div>
                   </div>
-                  <div className="mt-2.5 flex items-center justify-between text-[11px] bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-100">
-                    <span className="text-slate-500">ご利用プラン</span>
-                    <span className="font-semibold text-blue-600 uppercase flex items-center gap-1">
-                      <Sparkles className="size-2.5" />
-                      {user.plan}
-                    </span>
-                  </div>
                 </div>
 
                 {/* メニューアイテム */}
@@ -169,8 +164,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   >
                     <User className="size-4 text-blue-600" />
                     <div className="flex-1">
-                      <span>個人設定 / プロフィール</span>
-                      <span className="block text-[10px] text-slate-400 font-normal">表示名やパスワードの編集</span>
+                      <span>{t('nav.profile_menu_title')}</span>
+                      <span className="block text-[10px] text-slate-400 font-normal">{t('nav.profile_menu_desc')}</span>
                     </div>
                   </Link>
 
@@ -181,8 +176,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   >
                     <KeyRound className="size-4 text-indigo-600" />
                     <div className="flex-1">
-                      <span>開発者 API キー</span>
-                      <span className="block text-[10px] text-slate-400 font-normal">API トークンの発行と管理</span>
+                      <span>{t('nav.api_keys_menu_title')}</span>
+                      <span className="block text-[10px] text-slate-400 font-normal">{t('nav.api_keys_menu_desc')}</span>
                     </div>
                   </Link>
 
@@ -192,7 +187,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                     className="flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-slate-100 transition-colors text-slate-700 hover:text-slate-900"
                   >
                     <FolderKanban className="size-4 text-slate-500" />
-                    <span>マイサイト一覧</span>
+                    <span>{t('nav.my_sites')}</span>
                   </Link>
                 </div>
 
@@ -204,7 +199,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                     className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-rose-50 text-rose-600 transition-colors text-xs font-medium cursor-pointer"
                   >
                     <LogOut className="size-4 text-rose-500" />
-                    <span>ログアウト</span>
+                    <span>{t('nav.logout')}</span>
                   </button>
                 </div>
               </div>
@@ -219,7 +214,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           <div className="flex items-center gap-2">
             <AlertTriangle className="size-4 text-amber-600 shrink-0" />
             <span>
-              メールアドレス（<strong>{user.email}</strong>）の認証が完了していません。サイトの外部公開や設定変更を有効にするために認証を完了してください。
+              {t('email_banner.message', { email: user.email })}
             </span>
           </div>
           <div className="flex items-center gap-2 shrink-0">
@@ -227,7 +222,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               href="/verify-email"
               className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-medium transition-colors"
             >
-              認証ページを開く
+              {t('email_banner.verify_button')}
             </Link>
             <button
               type="button"
@@ -235,13 +230,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               disabled={resending}
               className="px-2.5 py-1 bg-white hover:bg-amber-100/60 text-amber-800 border border-amber-300 rounded-lg font-medium transition-colors disabled:opacity-50"
             >
-              {resending ? '送信中...' : 'メールを再送'}
+              {resending ? t('email_banner.resending') : t('email_banner.resend_button')}
             </button>
             {resendStatus && (
               <span className="text-amber-700 font-mono text-[11px] truncate max-w-xs">
                 {resendStatus.startsWith('http') ? (
                   <Link href={resendStatus} className="underline text-blue-600 font-bold ml-1">
-                    クイック認証リンク →
+                    {t('email_banner.quick_link')}
                   </Link>
                 ) : (
                   resendStatus

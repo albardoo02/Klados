@@ -52,6 +52,7 @@ import {
   Info,
   Palette,
   Highlighter,
+  UploadCloud,
 } from 'lucide-react';
 
 interface Collaborator {
@@ -995,6 +996,41 @@ export default function PageEditPage() {
             <Images className="size-3.5" />
             <span className="hidden md:inline">メディア</span>
           </button>
+
+          {/* MDファイル読み込みボタン */}
+          <label
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground border border-border hover:bg-muted rounded-lg transition-colors cursor-pointer"
+            title="手元の .md ファイルを読み込んでエディタに反映"
+          >
+            <UploadCloud className="size-3.5" />
+            <span className="hidden md:inline">MD読込</span>
+            <input
+              type="file"
+              accept=".md,.markdown,.txt"
+              className="hidden"
+              onChange={async (e) => {
+                const file = e.target.files?.[0];
+                if (file) {
+                  const text = await file.text();
+                  if (!preview || confirm('エディタの内容を読み込んだファイルで上書きしますか？')) {
+                    if (viewRef.current) {
+                      viewRef.current.dispatch({
+                        changes: {
+                          from: 0,
+                          to: viewRef.current.state.doc.length,
+                          insert: text,
+                        },
+                      });
+                    }
+                    setPreview(text);
+                    setSaved(false);
+                    broadcastDocChange(text);
+                  }
+                }
+                e.target.value = '';
+              }}
+            />
+          </label>
 
           {/* 公開プレビューリンク */}
           {publicUrl && (

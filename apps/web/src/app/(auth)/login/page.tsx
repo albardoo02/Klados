@@ -3,11 +3,13 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { useTranslations } from 'next-intl';
 import { authApi } from '@/lib/api';
 import { useAuthStore } from '@/store/auth';
 import { SocialLogin } from '@/components/social-login';
 
 export default function LoginPage() {
+  const t = useTranslations();
   const router = useRouter();
   const setAuth = useAuthStore((s) => s.setAuth);
   const [form, setForm] = useState({ email: '', password: '' });
@@ -25,7 +27,7 @@ export default function LoginPage() {
       router.push('/dashboard');
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } } };
-      setError(e.response?.data?.error ?? 'ログインに失敗しました');
+      setError(e.response?.data?.error ?? t('auth.login.error_default'));
     } finally {
       setLoading(false);
     }
@@ -38,8 +40,8 @@ export default function LoginPage() {
           <Link href="/" className="text-2xl font-black tracking-tight inline-block mb-1">
             Kla<span className="text-blue-600">dos</span>
           </Link>
-          <h1 className="text-xl font-bold text-slate-900">アカウントにログイン</h1>
-          <p className="text-xs text-slate-500 mt-1">Markdownで美しいサイトを構築・管理</p>
+          <h1 className="text-xl font-bold text-slate-900">{t('auth.login.title')}</h1>
+          <p className="text-xs text-slate-500 mt-1">{t('brand.description')}</p>
         </div>
 
         {error && (
@@ -52,7 +54,7 @@ export default function LoginPage() {
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium mb-1">メールアドレス</label>
+            <label className="block text-sm font-medium mb-1">{t('auth.email')}</label>
             <input
               type="email"
               required
@@ -62,7 +64,7 @@ export default function LoginPage() {
             />
           </div>
           <div>
-            <label className="block text-sm font-medium mb-1">パスワード</label>
+            <label className="block text-sm font-medium mb-1">{t('auth.password')}</label>
             <input
               type="password"
               required
@@ -90,7 +92,7 @@ export default function LoginPage() {
               </div>
             </div>
             <span className="text-sm text-slate-600 group-hover:text-slate-900 transition-colors">
-              30日間ログインを保持する
+              {t('auth.login.remember_me')}
             </span>
           </label>
 
@@ -99,13 +101,13 @@ export default function LoginPage() {
             disabled={loading}
             className="w-full bg-blue-500 hover:bg-blue-600 text-white rounded-lg py-2 font-semibold transition-colors disabled:opacity-50"
           >
-            {loading ? 'ログイン中...' : 'ログイン'}
+            {loading ? t('auth.login.submitting') : t('auth.login.submit')}
           </button>
         </form>
         <p className="text-center text-sm text-slate-500 mt-4">
-          アカウントがない場合は{' '}
+          {t('auth.login.no_account')}{' '}
           <Link href="/register" className="text-blue-500 hover:underline">
-            新規登録
+            {t('auth.login.register_link')}
           </Link>
         </p>
       </div>
