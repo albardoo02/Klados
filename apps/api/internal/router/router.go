@@ -38,6 +38,7 @@ func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
 			}
 			// ローカルおよびCloudflare Tunnel等のトンネルアクセスを許容
 			if strings.HasSuffix(origin, ".trycloudflare.com") ||
+				strings.HasSuffix(origin, "klados.app") ||
 				strings.Contains(origin, "localhost") ||
 				strings.Contains(origin, "127.0.0.1") {
 				return true

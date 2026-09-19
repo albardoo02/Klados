@@ -14,6 +14,11 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: path.resolve(__dirname, "../../"),
   },
+  allowedDevOrigins: [
+    "klados.app",
+    "*.klados.app",
+    "*.trycloudflare.com",
+  ],
   async rewrites() {
     return [
       {
