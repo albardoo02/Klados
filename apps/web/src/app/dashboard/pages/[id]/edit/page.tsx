@@ -1,12 +1,12 @@
 'use client';
 
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { pagesApi, sitesApi, mediaApi, commentsApi, PageVersion } from '@/lib/api';
-import { useParams, useRouter } from 'next/navigation';
-import { useEffect, useRef, useState, useMemo } from 'react';
-import { EditorView, basicSetup } from 'codemirror';
-import { markdown } from '@codemirror/lang-markdown';
-import { EditorState, Compartment } from '@codemirror/state';
+import {useMutation, useQuery, useQueryClient} from '@tanstack/react-query';
+import {commentsApi, mediaApi, pagesApi, PageVersion, sitesApi} from '@/lib/api';
+import {useParams, useRouter} from 'next/navigation';
+import {useEffect, useMemo, useRef, useState} from 'react';
+import {basicSetup, EditorView} from 'codemirror';
+import {markdown} from '@codemirror/lang-markdown';
+import { Annotation, Compartment, EditorState } from '@codemirror/state';
 import { vim } from '@replit/codemirror-vim';
 import { keymap } from '@codemirror/view';
 import { MarkdownRenderer } from '@/components/markdown-renderer';
@@ -19,42 +19,41 @@ import Link from 'next/link';
 import {
   ArrowLeft,
   Bold,
-  Italic,
-  Strikethrough,
+  Check,
+  CheckSquare,
+  Clock,
+  Code,
+  Columns,
+  ExternalLink,
+  Eye,
+  FileClock,
+  FileEdit,
   Heading1,
   Heading2,
   Heading3,
+  Highlighter,
+  History as HistoryIcon,
+  Image as ImageIcon,
+  Images,
+  Info,
+  Italic,
+  Link as LinkIcon,
   List,
   ListOrdered,
-  Code,
-  Quote,
-  Table as TableIcon,
-  Link as LinkIcon,
-  Image as ImageIcon,
   Loader2,
-  ExternalLink,
-  Save,
-  Check,
-  Columns,
-  Eye,
-  FileEdit,
-  Sigma,
-  History as HistoryIcon,
-  RotateCcw,
-  X,
-  Clock,
-  FileClock,
-  Images,
   MessageSquare,
-  Users,
-  Terminal,
   Minus,
-  CheckSquare,
-  Sparkles,
-  Info,
   Palette,
-  Highlighter,
+  Quote,
+  RotateCcw,
+  Save,
+  Sigma,
+  Sparkles,
+  Strikethrough,
+  Table as TableIcon,
+  Terminal,
   UploadCloud,
+  X,
 } from 'lucide-react';
 
 interface Collaborator {
@@ -74,12 +73,15 @@ const COLLAB_COLORS = [
   'bg-cyan-500 text-white border-cyan-600',
 ];
 
+// リモート同期による dispatch を識別するための CodeMirror アノテーション
+const remoteSyncAnnotation = Annotation.define<boolean>();
+
 interface SlashCommandItem {
   id: string;
   label: string;
   description: string;
   icon: any;
-  action: () => void;
+  action: (replaceRange?: { from: number; to: number }) => void;
 }
 
 export default function PageEditPage() {
@@ -219,7 +221,11 @@ export default function PageEditPage() {
   });
 
   // --- テキスト挿入ユーティリティ ---
-  const insertText = (textToInsert: string, explicitPos?: number) => {
+  const insertText = (
+    textToInsert: string,
+    explicitPos?: number,
+    replaceRange?: { from: number; to: number }
+  ) => {
     if (!viewRef.current) return;
     const view = viewRef.current;
     const { state, dispatch } = view;
@@ -227,21 +233,18 @@ export default function PageEditPage() {
     let from = state.doc.length;
     let to = state.doc.length;
 
-    if (typeof explicitPos === 'number' && explicitPos >= 0 && explicitPos <= state.doc.length) {
+    if (replaceRange) {
+      from = Math.min(Math.max(0, replaceRange.from), state.doc.length);
+      to = Math.min(Math.max(from, replaceRange.to), state.doc.length);
+    } else if (typeof explicitPos === 'number' && explicitPos >= 0 && explicitPos <= state.doc.length) {
       from = explicitPos;
       to = explicitPos;
-    } else if (lastSelectionRef.current && lastSelectionRef.current.from > 0) {
-      from = Math.min(lastSelectionRef.current.from, state.doc.length);
-      to = Math.min(lastSelectionRef.current.to, state.doc.length);
-    } else if (state.selection.main.from > 0) {
+    } else if (state.selection.main.from > 0 || state.selection.main.to > 0) {
       from = state.selection.main.from;
       to = state.selection.main.to;
     } else if (lastSelectionRef.current) {
       from = Math.min(lastSelectionRef.current.from, state.doc.length);
       to = Math.min(lastSelectionRef.current.to, state.doc.length);
-    } else {
-      from = state.doc.length;
-      to = state.doc.length;
     }
 
     dispatch({
@@ -256,14 +259,34 @@ export default function PageEditPage() {
     view.focus();
   };
 
-  const wrapText = (before: string, after: string, defaultText = '') => {
+  const wrapText = (
+    before: string,
+    after: string,
+    defaultText = '',
+    replaceRange?: { from: number; to: number }
+  ) => {
     if (!viewRef.current) return;
     const view = viewRef.current;
     const { state, dispatch } = view;
-    const selection = state.selection.main;
-    const from = selection.from;
-    const to = selection.to;
-    let selectedText = state.sliceDoc(from, to) || defaultText;
+
+    let from = state.selection.main.from;
+    let to = state.selection.main.to;
+
+    if (replaceRange) {
+      from = Math.min(Math.max(0, replaceRange.from), state.doc.length);
+      to = Math.min(Math.max(from, replaceRange.to), state.doc.length);
+    } else if (
+      from === to &&
+      lastSelectionRef.current &&
+      lastSelectionRef.current.from !== lastSelectionRef.current.to
+    ) {
+      // ツールバー等クリックでフォーカスが外れていた場合、直前の選択範囲を復元
+      from = Math.min(lastSelectionRef.current.from, state.doc.length);
+      to = Math.min(lastSelectionRef.current.to, state.doc.length);
+    }
+
+    const hasUserSelection = from !== to && !replaceRange;
+    let selectedText = hasUserSelection ? state.sliceDoc(from, to) : defaultText;
 
     // リスト記号（"- ", "* ", "+ ", "1. "など）が含まれている場合、マーカーの外側に書式をかけないよう分離
     let prefix = '';
@@ -275,14 +298,28 @@ export default function PageEditPage() {
 
     const replacement = `${prefix}${before}${selectedText}${after}`;
 
+    // カーソル位置の決定：
+    // 1) ユーザーが自発的に文字列を選択していた場合: 装飾された文字列を選択状態にして確認できるようにする
+    // 2) デフォルトテキスト挿入時 (スラッシュコマンド等): 全選択にすると直後のキー入力で消滅するため、末尾にキャレットを配置
+    const newCursorPos = from + replacement.length;
+    const selection = hasUserSelection
+      ? {
+          anchor: from + prefix.length + before.length,
+          head: from + prefix.length + before.length + selectedText.length,
+        }
+      : {
+          anchor: newCursorPos,
+        };
+
     dispatch({
       changes: { from, to, insert: replacement },
-      selection: {
-        anchor: from + prefix.length + before.length,
-        head: from + prefix.length + before.length + selectedText.length,
-      },
+      selection,
       scrollIntoView: true,
     });
+    lastSelectionRef.current = {
+      from: newCursorPos,
+      to: newCursorPos,
+    };
     view.focus();
   };
 
@@ -308,72 +345,74 @@ export default function PageEditPage() {
         label: '大見出し (H1)',
         description: '主要セクションのタイトル',
         icon: Heading1,
-        action: () => insertText('# '),
+        action: (range) => insertText('# ', undefined, range),
       },
       {
         id: 'h2',
         label: '中見出し (H2)',
         description: 'サブセクションのタイトル',
         icon: Heading2,
-        action: () => insertText('## '),
+        action: (range) => insertText('## ', undefined, range),
       },
       {
         id: 'h3',
         label: '小見出し (H3)',
         description: '詳細な小項目タイトル',
         icon: Heading3,
-        action: () => insertText('### '),
+        action: (range) => insertText('### ', undefined, range),
       },
       {
         id: 'highlight',
         label: 'ハイライトマーカー',
         description: 'テキストを黄色マーカーで強調 (==テキスト==)',
         icon: Highlighter,
-        action: () => wrapText('==', '==', 'ハイライトテキスト'),
+        action: (range) => wrapText('==', '==', 'ハイライトテキスト', range),
       },
       {
         id: 'red',
         label: '赤文字 (Red)',
         description: '選択テキストまたは赤色文字を挿入',
         icon: Palette,
-        action: () => wrapText('[', ']{color:#ef4444}', '赤色テキスト'),
+        action: (range) => wrapText('[', ']{color:#ef4444}', '赤色テキスト', range),
       },
       {
         id: 'blue',
         label: '青文字 (Blue)',
         description: '選択テキストまたは青色文字を挿入',
         icon: Palette,
-        action: () => wrapText('[', ']{color:#3b82f6}', '青色テキスト'),
+        action: (range) => wrapText('[', ']{color:#3b82f6}', '青色テキスト', range),
       },
       {
         id: 'green',
         label: '緑文字 (Green)',
         description: '選択テキストまたは緑色文字を挿入',
         icon: Palette,
-        action: () => wrapText('[', ']{color:#10b981}', '緑色テキスト'),
+        action: (range) => wrapText('[', ']{color:#10b981}', '緑色テキスト', range),
       },
       {
         id: 'yellow',
         label: '黄文字 (Yellow)',
         description: '選択テキストまたは黄色文字を挿入',
         icon: Palette,
-        action: () => wrapText('[', ']{color:#f59e0b}', '黄色テキスト'),
+        action: (range) => wrapText('[', ']{color:#f59e0b}', '黄色テキスト', range),
       },
       {
         id: 'purple',
         label: '紫文字 (Purple)',
         description: '選択テキストまたは紫色文字を挿入',
         icon: Palette,
-        action: () => wrapText('[', ']{color:#8b5cf6}', '紫色テキスト'),
+        action: (range) => wrapText('[', ']{color:#8b5cf6}', '紫色テキスト', range),
       },
       {
         id: 'table',
         label: 'テーブル (表)',
         description: 'GFM構文のMarkdownテーブルを挿入',
         icon: TableIcon,
-        action: () =>
+        action: (range) =>
           insertText(
-            '\n| 項目名 | 説明 | 状態 |\n| :--- | :--- | :---: |\n| サンプル1 | 詳細テキスト | ✅ 完了 |\n| サンプル2 | 詳細テキスト | ⏳ 進行中 |\n'
+            '\n| 項目名 | 説明 | 状態 |\n| :--- | :--- | :---: |\n| サンプル1 | 詳細テキスト | ✅ 完了 |\n| サンプル2 | 詳細テキスト | ⏳ 進行中 |\n',
+            undefined,
+            range
           ),
       },
       {
@@ -381,55 +420,73 @@ export default function PageEditPage() {
         label: 'コードブロック',
         description: 'シンタックスハイライト付きコードブロック',
         icon: Code,
-        action: () => insertText('```typescript\n// ここにコードを記述\nconst greeting = "Hello, Klados!";\nconsole.log(greeting);\n```\n'),
+        action: (range) =>
+          insertText(
+            '```typescript\n// ここにコードを記述\nconst greeting = "Hello, Klados!";\nconsole.log(greeting);\n```\n',
+            undefined,
+            range
+          ),
       },
       {
         id: 'quote',
         label: '引用 (Quote)',
         description: '引用テキストブロックを挿入',
         icon: Quote,
-        action: () => insertText('> 引用文をここに記述します。\n'),
+        action: (range) => insertText('> 引用文をここに記述します。\n', undefined, range),
       },
       {
         id: 'katex',
         label: 'KaTeX 数式',
         description: '数式ブロックフォーミュラ ($$ 数式 $$)',
         icon: Sigma,
-        action: () =>
-          insertText('$$\n\\int_{-\\infty}^{\\infty} e^{-x^2} dx = \\sqrt{\\pi}\n$$\n'),
+        action: (range) =>
+          insertText(
+            '$$\n\\int_{-\\infty}^{\\infty} e^{-x^2} dx = \\sqrt{\\pi}\n$$\n',
+            undefined,
+            range
+          ),
       },
       {
         id: 'divider',
         label: '区切り線 (Divider)',
         description: '水平罫線 (---) を挿入',
         icon: Minus,
-        action: () => insertText('\n---\n\n'),
+        action: (range) => insertText('\n---\n\n', undefined, range),
       },
       {
         id: 'checklist',
         label: 'タスクリスト',
         description: 'チェック可能なToDo項目',
         icon: CheckSquare,
-        action: () => insertText('- [ ] 新しいタスク\n'),
+        action: (range) => insertText('- [ ] 新しいタスク\n', undefined, range),
       },
       {
         id: 'callout',
         label: 'コールアウト / 注意書き',
         description: '強調表示用のメッセージボックス',
         icon: Info,
-        action: () => insertText(':::info\nここに注意書きや追加情報を記述します。\n:::\n'),
+        action: (range) =>
+          insertText(':::info\nここに注意書きや追加情報を記述します。\n:::\n', undefined, range),
       },
       {
         id: 'image',
         label: '画像挿入',
         description: 'メディアライブラリまたは画像ファイルを選択',
         icon: ImageIcon,
-        action: () => {
+        action: (range) => {
           if (viewRef.current) {
-            lastSelectionRef.current = {
-              from: viewRef.current.state.selection.main.from,
-              to: viewRef.current.state.selection.main.to,
-            };
+            if (range) {
+              viewRef.current.dispatch({
+                changes: { from: range.from, to: range.to, insert: '' },
+                selection: { anchor: range.from },
+              });
+              lastSelectionRef.current = { from: range.from, to: range.from };
+            } else {
+              lastSelectionRef.current = {
+                from: viewRef.current.state.selection.main.from,
+                to: viewRef.current.state.selection.main.to,
+              };
+            }
           }
           setMediaLibraryOpen(true);
         },
@@ -450,26 +507,27 @@ export default function PageEditPage() {
     );
   }, [slashCommands, slashFilter]);
 
-  // スラッシュコマンド実行
+  // スラッシュコマンド実行 (アトミックにスラッシュ削除とコンテンツ挿入を実行)
   const executeSlashCommand = (cmd: SlashCommandItem) => {
     setSlashMenuOpen(false);
     if (!viewRef.current) return;
     const view = viewRef.current;
-    const { state, dispatch } = view;
+    const { state } = view;
     const pos = state.selection.main.from;
     const line = state.doc.lineAt(pos);
     const lineText = line.text;
 
-    // スラッシュ文字を探して削除
+    // スラッシュ文字を探して置換対象範囲 (slashFrom -> pos) を算出
     const lastSlashIdx = lineText.lastIndexOf('/');
+    let replaceRange: { from: number; to: number } | undefined;
     if (lastSlashIdx !== -1) {
-      const slashFrom = line.from + lastSlashIdx;
-      dispatch({
-        changes: { from: slashFrom, to: pos, insert: '' },
-      });
+      replaceRange = {
+        from: line.from + lastSlashIdx,
+        to: pos,
+      };
     }
 
-    cmd.action();
+    cmd.action(replaceRange);
   };
 
   // --- WebSocket & BroadcastChannel リアルタイム同期 ---
@@ -511,6 +569,7 @@ export default function PageEditPage() {
               insert: msg.content,
             },
             selection: { anchor: Math.min(prevPos, msg.content.length) },
+            annotations: [remoteSyncAnnotation.of(true)],
           });
           setPreview(msg.content);
           setSaved(false);
@@ -569,12 +628,15 @@ export default function PageEditPage() {
           if (msg.type === 'doc_change' || msg.type === 'content_update') {
             const newContent = msg.content;
             if (viewRef.current && viewRef.current.state.doc.toString() !== newContent) {
+              const prevPos = viewRef.current.state.selection.main.from;
               viewRef.current.dispatch({
                 changes: {
                   from: 0,
                   to: viewRef.current.state.doc.length,
                   insert: newContent,
                 },
+                selection: { anchor: Math.min(prevPos, newContent.length) },
+                annotations: [remoteSyncAnnotation.of(true)],
               });
               setPreview(newContent);
             }
@@ -706,8 +768,7 @@ export default function PageEditPage() {
       } else if (from > 0) {
         from -= 1;
       }
-      const text = view.state.sliceDoc(from, to);
-      nanoCutBufferRef.current = text;
+      nanoCutBufferRef.current = view.state.sliceDoc(from, to);
       view.dispatch({
         changes: { from, to, insert: '' },
         selection: { anchor: from },
@@ -1029,21 +1090,27 @@ export default function PageEditPage() {
             const content = update.state.doc.toString();
             setPreview(content);
             setSaved(false);
-            broadcastDocChange(content);
 
-            // スラッシュコマンド検知
-            const pos = update.state.selection.main.from;
-            const line = update.state.doc.lineAt(pos);
-            const textBefore = line.text.slice(0, pos - line.from);
+            const isRemote = update.transactions.some(
+              (tr) => tr.annotation(remoteSyncAnnotation) === true
+            );
+            if (!isRemote) {
+              broadcastDocChange(content);
 
-            // 行頭のスラッシュ、または空白直後のスラッシュをトリガー
-            const match = /(?:^|\s)\/([a-zA-Z0-9_-]*)$/.exec(textBefore);
-            if (match) {
-              setSlashFilter(match[1] || '');
-              setSlashSelectedIndex(0);
-              setSlashMenuOpen(true);
-            } else {
-              setSlashMenuOpen(false);
+              // スラッシュコマンド検知 (ローカル入力時のみ)
+              const pos = update.state.selection.main.from;
+              const line = update.state.doc.lineAt(pos);
+              const textBefore = line.text.slice(0, pos - line.from);
+
+              // 行頭のスラッシュ、または空白直後のスラッシュをトリガー
+              const match = /(?:^|\s)\/([a-zA-Z0-9_-]*)$/.exec(textBefore);
+              if (match) {
+                setSlashFilter(match[1] || '');
+                setSlashSelectedIndex(0);
+                setSlashMenuOpen(true);
+              } else {
+                setSlashMenuOpen(false);
+              }
             }
           }
         }),
@@ -1572,10 +1639,11 @@ export default function PageEditPage() {
 
       {/* Markdown 書式ツールバー */}
       {(tab === 'edit' || tab === 'split') && (
-        <div className="flex items-center gap-1 px-4 py-1.5 border-b border-border bg-muted/20 text-xs overflow-x-auto">
+        <div className="relative z-20 flex items-center gap-1 px-4 py-1.5 border-b border-border bg-muted/20 text-xs overflow-visible">
           {/* スラッシュコマンド トリガーヒント */}
           <button
             type="button"
+            onMouseDown={(e) => e.preventDefault()}
             onClick={() => {
               insertText('/');
               setSlashFilter('');
@@ -1592,6 +1660,7 @@ export default function PageEditPage() {
 
           <button
             type="button"
+            onMouseDown={(e) => e.preventDefault()}
             onClick={() => wrapText('**', '**', '太字テキスト')}
             className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer"
             title="太字 (Bold)"
@@ -1600,6 +1669,7 @@ export default function PageEditPage() {
           </button>
           <button
             type="button"
+            onMouseDown={(e) => e.preventDefault()}
             onClick={() => wrapText('*', '*', '斜体テキスト')}
             className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer"
             title="斜体 (Italic)"
@@ -1608,6 +1678,7 @@ export default function PageEditPage() {
           </button>
           <button
             type="button"
+            onMouseDown={(e) => e.preventDefault()}
             onClick={() => wrapText('~~', '~~', '打ち消しテキスト')}
             className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer"
             title="取り消し線"
@@ -1619,6 +1690,15 @@ export default function PageEditPage() {
           <div className="relative" ref={colorPickerRef}>
             <button
               type="button"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                if (viewRef.current) {
+                  lastSelectionRef.current = {
+                    from: viewRef.current.state.selection.main.from,
+                    to: viewRef.current.state.selection.main.to,
+                  };
+                }
+              }}
               onClick={() => setColorPickerOpen(!colorPickerOpen)}
               className={`p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer flex items-center gap-1 ${
                 colorPickerOpen ? 'bg-muted text-foreground ring-1 ring-border' : ''
@@ -1639,6 +1719,7 @@ export default function PageEditPage() {
                     </span>
                     <button
                       type="button"
+                      onMouseDown={(e) => e.preventDefault()}
                       onClick={() => {
                         wrapText('[', ']{color:currentColor}', 'テキスト');
                         setColorPickerOpen(false);
@@ -1666,6 +1747,7 @@ export default function PageEditPage() {
                       <button
                         key={c.color}
                         type="button"
+                        onMouseDown={(e) => e.preventDefault()}
                         onClick={() => applyTextColor(c.color)}
                         className={`size-6 rounded-full ${c.bg} transition-transform hover:scale-110 cursor-pointer shadow-xs`}
                         title={c.name}
@@ -1691,6 +1773,7 @@ export default function PageEditPage() {
                     />
                     <button
                       type="button"
+                      onMouseDown={(e) => e.preventDefault()}
                       onClick={() => applyTextColor(customColor)}
                       className="h-6 px-2 text-[11px] font-medium bg-primary text-primary-foreground rounded hover:bg-primary/90 cursor-pointer"
                     >
@@ -1708,6 +1791,7 @@ export default function PageEditPage() {
                     </span>
                     <button
                       type="button"
+                      onMouseDown={(e) => e.preventDefault()}
                       onClick={() => {
                         wrapText('==', '==', 'ハイライトテキスト');
                         setColorPickerOpen(false);
@@ -1730,6 +1814,7 @@ export default function PageEditPage() {
                       <button
                         key={c.color}
                         type="button"
+                        onMouseDown={(e) => e.preventDefault()}
                         onClick={() => applyBgHighlight(c.color)}
                         className={`size-6 rounded-md ${c.bg} transition-transform hover:scale-110 cursor-pointer border border-border/40 shadow-xs flex items-center justify-center text-[10px] font-bold`}
                         title={c.name}
@@ -1747,6 +1832,7 @@ export default function PageEditPage() {
 
           <button
             type="button"
+            onMouseDown={(e) => e.preventDefault()}
             onClick={() => wrapText('# ', '', '見出し1')}
             className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer"
             title="大見出し (H1)"
@@ -1755,6 +1841,7 @@ export default function PageEditPage() {
           </button>
           <button
             type="button"
+            onMouseDown={(e) => e.preventDefault()}
             onClick={() => wrapText('## ', '', '見出し2')}
             className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer"
             title="中見出し (H2)"
@@ -1766,6 +1853,7 @@ export default function PageEditPage() {
 
           <button
             type="button"
+            onMouseDown={(e) => e.preventDefault()}
             onClick={() => wrapText('- ', '', 'リスト項目')}
             className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer"
             title="箇条書きリスト"
@@ -1774,6 +1862,7 @@ export default function PageEditPage() {
           </button>
           <button
             type="button"
+            onMouseDown={(e) => e.preventDefault()}
             onClick={() => wrapText('1. ', '', '番号付きリスト')}
             className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer"
             title="番号付きリスト"
@@ -1782,6 +1871,7 @@ export default function PageEditPage() {
           </button>
           <button
             type="button"
+            onMouseDown={(e) => e.preventDefault()}
             onClick={() => wrapText('> ', '', '引用テキスト')}
             className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer"
             title="引用"
@@ -1793,6 +1883,7 @@ export default function PageEditPage() {
 
           <button
             type="button"
+            onMouseDown={(e) => e.preventDefault()}
             onClick={() => wrapText('```ts\n', '\n```', 'console.log("Hello, Klados!");')}
             className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer"
             title="コードブロック"
@@ -1801,6 +1892,7 @@ export default function PageEditPage() {
           </button>
           <button
             type="button"
+            onMouseDown={(e) => e.preventDefault()}
             onClick={() =>
               insertText(
                 '\n| ヘッダー 1 | ヘッダー 2 | ヘッダー 3 |\n| :--- | :---: | ---: |\n| データ 1 | 中央揃え | 右揃え |\n| データ 2 | データ | データ |\n'
@@ -1813,6 +1905,7 @@ export default function PageEditPage() {
           </button>
           <button
             type="button"
+            onMouseDown={(e) => e.preventDefault()}
             onClick={() => wrapText('[', '](https://example.com)', 'リンクテキスト')}
             className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer"
             title="リンク"
@@ -1821,6 +1914,7 @@ export default function PageEditPage() {
           </button>
           <button
             type="button"
+            onMouseDown={(e) => e.preventDefault()}
             onClick={() => wrapText('$$ ', ' $$', 'E = mc^2')}
             className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer"
             title="KaTeX数式"

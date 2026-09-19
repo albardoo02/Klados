@@ -206,6 +206,17 @@ export function MarkdownRenderer({ content, className = '', siteSlug }: Markdown
   return (
     <div className={`markdown-body max-w-none ${className}`}>
       <ReactMarkdown
+        urlTransform={(url) => {
+          const trimmed = (url || '').trim().toLowerCase();
+          if (
+            trimmed.startsWith('javascript:') ||
+            trimmed.startsWith('vbscript:') ||
+            trimmed.startsWith('data:text/html')
+          ) {
+            return '';
+          }
+          return url;
+        }}
         remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={[rehypeHighlight, rehypeKatex]}
         components={{
