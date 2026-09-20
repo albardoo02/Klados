@@ -17,7 +17,7 @@ data:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: postgres-pvc
+  name: klados-postgres-data
 spec:
   accessModes:
     - ReadWriteOnce
@@ -70,7 +70,7 @@ spec:
       volumes:
         - name: postgres-data
           persistentVolumeClaim:
-            claimName: postgres-pvc
+            claimName: klados-postgres-data
 ---
 apiVersion: v1
 kind: Service
@@ -124,7 +124,7 @@ spec:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: minio-pvc
+  name: klados-minio-data
 spec:
   accessModes:
     - ReadWriteOnce
@@ -183,7 +183,7 @@ spec:
       volumes:
         - name: minio-data
           persistentVolumeClaim:
-            claimName: minio-pvc
+            claimName: klados-minio-data
 ---
 apiVersion: v1
 kind: Service
