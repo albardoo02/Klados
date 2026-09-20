@@ -22,6 +22,7 @@ const nextConfig: NextConfig = {
   allowedDevOrigins: [
     "klados.app",
     "*.klados.app",
+    "*.azisaba.net",
     "*.trycloudflare.com",
   ],
   async rewrites() {
