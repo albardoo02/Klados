@@ -32,6 +32,8 @@ metadata:
   name: klados-postgres
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: klados-postgres
@@ -137,6 +139,8 @@ metadata:
   name: klados-minio
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: klados-minio
