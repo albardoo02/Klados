@@ -3,6 +3,7 @@
 import React from 'react';
 import Link from 'next/link';
 import { Folder, Tags } from 'lucide-react';
+import { getSitePrefix } from '@/lib/site-url';
 
 export interface CategoryBoxProps {
   categories: Array<{ name: string; sortKey?: string } | string>;
@@ -22,6 +23,7 @@ export function CategoryBox({
   }
 
   const normalized = categories.map((c) => (typeof c === 'string' ? { name: c } : c));
+  const sitePrefix = getSitePrefix(siteSlug);
 
   return (
     <div
@@ -35,7 +37,7 @@ export function CategoryBox({
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         {normalized.map((cat, idx) => {
           const encodedName = encodeURIComponent(cat.name);
-          const href = `/sites/${siteSlug}/Category:${encodedName}`;
+          const href = `${sitePrefix}/Category:${encodedName}`;
 
           return (
             <React.Fragment key={cat.name}>

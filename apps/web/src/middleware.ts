@@ -30,10 +30,17 @@ export function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  // 独自ドメイン（例: newiki.azisaba.net など、管理画面以外の任意のドメイン）からのアクセス:
-  // アクセスされたホスト名（hostname）をキーにして、DBのカスタムドメインと一致するサイトへ動的リライト！
-  // 例: / -> /sites/newiki.azisaba.net
-  //     /about -> /sites/newiki.azisaba.net/about
+  // 独自ドメイン（例: azipedia.azisaba.net など、管理画面以外の任意のドメイン）からのアクセス:
+  // 1. もしブラウザが /sites/hostname を直接開こうとした場合はクリーンなURL（/ など）へリダイレクト
+  if (url.pathname.startsWith(`/sites/${hostname}`)) {
+    const cleanPath = url.pathname.slice(`/sites/${hostname}`.length) || '/';
+    url.pathname = cleanPath;
+    return NextResponse.redirect(url);
+  }
+
+  // 2. 独自ドメインのアクセスを内部で /sites/${hostname} に動的リライト！
+  // 例: / -> /sites/azipedia.azisaba.net
+  //     /about -> /sites/azipedia.azisaba.net/about
   if (!url.pathname.startsWith('/sites/')) {
     const targetPath = url.pathname === '/' ? `/sites/${hostname}` : `/sites/${hostname}${url.pathname}`;
     url.pathname = targetPath;

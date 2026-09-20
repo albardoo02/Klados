@@ -11,6 +11,7 @@ import {
   Search,
   ChevronRight,
 } from 'lucide-react';
+import { getSitePrefix, getSitePageHref } from '@/lib/site-url';
 
 interface SpecialCategoriesViewProps {
   siteSlug: string;
@@ -103,7 +104,7 @@ export function SpecialCategoriesView({
       {/* パンくずリスト */}
       <div className="flex items-center gap-1.5 text-xs text-slate-400 dark:text-slate-500">
         <Link
-          href={`/sites/${siteSlug}`}
+          href={getSitePageHref(siteSlug, '')}
           className="hover:underline transition-colors"
           style={{ color: brandColor }}
         >
@@ -159,7 +160,7 @@ export function SpecialCategoriesView({
       {filtered.length > 0 ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {filtered.map((cat) => {
-            const href = `/sites/${siteSlug}/Category:${encodeURIComponent(cat.name)}`;
+            const href = `${getSitePrefix(siteSlug)}/Category:${encodeURIComponent(cat.name)}`;
 
             return (
               <Link

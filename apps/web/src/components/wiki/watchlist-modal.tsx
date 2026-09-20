@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { Star, X, Search, Trash2, ArrowRight, BookOpen } from 'lucide-react';
+import { getSitePageHref } from '@/lib/site-url';
 
 export interface WatchlistItem {
   id: string;
@@ -172,7 +173,7 @@ export function WatchlistModal({
               {filtered.map((item) => (
                 <Link
                   key={item.slug}
-                  href={`/sites/${siteSlug}/${item.slug === 'index' ? '' : item.slug}`}
+                  href={getSitePageHref(siteSlug, item.slug)}
                   onClick={() => {
                     onSelectPage?.();
                     onClose();

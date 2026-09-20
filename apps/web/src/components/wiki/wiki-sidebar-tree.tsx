@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { ExternalLink, ChevronRight, Plus, Minus } from 'lucide-react';
 import { SidebarSection, SidebarLink, containsUrl } from '@/types/sidebar';
+import { getSitePageHref } from '@/lib/site-url';
 
 interface WikiSidebarTreeProps {
   sections: SidebarSection[];
@@ -119,11 +120,7 @@ export function WikiSidebarTree({
 
     const externalUrl = item.url.startsWith('www.') ? `https://${item.url}` : item.url;
 
-    const cleanUrl = item.url.replace(/^\//, '');
-    const pageHref =
-      cleanUrl === '' || cleanUrl === 'index' || cleanUrl === 'home'
-        ? `/sites/${siteSlug}`
-        : `/sites/${siteSlug}/${cleanUrl}`;
+    const pageHref = getSitePageHref(siteSlug, item.url);
 
     return (
       <div key={key} className="select-none">

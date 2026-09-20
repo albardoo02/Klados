@@ -15,6 +15,7 @@ import {
   Layers,
   Info,
 } from 'lucide-react';
+import { getSitePrefix, getSitePageHref } from '@/lib/site-url';
 
 interface CategoryViewProps {
   categoryName: string;
@@ -166,7 +167,7 @@ export function CategoryView({
       {/* パンくずリスト */}
       <div className="flex items-center gap-1.5 text-xs text-slate-400 dark:text-slate-500">
         <Link
-          href={`/sites/${siteSlug}`}
+          href={getSitePageHref(siteSlug, '')}
           className="hover:underline transition-colors"
           style={{ color: brandColor }}
         >
@@ -174,7 +175,7 @@ export function CategoryView({
         </Link>
         <ChevronRight className="size-3" />
         <Link
-          href={`/sites/${siteSlug}/Special:Categories`}
+          href={`${getSitePrefix(siteSlug)}/Special:Categories`}
           className="hover:underline transition-colors text-slate-500 dark:text-slate-400"
         >
           カテゴリ一覧
@@ -301,7 +302,7 @@ export function CategoryView({
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 pt-2">
             {subcategories.map((sub) => {
               const subName = sub.category_name || sub.title.replace(/^(?:category|カテゴリ):/i, '');
-              const subHref = `/sites/${siteSlug}/Category:${encodeURIComponent(subName)}`;
+              const subHref = `${getSitePrefix(siteSlug)}/Category:${encodeURIComponent(subName)}`;
 
               return (
                 <Link
@@ -387,10 +388,7 @@ export function CategoryView({
 
                     <ul className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 pl-1">
                       {groupItems.map((item) => {
-                        const pageHref =
-                          item.slug === 'index' || item.slug === 'home' || item.slug === ''
-                            ? `/sites/${siteSlug}`
-                            : `/sites/${siteSlug}/${item.slug}`;
+                        const pageHref = getSitePageHref(siteSlug, item.slug);
 
                         return (
                           <li key={item.id || item.slug}>

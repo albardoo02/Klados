@@ -3,6 +3,7 @@
 import { useState, useMemo } from 'react';
 import Link from 'next/link';
 import { Link2, X, Search, ArrowRight, FileText, ExternalLink } from 'lucide-react';
+import { getSitePageHref } from '@/lib/site-url';
 
 interface BacklinkPage {
   id: string;
@@ -140,7 +141,7 @@ export function BacklinksModal({
               {filtered.map((item) => (
                 <Link
                   key={item.slug}
-                  href={`/sites/${siteSlug}/${item.slug === 'index' ? '' : item.slug}`}
+                  href={getSitePageHref(siteSlug, item.slug)}
                   onClick={() => {
                     onSelectPage?.();
                     onClose();

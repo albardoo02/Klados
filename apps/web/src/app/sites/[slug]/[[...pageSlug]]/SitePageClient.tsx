@@ -42,6 +42,7 @@ import { extractCategoriesFromMarkdown } from '@/components/markdown-renderer';
 import { WikiSidebarTree } from '@/components/wiki/wiki-sidebar-tree';
 import { SidebarSection, generateDefaultSidebar } from '@/types/sidebar';
 import { useAuthStore } from '@/store/auth';
+import { getSitePrefix, getSitePageHref, isCustomDomainHost } from '@/lib/site-url';
 
 interface PublicPage {
   id: string;
@@ -551,6 +552,9 @@ export default function SitePageClient() {
         .catch(() => null),
   });
 
+  const isCustomDomain = isCustomDomainHost(siteSlug);
+  const sitePrefix = getSitePrefix(siteSlug);
+
   const isFallback = isSiteError || (!isSiteLoading && !siteData);
   const site: PublicSite = siteData || {
     id: 'demo-site',
@@ -680,11 +684,11 @@ export default function SitePageClient() {
 
   // おまかせ表示 (ランダムページへ移動)
   const getRandomPageHref = () => {
-    if (pages.length === 0) return `/sites/${siteSlug}`;
+    if (pages.length === 0) return sitePrefix || '/';
     const rand = pages[Math.floor(Math.random() * pages.length)];
     return rand.slug === 'index' || rand.slug === 'home' || rand.slug === ''
-      ? `/sites/${siteSlug}`
-      : `/sites/${siteSlug}/${rand.slug}`;
+      ? (sitePrefix || '/')
+      : `${sitePrefix}/${rand.slug}`;
   };
 
   // テーマ切り替え
@@ -768,6 +772,45 @@ export default function SitePageClient() {
     }
   }, [favicon]);
 
+  if (!isSiteLoading && !siteData) {
+    const isDomain = siteSlug.includes('.');
+    return (
+      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col items-center justify-center p-6 text-slate-800 dark:text-slate-200 font-sans">
+        <div className="max-w-md w-full bg-white dark:bg-slate-900 rounded-2xl p-8 border border-slate-200 dark:border-slate-800 shadow-xl text-center space-y-5">
+          <div className="size-14 rounded-2xl bg-amber-50 dark:bg-amber-950/60 text-amber-500 mx-auto flex items-center justify-center border border-amber-200/60 dark:border-amber-800/40 shadow-xs">
+            <BookOpen className="size-7" />
+          </div>
+          <div>
+            <h1 className="text-xl font-bold">サイトが見つかりません (404)</h1>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+              {isDomain
+                ? `ドメイン「${siteSlug}」に紐づく公開サイトが見つかりませんでした。`
+                : `サイト「${siteSlug}」は存在しないか、公開されていません。`}
+            </p>
+          </div>
+          {isDomain && (
+            <div className="text-xs text-left bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl space-y-2 border border-slate-200/70 dark:border-slate-700/60">
+              <p className="font-semibold text-slate-700 dark:text-slate-300">💡 サイトと紐付ける手順:</p>
+              <ol className="list-decimal list-inside space-y-1.5 text-slate-600 dark:text-slate-400">
+                <li>
+                  <a href="https://cms.azisaba.net" className="text-blue-600 dark:text-blue-400 underline font-medium">CMS管理画面</a> にログイン
+                </li>
+                <li>対象サイトの「サイト設定」を開く</li>
+                <li>「カスタムドメイン」欄に <code className="bg-white dark:bg-slate-900 px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-700 font-mono text-blue-600 dark:text-blue-400">{siteSlug}</code> を入力して保存</li>
+              </ol>
+            </div>
+          )}
+          <a
+            href="https://cms.azisaba.net"
+            className="inline-flex items-center justify-center w-full py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-medium text-sm transition-colors shadow-sm cursor-pointer"
+          >
+            CMS管理画面へ移動
+          </a>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       className={`min-h-screen transition-colors duration-200 ${
@@ -814,7 +857,7 @@ export default function SitePageClient() {
               {mobileMenuOpen ? <X className="size-5" /> : <Menu className="size-5" />}
             </button>
 
-            <Link href={`/sites/${siteSlug}`} className="flex items-center gap-2.5 group">
+            <Link href={sitePrefix || '/'} className="flex items-center gap-2.5 group">
               <div
                 className="size-8 rounded-lg flex items-center justify-center text-white shadow-xs group-hover:scale-105 transition-transform"
                 style={{ backgroundColor: brandPrimaryColor }}
@@ -984,7 +1027,7 @@ export default function SitePageClient() {
                       <span>おまかせ表示</span>
                     </Link>
                     <Link
-                      href={`/sites/${siteSlug}/Special:Categories`}
+                      href={`${sitePrefix}/Special:Categories`}
                       className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800/60 hover:text-slate-900 dark:hover:text-white transition-colors"
                       title="サイト内の全カテゴリを一覧表示"
                     >
@@ -1086,7 +1129,7 @@ export default function SitePageClient() {
                     <span>おまかせ表示</span>
                   </Link>
                   <Link
-                    href={`/sites/${siteSlug}/Special:Categories`}
+                    href={`${sitePrefix}/Special:Categories`}
                     onClick={() => setMobileMenuOpen(false)}
                     className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
                   >
@@ -1181,7 +1224,7 @@ export default function SitePageClient() {
               {/* パンくずリスト */}
               <div className="flex items-center gap-1.5 text-xs text-slate-400 dark:text-slate-500">
                 <Link
-                  href={`/sites/${siteSlug}`}
+                  href={sitePrefix || '/'}
                   className="hover:underline transition-colors"
                   style={{ color: brandPrimaryColor }}
                 >
@@ -1266,8 +1309,8 @@ export default function SitePageClient() {
                       prevPage.slug === 'index' ||
                       prevPage.slug === 'home' ||
                       prevPage.slug === ''
-                        ? `/sites/${siteSlug}`
-                        : `/sites/${siteSlug}/${prevPage.slug}`
+                        ? (sitePrefix || '/')
+                        : `${sitePrefix}/${prevPage.slug}`
                     }
                     className={`flex-1 p-4 rounded-xl border transition-all group ${
                       isDark
@@ -1289,7 +1332,7 @@ export default function SitePageClient() {
 
                 {nextPage ? (
                   <Link
-                    href={`/sites/${siteSlug}/${nextPage.slug}`}
+                    href={`${sitePrefix}/${nextPage.slug}`}
                     className={`flex-1 p-4 rounded-xl border transition-all text-right group ${
                       isDark
                         ? 'border-slate-800 hover:border-slate-700 bg-slate-900/40 hover:bg-slate-800/50'
@@ -1317,7 +1360,7 @@ export default function SitePageClient() {
                 指定されたページが存在しないか、まだ公開されていません。
               </p>
               <Link
-                href={`/sites/${siteSlug}`}
+                href={sitePrefix || '/'}
                 className="inline-flex items-center gap-2 px-4 py-2 text-white rounded-xl text-sm font-medium transition-opacity hover:opacity-90"
                 style={{ backgroundColor: brandPrimaryColor }}
               >

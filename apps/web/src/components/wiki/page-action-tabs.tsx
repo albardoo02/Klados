@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { getSitePageHref } from '@/lib/site-url';
 import {
   BookOpen,
   Edit3,
@@ -184,7 +185,7 @@ export function PageActionTabs({
     try {
       await pagesApi.delete(page.id);
       showToast('ページをゴミ箱に移動しました');
-      router.push(`/sites/${site.slug}`);
+      router.push(getSitePageHref(site.slug, ''));
     } catch (err: any) {
       alert('削除に失敗しました: ' + (err?.response?.data?.error || err?.message || '不明なエラー'));
     }

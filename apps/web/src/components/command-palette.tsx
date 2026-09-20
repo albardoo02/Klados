@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { sitesApi } from '@/lib/api';
+import { getSitePageHref } from '@/lib/site-url';
 import {
   Search,
   FileText,
@@ -123,7 +124,7 @@ export function CommandPalette({
         slug: 'home',
         type: 'action',
         snippet: '公開中のトップページを表示',
-        href: `/sites/${siteSlug}`,
+        href: getSitePageHref(siteSlug, ''),
       });
 
       if (canEdit) {
@@ -224,7 +225,7 @@ export function CommandPalette({
                 status: item.status,
                 type: 'page',
                 href: siteSlug
-                  ? `/sites/${siteSlug}/${item.slug === 'index' ? '' : item.slug}`
+                  ? getSitePageHref(siteSlug, item.slug)
                   : `/dashboard/pages/${item.id}/edit`,
               }));
             }
@@ -261,7 +262,7 @@ export function CommandPalette({
               snippet: snippet || p.title,
               type: 'page',
               href: siteSlug
-                ? `/sites/${siteSlug}/${p.slug === 'index' ? '' : p.slug}`
+                ? getSitePageHref(siteSlug, p.slug)
                 : `/dashboard/pages/${p.id}/edit`,
             };
           });
@@ -335,7 +336,7 @@ export function CommandPalette({
       router.push(item.href);
     } else if (item.type === 'page') {
       if (siteSlug) {
-        router.push(`/sites/${siteSlug}/${item.slug === 'index' ? '' : item.slug}`);
+        router.push(getSitePageHref(siteSlug, item.slug));
       } else {
         router.push(`/dashboard/pages/${item.id}/edit`);
       }

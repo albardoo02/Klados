@@ -8,6 +8,7 @@ import rehypeHighlight from 'rehype-highlight';
 import rehypeKatex from 'rehype-katex';
 import { Check, Copy, ExternalLink, Image as ImageIcon } from 'lucide-react';
 import { resolveMediaUrl } from '@/lib/media';
+import { getSitePrefix } from '@/lib/site-url';
 
 interface MarkdownRendererProps {
   content: string;
@@ -139,6 +140,8 @@ function preprocessMarkdown(content: string, siteSlug?: string): string {
     return `[${text}](color:${encodeURIComponent(color.trim())})`;
   });
 
+  const sitePrefix = getSitePrefix(siteSlug);
+
   // 6.5. MediaWiki カテゴリ記法
   // 6.5.1. インラインリンク: [[:Category:カテゴリ名]] または [[:Category:カテゴリ名|表示名]]
   result = result.replace(
@@ -147,10 +150,7 @@ function preprocessMarkdown(content: string, siteSlug?: string): string {
       const catName = (rawCat || '').trim();
       if (!catName) return '';
       const label = (rawLabel ? rawLabel.trim() : `Category:${catName}`) || `Category:${catName}`;
-      if (siteSlug) {
-        return `[${label}](/sites/${siteSlug}/Category:${encodeURIComponent(catName)})`;
-      }
-      return `[${label}](/Category:${encodeURIComponent(catName)})`;
+      return `[${label}](${sitePrefix}/Category:${encodeURIComponent(catName)})`;
     }
   );
 
@@ -214,18 +214,12 @@ function preprocessMarkdown(content: string, siteSlug?: string): string {
       const [pageSlug, heading] = target.split('#');
       const slug = slugifyHeading(heading.trim());
       const pSlug = pageSlug.trim().replace(/^\//, '');
-      if (siteSlug) {
-        return `[${label}](/sites/${siteSlug}/${pSlug}#${slug})`;
-      }
-      return `[${label}](/${pSlug}#${slug})`;
+      return `[${label}](${sitePrefix}/${pSlug}#${slug})`;
     }
 
     // サイト内別ページ: [[page-slug]]
     const pSlug = target.replace(/^\//, '');
-    if (siteSlug) {
-      return `[${label}](/sites/${siteSlug}/${pSlug})`;
-    }
-    return `[${label}](/${pSlug})`;
+    return `[${label}](${sitePrefix}/${pSlug})`;
   });
 
   return result;

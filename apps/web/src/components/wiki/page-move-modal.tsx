@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Edit2, X, Loader2, ArrowRight } from 'lucide-react';
 import { pagesApi } from '@/lib/api';
+import { getSitePageHref } from '@/lib/site-url';
 
 interface PageMoveModalProps {
   isOpen: boolean;
@@ -41,7 +42,7 @@ export function PageMoveModal({ isOpen, onClose, page, siteSlug }: PageMoveModal
 
       onClose();
       // 新しいスラグへ遷移
-      router.push(`/sites/${siteSlug}/${cleanSlug === 'index' ? '' : cleanSlug}`);
+      router.push(getSitePageHref(siteSlug, cleanSlug));
     } catch (err: any) {
       setError(err?.response?.data?.error || err?.message || 'ページの移動に失敗しました');
     } finally {
@@ -109,7 +110,7 @@ export function PageMoveModal({ isOpen, onClose, page, siteSlug }: PageMoveModal
               />
             </div>
             <p className="text-[11px] text-slate-400">
-              変更後URL: <code className="font-mono text-[10px] text-blue-500">/sites/{siteSlug}/{slug || '...'}</code>
+              変更後URL: <code className="font-mono text-[10px] text-blue-500">{getSitePageHref(siteSlug, slug || '...')}</code>
             </p>
           </div>
 
