@@ -205,7 +205,9 @@ kind: Deployment
 metadata:
   name: klados-api
 spec:
-  replicas: 2
+  replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: klados-api
@@ -261,7 +263,9 @@ kind: Deployment
 metadata:
   name: klados-web
 spec:
-  replicas: 2
+  replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: klados-web
@@ -289,14 +293,18 @@ spec:
             httpGet:
               path: /login
               port: 3000
-            initialDelaySeconds: 10
+            initialDelaySeconds: 15
             periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 5
           livenessProbe:
             httpGet:
               path: /login
               port: 3000
-            initialDelaySeconds: 15
+            initialDelaySeconds: 30
             periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 5
           resources:
             requests:
               cpu: "100m"
