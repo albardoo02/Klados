@@ -1,8 +1,13 @@
 import type { NextConfig } from "next";
 import createNextIntlPlugin from "next-intl/plugin";
+import fs from "fs";
 import path from "path";
 
 const withNextIntl = createNextIntlPlugin("./src/i18n/request.ts");
+
+const workspaceRoot = fs.existsSync(path.resolve(__dirname, "../../pnpm-workspace.yaml"))
+  ? path.resolve(__dirname, "../../")
+  : path.resolve(__dirname);
 
 const BACKEND_INTERNAL_URL =
   process.env.INTERNAL_API_URL?.replace(/\/v1\/?$/, '') ||
@@ -12,7 +17,7 @@ const BACKEND_INTERNAL_URL =
 const nextConfig: NextConfig = {
   output: "standalone",
   turbopack: {
-    root: path.resolve(__dirname, "../../"),
+    root: workspaceRoot,
   },
   allowedDevOrigins: [
     "klados.app",

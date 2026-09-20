@@ -48,4 +48,4 @@ USER nextjs
 
 EXPOSE 3000
 
-CMD ["sh", "-c", "if [ -f apps/web/server.js ]; then node apps/web/server.js; else node server.js; fi"]
+CMD ["sh", "-c", "ENTRY=$(find /app -name server.js | head -n 1); if [ -n \"$ENTRY\" ]; then DIR=$(dirname \"$ENTRY\"); mkdir -p \"$DIR/.next\"; cp -rn /app/.next/static \"$DIR/.next/\" 2>/dev/null || true; cp -rn /app/public \"$DIR/\" 2>/dev/null || true; echo \"Starting Next.js server from $DIR\"; cd \"$DIR\" && exec node server.js; else echo \"server.js not found under /app:\"; ls -laR /app; exit 1; fi"]
