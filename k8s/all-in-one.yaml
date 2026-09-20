@@ -43,6 +43,9 @@ data:
   # アジ鯖Wikiの公開ドメインに合わせて指定（例: wiki.azisaba.net）
   ALLOW_ORIGINS: "*"
   INTERNAL_API_URL: "http://klados-api:8080/v1"
+  # root管理者の自動指定（指定したメール/ユーザー名、または初回登録者が自動的にroot管理者になります）
+  ROOT_EMAIL: "admin@azisaba.net"
+  ROOT_USERNAME: "admin"
 ---
 # ------------------------------------------------------------------------------
 # PostgreSQL (データベース)
@@ -261,7 +264,7 @@ spec:
     spec:
       containers:
         - name: api
-          image: ghcr.io/your-org/klados-api:latest # ※ビルドしたイメージ名に変更
+          image: ghcr.io/albardoo02/klados-api:latest
           ports:
             - containerPort: 8080
           envFrom:
@@ -321,7 +324,7 @@ spec:
     spec:
       containers:
         - name: web
-          image: ghcr.io/your-org/klados-web:latest # ※ビルドしたイメージ名に変更
+          image: ghcr.io/albardoo02/klados-web:latest
           ports:
             - containerPort: 3000
           env:
@@ -366,7 +369,7 @@ spec:
     app: klados-web
 ---
 # ------------------------------------------------------------------------------
-# Ingress (ドメイン・TLSルーティング)
+# Ingress (Cloudflare Tunnel または Ingress Controller 経由)
 # ------------------------------------------------------------------------------
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -374,20 +377,23 @@ metadata:
   name: klados-ingress
   namespace: klados
   annotations:
-    kubernetes.io/ingress.class: "nginx"
-    cert-manager.io/cluster-issuer: "letsencrypt-prod"
     nginx.ingress.kubernetes.io/proxy-body-size: "100m"
-    nginx.ingress.kubernetes.io/websocket-services: "klados-web"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/websocket-services: "klados-api"
 spec:
-  tls:
-    - hosts:
-        - wiki.azisaba.net # ※利用するドメインに変更
-      secretName: azisaba-wiki-tls
   rules:
-    - host: wiki.azisaba.net # ※利用するドメインに変更
-      http:
+    - http:
         paths:
-          # Next.js が内部で /v1 を klados-api にプロキシするため、すべてのトラフィックを klados-web に向けるだけでOK！
+          # WebSocket リアルタイム編集 (API直通)
+          - path: /v1/ws
+            pathType: Prefix
+            backend:
+              service:
+                name: klados-api
+                port:
+                  number: 8080
+          # Next.js Web UI & /v1 APIプロキシ (Catch-All)
           - path: /
             pathType: Prefix
             backend:
