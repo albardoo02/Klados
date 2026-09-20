@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -74,6 +75,8 @@ func (h *PageHandler) Create(c *gin.Context) {
 		return
 	}
 
+	_ = SyncPageCategories(h.DB, page)
+
 	c.JSON(http.StatusCreated, gin.H{"success": true, "data": page})
 }
 
@@ -129,6 +132,7 @@ func (h *PageHandler) Update(c *gin.Context) {
 	}
 
 	h.DB.Save(&page)
+	_ = SyncPageCategories(h.DB, &page)
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": page})
 }
 
@@ -143,6 +147,7 @@ func (h *PageHandler) Delete(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "page not found"})
 		return
 	}
+	h.DB.Where("page_id = ?", id).Delete(&model.PageCategory{})
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
@@ -196,6 +201,7 @@ func (h *PageHandler) GetPublicPage(c *gin.Context) {
 	}
 
 	pageSlug := strings.Trim(rawPageSlug, "/")
+	unescaped, _ := url.PathUnescape(pageSlug)
 	var page model.Page
 	var err error
 	if pageSlug == "" || pageSlug == "index" {
@@ -206,11 +212,36 @@ func (h *PageHandler) GetPublicPage(c *gin.Context) {
 				Order("position asc, created_at asc").First(&page).Error
 		}
 	} else {
-		err = h.DB.Where("site_id = ? AND (slug = ? OR slug = ?) AND status = ? AND deleted_at IS NULL",
-			site.ID, pageSlug, "/"+pageSlug, model.PageStatusPublished).First(&page).Error
+		possibleSlugs := []string{pageSlug, "/" + pageSlug}
+		if unescaped != "" && unescaped != pageSlug {
+			possibleSlugs = append(possibleSlugs, unescaped, "/"+unescaped)
+		}
+		err = h.DB.Where("site_id = ? AND slug IN ? AND status = ? AND deleted_at IS NULL",
+			site.ID, possibleSlugs, model.PageStatusPublished).First(&page).Error
 	}
 
 	if err != nil {
+		lowerSlug := strings.ToLower(pageSlug)
+		lowerUnescaped := strings.ToLower(unescaped)
+		if strings.HasPrefix(lowerSlug, "category:") || strings.HasPrefix(lowerSlug, "カテゴリ:") ||
+			strings.HasPrefix(lowerUnescaped, "category:") || strings.HasPrefix(lowerUnescaped, "カテゴリ:") {
+			title := pageSlug
+			if unescaped != "" {
+				title = unescaped
+			}
+			syntheticPage := model.Page{
+				ID:        uuid.Nil,
+				SiteID:    site.ID,
+				Slug:      pageSlug,
+				Title:     title,
+				Content:   "",
+				Status:    model.PageStatusPublished,
+				CreatedAt: time.Now(),
+				UpdatedAt: time.Now(),
+			}
+			c.JSON(http.StatusOK, gin.H{"success": true, "data": syntheticPage})
+			return
+		}
 		c.JSON(http.StatusNotFound, gin.H{"error": "page not found"})
 		return
 	}
@@ -252,6 +283,7 @@ func (h *PageHandler) Restore(c *gin.Context) {
 
 	page.DeletedAt = nil
 	page.Status = model.PageStatusDraft
+	_ = SyncPageCategories(h.DB, &page)
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": page})
 }
 
@@ -300,6 +332,7 @@ func (h *PageHandler) Revert(c *gin.Context) {
 		return
 	}
 
+	_ = SyncPageCategories(h.DB, &page)
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": page})
 }
 

@@ -277,6 +277,50 @@ export const publicApi = {
     api.post(`/public/sites/${slug}/views`, { page_slug: pageSlug || '' }),
 };
 
+// --- Categories (MediaWiki Style) ---
+export interface CategorySummary {
+  name: string;
+  page_count: number;
+  subcategory_count: number;
+  total_count: number;
+}
+
+export interface CategoryMemberItem {
+  id: string;
+  slug: string;
+  title: string;
+  sort_key: string;
+  is_category: boolean;
+  category_name?: string;
+  member_count?: number;
+}
+
+export interface CategoryDetailData {
+  category_name: string;
+  page?: {
+    id: string;
+    slug: string;
+    title: string;
+    content: string;
+    created_at?: string;
+    updated_at?: string;
+  } | null;
+  subcategories: CategoryMemberItem[];
+  pages: CategoryMemberItem[];
+  grouped_pages: Record<string, CategoryMemberItem[]>;
+  total_pages: number;
+  total_subcategories: number;
+}
+
+export const categoriesApi = {
+  listPublic: (siteSlug: string) =>
+    api.get(`/public/sites/${siteSlug}/categories`),
+  getPublic: (siteSlug: string, categoryName: string) =>
+    api.get(`/public/sites/${siteSlug}/categories/${encodeURIComponent(categoryName)}`),
+  listForSite: (siteId: string) =>
+    api.get(`/sites/${siteId}/categories`),
+};
+
 // --- Comments (Phase 3) ---
 export interface CommentItem {
   id: string;

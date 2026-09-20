@@ -30,6 +30,46 @@ export function slugifyHeading(text: string): string {
   );
 }
 
+export interface ExtractedCategoryItem {
+  name: string;
+  sortKey: string;
+}
+
+/**
+ * Markdown本文から [[Category:カテゴリ名]] および [[カテゴリ:カテゴリ名]] を抽出
+ */
+export function extractCategoriesFromMarkdown(
+  content?: string,
+  defaultSortKey: string = ''
+): ExtractedCategoryItem[] {
+  if (!content) return [];
+  const regex = /\[\[(:?)(?:category|カテゴリ)\s*:\s*([^\]\n|]+)(?:\|([^\]\n]*))?\]\]/gi;
+  const categories: ExtractedCategoryItem[] = [];
+  const seen = new Set<string>();
+
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(content)) !== null) {
+    const isInline = match[1] === ':';
+    if (isInline) continue;
+
+    const rawName = (match[2] || '').trim();
+    if (!rawName) continue;
+
+    const lower = rawName.toLowerCase();
+    if (seen.has(lower)) continue;
+    seen.add(lower);
+
+    const sortKey =
+      (match[3] !== undefined && match[3] !== null ? match[3] : '').trim() ||
+      defaultSortKey ||
+      rawName;
+
+    categories.push({ name: rawName, sortKey });
+  }
+
+  return categories;
+}
+
 /**
  * Markdownの前処理:
  * 1. 箇条書きリスト内での斜体指定を補正
@@ -98,6 +138,24 @@ function preprocessMarkdown(content: string, siteSlug?: string): string {
   result = result.replace(/<font\s+color="([^"]+)"\s*>([\s\S]*?)<\/font>/gi, (match, color, text) => {
     return `[${text}](color:${encodeURIComponent(color.trim())})`;
   });
+
+  // 6.5. MediaWiki カテゴリ記法
+  // 6.5.1. インラインリンク: [[:Category:カテゴリ名]] または [[:Category:カテゴリ名|表示名]]
+  result = result.replace(
+    /\[\[:(?:category|カテゴリ)\s*:\s*([^\]\n|]+)(?:\|([^\]\n]+))?\]\]/gi,
+    (_, rawCat, rawLabel) => {
+      const catName = (rawCat || '').trim();
+      if (!catName) return '';
+      const label = (rawLabel ? rawLabel.trim() : `Category:${catName}`) || `Category:${catName}`;
+      if (siteSlug) {
+        return `[${label}](/sites/${siteSlug}/Category:${encodeURIComponent(catName)})`;
+      }
+      return `[${label}](/Category:${encodeURIComponent(catName)})`;
+    }
+  );
+
+  // 6.5.2. ページカテゴリ付与: [[Category:カテゴリ名]] または [[Category:カテゴリ名|ソートキー]] (本文からは除去)
+  result = result.replace(/\[\[(?:category|カテゴリ)\s*:\s*([^\]\n|]+)(?:\|([^\]\n]*))?\]\]\n?/gi, '');
 
   // 7. Wikiリンク [[target]] または [[target|label]]
   result = result.replace(/\[\[([^\]\n|]+)(?:\|([^\]\n]+))?\]\]/g, (_, rawTarget, rawLabel) => {

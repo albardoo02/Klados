@@ -28,6 +28,7 @@ import {
   Eye,
   FileClock,
   FileEdit,
+  FolderTree,
   Heading1,
   Heading2,
   Heading3,
@@ -467,6 +468,13 @@ export default function PageEditPage() {
         icon: Info,
         action: (range) =>
           insertText(':::info\nここに注意書きや追加情報を記述します。\n:::\n', undefined, range),
+      },
+      {
+        id: 'category',
+        label: 'カテゴリ (Category)',
+        description: 'MediaWiki風のカテゴリタグを挿入 ([[Category:カテゴリ名]])',
+        icon: FolderTree,
+        action: (range) => wrapText('[[Category:', ']]', 'カテゴリ名', range),
       },
       {
         id: 'image',
@@ -1933,6 +1941,15 @@ export default function PageEditPage() {
             title="KaTeX数式"
           >
             <Sigma className="size-4" />
+          </button>
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => wrapText('[[Category:', ']]', 'カテゴリ名')}
+            className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer"
+            title="カテゴリを付与 ([[Category:カテゴリ名]])"
+          >
+            <FolderTree className="size-4" />
           </button>
 
           <div className="h-4 w-px bg-border mx-1" />

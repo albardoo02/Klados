@@ -1,6 +1,8 @@
 package router
 
 import (
+	"context"
+	"fmt"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/klados/api/internal/config"
@@ -9,8 +11,6 @@ import (
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"gorm.io/gorm"
-	"context"
-	"fmt"
 	"log"
 	"net/http"
 	"strings"
@@ -86,6 +86,7 @@ func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
 	commentH := &handler.CommentHandler{DB: db}
 	apiKeyH := &handler.APIKeyHandler{DB: db}
 	analyticsH := &handler.AnalyticsHandler{DB: db}
+	categoryH := &handler.CategoryHandler{DB: db}
 	mediaH := &handler.MediaHandler{
 		DB:       db,
 		Minio:    minioClient,
@@ -112,6 +113,8 @@ func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
 		public.GET("/sites/:slug/robots.txt", siteH.GetRobotsTxt)
 		public.POST("/sites/:slug/view", analyticsH.RecordView)
 		public.POST("/sites/:slug/views", analyticsH.RecordView)
+		public.GET("/sites/:slug/categories", categoryH.ListPublic)
+		public.GET("/sites/:slug/categories/*name", categoryH.GetPublicCategory)
 		public.GET("/sites/:slug/pages", pageH.ListPublicBySlug)
 		public.GET("/sites/:slug/pages/*pageSlug", pageH.GetPublicPage)
 		public.POST("/sites/:slug/pages/*pageSlug", func(c *gin.Context) {
@@ -130,7 +133,6 @@ func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
 	// Direct media access by ID
 	api.GET("/media/:id", mediaH.ServeByID)
 	api.GET("/media/:id/content", mediaH.ServeByID)
-
 
 	// 認証 (Public)
 	auth := api.Group("/auth")
@@ -166,6 +168,7 @@ func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
 		protected.GET("/sites/:id/trash", pageH.ListTrash)
 		protected.GET("/sites/:id/export", siteH.Export)
 		protected.POST("/sites/:id/password", siteH.SetPassword)
+		protected.GET("/sites/:id/categories", categoryH.ListForSite)
 
 		// Site Members
 		protected.GET("/sites/:id/members", memberH.List)

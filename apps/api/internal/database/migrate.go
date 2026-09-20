@@ -17,5 +17,6 @@ func Migrate(db *gorm.DB) error {
 		&model.Comment{},
 		&model.APIKey{},
 		&model.SiteMember{},
+		&model.PageCategory{},
 	)
 }

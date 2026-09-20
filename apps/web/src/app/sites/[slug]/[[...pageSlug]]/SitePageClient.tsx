@@ -30,10 +30,15 @@ import {
   Info,
   LogIn,
   UserPlus,
+  FolderTree,
 } from 'lucide-react';
 import { PageActionTabs } from '@/components/wiki/page-action-tabs';
 import { SidebarEditorModal } from '@/components/wiki/sidebar-editor-modal';
 import { PageInfoModal } from '@/components/wiki/page-info-modal';
+import { CategoryBox } from '@/components/wiki/category-box';
+import { CategoryView } from '@/components/wiki/category-view';
+import { SpecialCategoriesView } from '@/components/wiki/special-categories-view';
+import { extractCategoriesFromMarkdown } from '@/components/markdown-renderer';
 import { SidebarSection, generateDefaultSidebar } from '@/types/sidebar';
 import { useAuthStore } from '@/store/auth';
 
@@ -157,6 +162,9 @@ Obsidian や Scrapbox、MediaWiki と同様に、\`[[slug]]\` や \`[[slug|表�
 - [[#目次 (ページ内リンクの例)|ページ先頭の目次へ戻る]]
 - [[guide|スタートガイドを読む (Wikiリンク)]]
 - [[features|機能詳細を見る (Wikiリンク)]]
+
+[[Category:スタートガイド]]
+[[Category:ドキュメント]]
 `,
   },
   {
@@ -185,6 +193,8 @@ Klados で新しいWebサイトを立ち上げる手順を解説します。
 # ローカル開発の起動
 pnpm dev
 \`\`\`
+
+[[Category:スタートガイド|01-guide]]
 `,
   },
   {
@@ -221,6 +231,22 @@ Klados で使用できる代表的な記法一覧です。
 | \`remark-gfm\` | 4.x | GFM拡張 |
 | \`rehype-highlight\` | 7.x | 構文ハイライト |
 | \`rehype-katex\` | 7.x | 数式レンダリング |
+
+[[Category:ドキュメント|記法]]
+[[Category:リファレンス]]
+`,
+  },
+  {
+    id: 'demo-4',
+    slug: 'Category:スタートガイド',
+    title: 'Category:スタートガイド',
+    status: 'published',
+    created_at: new Date().toISOString(),
+    content: `# カテゴリ: スタートガイド
+
+Klados の基本的な使い方やセットアップ手順に関するページのカテゴリです。
+
+[[Category:ドキュメント]]
 `,
   },
 ];
@@ -295,9 +321,38 @@ export default function SitePageClient() {
   const siteSlug = params.slug;
   const rawPageSlug = params.pageSlug;
 
-  const currentSlug = Array.isArray(rawPageSlug)
-    ? rawPageSlug.join('/')
-    : rawPageSlug || '';
+  const currentSlug = useMemo(() => {
+    const raw = Array.isArray(rawPageSlug)
+      ? rawPageSlug.join('/')
+      : rawPageSlug || '';
+    try {
+      return decodeURIComponent(raw);
+    } catch {
+      return raw;
+    }
+  }, [rawPageSlug]);
+
+  // カテゴリ関連の判定 (MediaWiki互換)
+  const isSpecialCategories = useMemo(() => {
+    const lower = currentSlug.toLowerCase();
+    return (
+      lower === 'special:categories' ||
+      lower === 'special:カテゴリ' ||
+      lower === '特別:カテゴリ' ||
+      lower === 'categories' ||
+      lower === 'カテゴリ'
+    );
+  }, [currentSlug]);
+
+  const isCategoryPage = useMemo(() => {
+    const lower = currentSlug.toLowerCase();
+    return lower.startsWith('category:') || currentSlug.startsWith('カテゴリ:');
+  }, [currentSlug]);
+
+  const categoryName = useMemo(() => {
+    if (!isCategoryPage) return '';
+    return currentSlug.replace(/^(?:category|カテゴリ):/i, '');
+  }, [isCategoryPage, currentSlug]);
 
   // 認証および権限判定
   const { user, token } = useAuthStore();
@@ -391,6 +446,12 @@ export default function SitePageClient() {
     (targetSlug
       ? pages.find((p) => p.slug === targetSlug || p.slug === `/${targetSlug}`)
       : pages[0]);
+
+  // ページに付与されたカテゴリの抽出
+  const pageCategories = useMemo(() => {
+    if (!activePage?.content) return [];
+    return extractCategoriesFromMarkdown(activePage.content);
+  }, [activePage?.content]);
 
   // コメント数取得
   const { data: comments = [] } = useQuery({
@@ -823,6 +884,14 @@ export default function SitePageClient() {
                       <Dices className="size-3.5 text-slate-400" />
                       <span>おまかせ表示</span>
                     </Link>
+                    <Link
+                      href={`/sites/${siteSlug}/Special:Categories`}
+                      className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800/60 hover:text-slate-900 dark:hover:text-white transition-colors"
+                      title="サイト内の全カテゴリを一覧表示"
+                    >
+                      <FolderTree className="size-3.5 text-slate-400" />
+                      <span>カテゴリ一覧</span>
+                    </Link>
                     <button
                       type="button"
                       onClick={() => typeof window !== 'undefined' && window.print()}
@@ -970,6 +1039,14 @@ export default function SitePageClient() {
                       <Dices className="size-4 text-slate-400" />
                       <span>おまかせ表示</span>
                     </Link>
+                    <Link
+                      href={`/sites/${siteSlug}/Special:Categories`}
+                      onClick={() => setMobileMenuOpen(false)}
+                      className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                    >
+                      <FolderTree className="size-4 text-slate-400" />
+                      <span>カテゴリ一覧</span>
+                    </Link>
                   </div>
                 )}
 
@@ -1027,6 +1104,23 @@ export default function SitePageClient() {
               />
               <p className="text-sm">ページを読み込み中...</p>
             </div>
+          ) : isSpecialCategories ? (
+            <SpecialCategoriesView
+              siteSlug={siteSlug}
+              site={site}
+              isDark={isDark}
+              allPages={pages}
+            />
+          ) : isCategoryPage ? (
+            <CategoryView
+              categoryName={categoryName}
+              siteSlug={siteSlug}
+              site={site}
+              canEdit={canEdit}
+              isDark={isDark}
+              categoryPage={activePage}
+              allPages={pages}
+            />
           ) : activePage ? (
             <article className="space-y-6">
               {/* MediaWiki スタイル アクションタブバー (閲覧・編集・ソースを表示・履歴表示・★・その他▼) */}
@@ -1087,6 +1181,13 @@ export default function SitePageClient() {
                   siteSlug={siteSlug}
                 />
               </div>
+
+              {/* MediaWiki スタイル カテゴリボックス (記事下部) */}
+              <CategoryBox
+                categories={pageCategories}
+                siteSlug={siteSlug}
+                primaryColor={brandPrimaryColor}
+              />
 
               {/* 記事下部コメントエリア */}
               <div className="pt-8 border-t border-border">
