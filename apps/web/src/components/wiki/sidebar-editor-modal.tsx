@@ -126,7 +126,7 @@ export function SidebarEditorModal({
   const handleAddLink = (secIndex: number) => {
     const next = [...sections];
     const newLink: SidebarLink = {
-      id: `link-${Date.now()}`,
+      id: `link-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       title: '新規リンク',
       url: '',
       isExternal: false,
@@ -135,9 +135,73 @@ export function SidebarEditorModal({
     setSections(next);
   };
 
+  // 開閉グループ（フォルダ）の追加
+  const handleAddFolder = (secIndex: number) => {
+    const next = [...sections];
+    const newFolder: SidebarLink = {
+      id: `folder-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      title: '新規グループ',
+      url: '',
+      isExternal: false,
+      children: [],
+      defaultOpen: false, // 初期状態: [+] 閉じる
+    };
+    next[secIndex].links.push(newFolder);
+    setSections(next);
+  };
+
+  // フォルダに子アイテムを追加
+  const handleAddChildToItem = (secIndex: number, linkIndex: number) => {
+    const next = [...sections];
+    const target = next[secIndex].links[linkIndex];
+    if (!target.children) {
+      target.children = [];
+    }
+    target.children.push({
+      id: `link-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      title: 'サブ項目',
+      url: '',
+      isExternal: false,
+    });
+    setSections(next);
+  };
+
+  // リンクをフォルダに変換、またはフォルダをリンクに変換
+  const handleToggleFolderType = (secIndex: number, linkIndex: number) => {
+    const next = [...sections];
+    const target = next[secIndex].links[linkIndex];
+    if (target.children !== undefined) {
+      delete target.children;
+      delete target.defaultOpen;
+    } else {
+      target.children = [];
+      target.defaultOpen = false;
+    }
+    setSections(next);
+  };
+
+  // 初期開閉状態のトグル
+  const handleToggleDefaultOpen = (secIndex: number, linkIndex: number) => {
+    const next = [...sections];
+    const target = next[secIndex].links[linkIndex];
+    if (target.children !== undefined) {
+      target.defaultOpen = !target.defaultOpen;
+    }
+    setSections(next);
+  };
+
   const handleDeleteLink = (secIndex: number, linkIndex: number) => {
     const next = [...sections];
     next[secIndex].links.splice(linkIndex, 1);
+    setSections(next);
+  };
+
+  const handleDeleteChild = (secIndex: number, linkIndex: number, childIndex: number) => {
+    const next = [...sections];
+    const target = next[secIndex].links[linkIndex];
+    if (target.children) {
+      target.children.splice(childIndex, 1);
+    }
     setSections(next);
   };
 
@@ -156,13 +220,32 @@ export function SidebarEditorModal({
     setSections(next);
   };
 
+  const handleChildChange = (
+    secIndex: number,
+    linkIndex: number,
+    childIndex: number,
+    field: 'title' | 'url',
+    val: string
+  ) => {
+    const next = [...sections];
+    const target = next[secIndex].links[linkIndex];
+    if (target.children && target.children[childIndex]) {
+      target.children[childIndex][field] = val;
+      if (field === 'url') {
+        target.children[childIndex].isExternal =
+          val.startsWith('http://') || val.startsWith('https://');
+      }
+    }
+    setSections(next);
+  };
+
   // 既存ページから選択して追加
   const handleSelectExistingPage = (secIndex: number, pageSlug: string) => {
     const page = availablePages.find((p) => p.slug === pageSlug);
     if (!page) return;
     const next = [...sections];
     next[secIndex].links.push({
-      id: `link-${Date.now()}`,
+      id: `link-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       title: page.title,
       url: page.slug === 'index' || page.slug === 'home' || page.slug === '' ? '' : page.slug,
       isExternal: false,
@@ -370,57 +453,151 @@ export function SidebarEditorModal({
                       </div>
                     </div>
 
-                    {/* リンク一覧 */}
-                    <div className="space-y-2 pl-2">
-                      {sec.links.map((link, linkIdx) => (
-                        <div
-                          key={link.id || linkIdx}
-                          className="flex items-center gap-2 text-xs"
-                        >
-                          <span className="text-slate-300 dark:text-slate-600">•</span>
-                          <input
-                            type="text"
-                            value={link.title}
-                            onChange={(e) =>
-                              handleLinkChange(secIdx, linkIdx, 'title', e.target.value)
-                            }
-                            placeholder="リンク名 (例: 利用規約)"
-                            className="w-48 bg-slate-50 dark:bg-slate-800/80 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200"
-                          />
-                          <input
-                            type="text"
-                            value={link.url}
-                            onChange={(e) =>
-                              handleLinkChange(secIdx, linkIdx, 'url', e.target.value)
-                            }
-                            placeholder="URL または スラグ (例: terms, https://...)"
-                            className="flex-1 font-mono text-[11px] bg-slate-50 dark:bg-slate-800/80 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200"
-                          />
-                          {link.isExternal && (
-                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-300 font-medium shrink-0 flex items-center gap-1">
-                              <Globe className="size-2.5" /> 外部
-                            </span>
-                          )}
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteLink(secIdx, linkIdx)}
-                            className="p-1.5 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
-                            title="リンクを削除"
+                    {/* リンク & フォルダ一覧 */}
+                    <div className="space-y-2.5 pl-1">
+                      {sec.links.map((link, linkIdx) => {
+                        const isFolder = link.children !== undefined;
+
+                        return (
+                          <div
+                            key={link.id || linkIdx}
+                            className={`rounded-xl border transition-colors ${
+                              isFolder
+                                ? 'bg-slate-50/90 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700/80 p-2.5 space-y-2'
+                                : 'border-transparent hover:border-slate-200 dark:hover:border-slate-800 p-1.5'
+                            }`}
                           >
-                            <Trash2 className="size-3.5" />
-                          </button>
-                        </div>
-                      ))}
+                            {/* アイテムヘッダー行 */}
+                            <div className="flex items-center gap-2 text-xs">
+                              {isFolder ? (
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleDefaultOpen(secIdx, linkIdx)}
+                                  className="size-5 shrink-0 border border-slate-400 dark:border-slate-500 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center justify-center rounded-xs font-mono font-bold text-[11px] text-slate-700 dark:text-slate-200 cursor-pointer shadow-2xs"
+                                  title={link.defaultOpen ? '初期状態: 開く [-] (クリックで閉じる [+] に変更)' : '初期状態: 閉じる [+] (クリックで開く [-] に変更)'}
+                                >
+                                  {link.defaultOpen ? '−' : '+'}
+                                </button>
+                              ) : (
+                                <span className="text-slate-400 dark:text-slate-500 font-bold ml-1 mr-0.5">•</span>
+                              )}
+
+                              <input
+                                type="text"
+                                value={link.title}
+                                onChange={(e) =>
+                                  handleLinkChange(secIdx, linkIdx, 'title', e.target.value)
+                                }
+                                placeholder={isFolder ? 'グループ名 (例: サーバー一覧)' : 'リンク名 (例: 利用規約)'}
+                                className={`bg-white dark:bg-slate-800 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 ${
+                                  isFolder ? 'w-52 font-semibold' : 'w-48'
+                                }`}
+                              />
+
+                              <input
+                                type="text"
+                                value={link.url}
+                                onChange={(e) =>
+                                  handleLinkChange(secIdx, linkIdx, 'url', e.target.value)
+                                }
+                                placeholder={isFolder ? 'URL（任意・空欄でも可）' : 'URL または スラグ (例: terms)'}
+                                className="flex-1 font-mono text-[11px] bg-white dark:bg-slate-800 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200"
+                              />
+
+                              {link.isExternal && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-300 font-medium shrink-0 flex items-center gap-1">
+                                  <Globe className="size-2.5" /> 外部
+                                </span>
+                              )}
+
+                              {/* フォルダ化 / リンク化 切り替え */}
+                              <button
+                                type="button"
+                                onClick={() => handleToggleFolderType(secIdx, linkIdx)}
+                                className="px-2 py-1 rounded-md text-[11px] font-medium text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40 border border-slate-200 dark:border-slate-700 cursor-pointer"
+                                title={isFolder ? '通常のリンクに戻す' : '折りたたみフォルダ（開閉グループ）に変換'}
+                              >
+                                {isFolder ? 'リンク化' : '📁 フォルダ化'}
+                              </button>
+
+                              {/* 削除ボタン */}
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteLink(secIdx, linkIdx)}
+                                className="p-1.5 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                                title="削除"
+                              >
+                                <Trash2 className="size-3.5" />
+                              </button>
+                            </div>
+
+                            {/* フォルダの場合: サブ項目（子リンク）のリスト */}
+                            {isFolder && (
+                              <div className="ml-6 pl-3 border-l-2 border-slate-200 dark:border-slate-700 space-y-2 pt-1">
+                                {link.children && link.children.length > 0 ? (
+                                  link.children.map((child, childIdx) => (
+                                    <div
+                                      key={child.id || childIdx}
+                                      className="flex items-center gap-2 text-xs"
+                                    >
+                                      <span className="text-slate-400 dark:text-slate-500">•</span>
+                                      <input
+                                        type="text"
+                                        value={child.title}
+                                        onChange={(e) =>
+                                          handleChildChange(secIdx, linkIdx, childIdx, 'title', e.target.value)
+                                        }
+                                        placeholder="サブリンク名"
+                                        className="w-44 bg-white dark:bg-slate-800 px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200"
+                                      />
+                                      <input
+                                        type="text"
+                                        value={child.url}
+                                        onChange={(e) =>
+                                          handleChildChange(secIdx, linkIdx, childIdx, 'url', e.target.value)
+                                        }
+                                        placeholder="スラグ または URL"
+                                        className="flex-1 font-mono text-[11px] bg-white dark:bg-slate-800 px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200"
+                                      />
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDeleteChild(secIdx, linkIdx, childIdx)}
+                                        className="p-1 rounded text-slate-400 hover:text-rose-500 cursor-pointer"
+                                        title="サブ項目を削除"
+                                      >
+                                        <Trash2 className="size-3" />
+                                      </button>
+                                    </div>
+                                  ))
+                                ) : (
+                                  <div className="text-[11px] text-slate-400 py-1 italic">
+                                    サブ項目がまだありません
+                                  </div>
+                                )}
+
+                                <button
+                                  type="button"
+                                  onClick={() => handleAddChildToItem(secIdx, linkIdx)}
+                                  className="inline-flex items-center gap-1 text-[11px] font-medium text-blue-600 dark:text-blue-400 hover:underline cursor-pointer pt-0.5"
+                                >
+                                  <Plus className="size-3" />
+                                  <span>サブ項目を追加</span>
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
 
                       {sec.links.length === 0 && (
-                        <div className="text-center py-3 text-xs text-slate-400 border border-dashed border-slate-200 dark:border-slate-800 rounded-xl">
-                          リンクがまだありません
+                        <div className="text-center py-4 text-xs text-slate-400 border border-dashed border-slate-200 dark:border-slate-800 rounded-xl">
+                          項目がまだありません。「リンクを追加」または「開閉グループを追加」してください
                         </div>
                       )}
                     </div>
 
-                    {/* リンク追加バー */}
-                    <div className="pt-2 flex items-center justify-between gap-3 text-xs border-t border-slate-100 dark:border-slate-800/60">
+                    {/* 項目追加バー */}
+                    <div className="pt-2 flex items-center justify-between gap-3 text-xs border-t border-slate-100 dark:border-slate-800/60 flex-wrap">
                       <div className="flex items-center gap-2">
                         <select
                           onChange={(e) => {
@@ -443,14 +620,24 @@ export function SidebarEditorModal({
                         </select>
                       </div>
 
-                      <button
-                        type="button"
-                        onClick={() => handleAddLink(secIdx)}
-                        className="inline-flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/50 cursor-pointer"
-                      >
-                        <Plus className="size-3.5" />
-                        <span>カスタムリンクを追加</span>
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleAddLink(secIdx)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/50 cursor-pointer"
+                        >
+                          <Plus className="size-3.5" />
+                          <span>リンクを追加</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleAddFolder(secIdx)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 cursor-pointer"
+                        >
+                          <Plus className="size-3.5" />
+                          <span>📁 開閉グループを追加</span>
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -469,14 +656,22 @@ export function SidebarEditorModal({
           ) : (
             /* Wikiテキスト直接編集 */
             <div className="space-y-3">
-              <div className="text-xs text-slate-500 dark:text-slate-400 space-y-1">
+              <div className="text-xs text-slate-500 dark:text-slate-400 space-y-1.5">
                 <p className="font-semibold text-slate-700 dark:text-slate-300">
-                  MediaWiki:Sidebar 記法仕様:
+                  MediaWiki & SeesaaWiki スタイル記法仕様:
                 </p>
                 <pre className="p-2.5 rounded-lg bg-slate-100 dark:bg-slate-800 font-mono text-[11px] leading-relaxed">
 {`* セクション見出し
-** ページスラッグまたはURL | 表示名
-** https://twitter.com/... | 公式Twitter`}
+** [-] 最初から開くフォルダ名
+*** サブページスラグ | 表示名
+*** [+] 最初から閉じるフォルダ名
+**** 孫ページスラグ | 表示名
+** 通常リンクスラグ | 表示名
+
+※ SeesaaWiki記法もサポートしています:
+[+] フォルダ名
+** サブページ
+[END]`}
                 </pre>
               </div>
               <textarea
@@ -484,7 +679,7 @@ export function SidebarEditorModal({
                 onChange={(e) => setWikitext(e.target.value)}
                 rows={18}
                 className="w-full p-4 rounded-xl bg-slate-900 text-slate-100 font-mono text-xs leading-relaxed border border-slate-700 focus:outline-blue-500 resize-none selection:bg-blue-600"
-                placeholder={`* 規約\n** /terms | 利用規約\n** /discord | Discordルール\n\n* リンク\n** https://klados.app | Klados公式サイト`}
+                placeholder={`* サーバー一覧\n** [-] Life生活鯖\n*** ルール（Life）\n*** 補填に関して\n*** [-] 初めての方へ\n**** テクスチャの導入\n*** [+] 経済関連\n** [+] The Slow Life\n\n* 全体\n** top | トップページ\n** rules | ルール`}
               />
             </div>
           )}

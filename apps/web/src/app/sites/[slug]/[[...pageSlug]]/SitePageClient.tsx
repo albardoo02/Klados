@@ -39,6 +39,7 @@ import { CategoryBox } from '@/components/wiki/category-box';
 import { CategoryView } from '@/components/wiki/category-view';
 import { SpecialCategoriesView } from '@/components/wiki/special-categories-view';
 import { extractCategoriesFromMarkdown } from '@/components/markdown-renderer';
+import { WikiSidebarTree } from '@/components/wiki/wiki-sidebar-tree';
 import { SidebarSection, generateDefaultSidebar } from '@/types/sidebar';
 import { useAuthStore } from '@/store/auth';
 
@@ -248,6 +249,169 @@ Klados の基本的な使い方やセットアップ手順に関するページ�
 
 [[Category:ドキュメント]]
 `,
+  },
+];
+
+// SeesaaWiki風 デモサイドバー構成（画像サンプル準拠）
+const DEMO_SIDEBAR_SECTIONS: SidebarSection[] = [
+  {
+    id: 'sec-general',
+    title: '全体',
+    links: [
+      { id: 'l-top', title: 'トップページ', url: 'index' },
+      { id: 'l-rules', title: 'ルール', url: 'rules' },
+      { id: 'l-guide', title: '初参加の方へ', url: 'guide' },
+      { id: 'l-vote', title: '投票について', url: 'vote' },
+      { id: 'l-support', title: 'サポート受付への連絡方法', url: 'support' },
+      { id: 'l-rules-ru', title: 'Правила', url: 'rules-ru' },
+    ],
+  },
+  {
+    id: 'sec-servers',
+    title: 'サーバー一覧',
+    links: [
+      {
+        id: 'f-life',
+        title: 'Life生活鯖',
+        url: 'life',
+        defaultOpen: true,
+        children: [
+          { id: 'c-rules-life', title: 'ルール（Life）', url: 'life-rules' },
+          { id: 'c-compensate', title: '補填に関して', url: 'life-compensation' },
+          { id: 'c-recipe', title: 'アイテムレシピ', url: 'life-recipes' },
+          { id: 'c-abbr', title: '略語について(Life)', url: 'life-abbrev' },
+          { id: 'c-patch', title: 'パッチノート', url: 'life-patchnotes' },
+          { id: 'c-event', title: 'イベント', url: 'life-events' },
+          {
+            id: 'f-beginners',
+            title: '初めての方へ',
+            url: 'life-beginner',
+            defaultOpen: true,
+            children: [
+              { id: 'b-start', title: '初めての方へ', url: 'life-beginner' },
+              { id: 'b-texture', title: 'テクスチャの導入', url: 'life-texture' },
+              { id: 'b-intro', title: 'LIFE鯖に来たらこれから始めればいい！', url: 'life-intro' },
+              { id: 'b-qa', title: 'LIFE鯖Q&A', url: 'life-qa' },
+              { id: 'b-exchange', title: '交換所', url: 'life-exchange' },
+              { id: 'b-world', title: 'ワールドの説明(Life)', url: 'life-world' },
+              { id: 'b-rank', title: 'Rank', url: 'life-rank' },
+              { id: 'b-mcmmo', title: 'MCMMO', url: 'life-mcmmo' },
+              { id: 'b-time', title: '時間補填(Life)', url: 'life-time' },
+              { id: 'b-chest', title: 'チェストの保護', url: 'life-chest' },
+            ],
+          },
+          {
+            id: 'f-economy',
+            title: '経済関連',
+            url: '',
+            defaultOpen: false,
+            children: [
+              { id: 'ec-1', title: '経済システム基礎', url: 'economy-basic' },
+              { id: 'ec-2', title: 'ショップ開設手順', url: 'economy-shop' },
+            ],
+          },
+          {
+            id: 'f-commands',
+            title: 'コマンド関連',
+            url: '',
+            defaultOpen: false,
+            children: [
+              { id: 'cmd-1', title: '基本コマンド一覧', url: 'cmd-list' },
+            ],
+          },
+          {
+            id: 'f-world',
+            title: 'ワールド関連',
+            url: '',
+            defaultOpen: false,
+            children: [
+              { id: 'wld-1', title: '資源ワールドについて', url: 'world-resource' },
+            ],
+          },
+          {
+            id: 'f-pve',
+            title: 'PVE関連',
+            url: '',
+            defaultOpen: false,
+            children: [
+              { id: 'pve-1', title: 'ダンジョン攻略', url: 'pve-dungeon' },
+            ],
+          },
+          {
+            id: 'f-others',
+            title: 'その他',
+            url: '',
+            defaultOpen: false,
+            children: [
+              { id: 'oth-1', title: '便利機能まとめ', url: 'features' },
+            ],
+          },
+        ],
+      },
+      {
+        id: 'f-tsl',
+        title: 'The Slow Life',
+        url: '',
+        defaultOpen: false,
+        children: [{ id: 'tsl-1', title: '概要とルール', url: 'tsl-overview' }],
+      },
+      {
+        id: 'f-lgw',
+        title: 'LGW鯖',
+        url: '',
+        defaultOpen: false,
+        children: [{ id: 'lgw-1', title: 'LGW銃撃戦ルール', url: 'lgw-rules' }],
+      },
+      {
+        id: 'f-afnw',
+        title: 'AFNW鯖',
+        url: '',
+        defaultOpen: false,
+        children: [{ id: 'afnw-1', title: 'サーバー情報', url: 'afnw-info' }],
+      },
+      {
+        id: 'f-vanilla',
+        title: 'ばにらいふ！鯖',
+        url: '',
+        defaultOpen: false,
+        children: [{ id: 'van-1', title: 'バニラ生活案内', url: 'vanilla-guide' }],
+      },
+      {
+        id: 'f-pg',
+        title: 'PG鯖',
+        url: '',
+        defaultOpen: false,
+        children: [{ id: 'pg-1', title: 'ミニゲーム一覧', url: 'pg-games' }],
+      },
+      {
+        id: 'f-aster',
+        title: 'AsterPvP鯖',
+        url: '',
+        defaultOpen: false,
+        children: [{ id: 'ast-1', title: 'PvP大会ルール', url: 'aster-pvp' }],
+      },
+      {
+        id: 'f-beta',
+        title: 'β公開サーバー',
+        url: '',
+        defaultOpen: false,
+        children: [{ id: 'beta-1', title: 'テスト参加要領', url: 'beta-join' }],
+      },
+      {
+        id: 'f-unreachable',
+        title: '現在ログイン出来ないサーバー',
+        url: '',
+        defaultOpen: false,
+        children: [{ id: 'unr-1', title: '休止サーバー情報', url: 'maintenance' }],
+      },
+      {
+        id: 'f-legacy',
+        title: '今は亡きサーバー',
+        url: '',
+        defaultOpen: false,
+        children: [{ id: 'leg-1', title: '過去の記録・アーカイブ', url: 'archives' }],
+      },
+    ],
   },
 ];
 
@@ -503,13 +667,16 @@ export default function SitePageClient() {
     }
   }, [site.settings, siteSlug]);
 
-  // 実効サイドバーセクション (設定がなければ既存ページ一覧から生成)
+  // 実効サイドバーセクション (設定がなければデモまたは既存ページ一覧から生成)
   const activeSidebarSections = useMemo<SidebarSection[]>(() => {
     if (sidebarSections && sidebarSections.length > 0) {
       return sidebarSections;
     }
+    if (isFallback) {
+      return DEMO_SIDEBAR_SECTIONS;
+    }
     return generateDefaultSidebar(pages);
-  }, [sidebarSections, pages]);
+  }, [sidebarSections, isFallback, pages]);
 
   // おまかせ表示 (ランダムページへ移動)
   const getRandomPageHref = () => {
@@ -772,20 +939,20 @@ export default function SitePageClient() {
 
       {/* メインレイアウト */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex gap-8">
-        {/* デスクトップ用サイドバー (MediaWiki:Sidebar) */}
+        {/* デスクトップ用サイドバー (SeesaaWiki風 開閉ツリーメニュー) */}
         <aside className="hidden md:block w-64 shrink-0">
-          <div className="sticky top-24 space-y-5">
+          <div className="sticky top-24 space-y-4">
             {/* サイドバーヘッダー & 編集ボタン (関係者のみ) */}
-            <div className="flex items-center justify-between pb-2 border-b border-border">
-              <span className="text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
-                ナビゲーション
+            <div className="flex items-center justify-between pb-1.5 border-b border-border">
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                Menu
               </span>
               {canEdit && (
                 <button
                   type="button"
                   onClick={() => setSidebarEditorOpen(true)}
                   className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors p-1 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
-                  title="サイドバーを編集 (MediaWiki:Sidebar)"
+                  title="サイドバーを編集 (MediaWiki / SeesaaWiki)"
                 >
                   <Settings2 className="size-3.5" />
                   <span>編集</span>
@@ -793,82 +960,14 @@ export default function SitePageClient() {
               )}
             </div>
 
-            {/* セクション別ナビゲーション一覧 */}
-            <div className="space-y-4">
-              {activeSidebarSections.map((sec) => (
-                <div key={sec.id} className="space-y-1">
-                  {sec.title && (
-                    <div className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider px-2 py-1 border-b border-slate-100 dark:border-slate-800/60 mb-1">
-                      {sec.title}
-                    </div>
-                  )}
-                  <nav className="space-y-0.5">
-                    {sec.links.map((link) => {
-                      const isExternal =
-                        link.isExternal ||
-                        link.url.startsWith('http://') ||
-                        link.url.startsWith('https://');
-
-                      if (isExternal) {
-                        return (
-                          <a
-                            key={link.id}
-                            href={link.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="flex items-center justify-between px-2.5 py-1.5 rounded-xl text-xs text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/60 transition-colors group"
-                          >
-                            <span className="truncate">{link.title}</span>
-                            <ExternalLink className="size-3 text-slate-400 group-hover:text-slate-600 dark:group-hover:text-slate-300 shrink-0" />
-                          </a>
-                        );
-                      }
-
-                      const cleanUrl = link.url.replace(/^\//, '');
-                      const isSelected =
-                        (cleanUrl === '' && (currentSlug === '' || currentSlug === 'index' || currentSlug === 'home')) ||
-                        (cleanUrl !== '' && (currentSlug === cleanUrl || currentSlug === `/${cleanUrl}`));
-
-                      const pageHref =
-                        cleanUrl === '' || cleanUrl === 'index' || cleanUrl === 'home'
-                          ? `/sites/${siteSlug}`
-                          : `/sites/${siteSlug}/${cleanUrl}`;
-
-                      return (
-                        <Link
-                          key={link.id}
-                          href={pageHref}
-                          style={
-                            isSelected
-                              ? {
-                                  color: brandPrimaryColor,
-                                  borderColor: `${brandPrimaryColor}40`,
-                                  backgroundColor: `${brandPrimaryColor}15`,
-                                }
-                              : undefined
-                          }
-                          className={`flex items-center justify-between px-2.5 py-1.5 rounded-xl text-xs transition-colors group ${
-                            isSelected
-                              ? 'font-bold border'
-                              : isDark
-                              ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-                              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-                          }`}
-                        >
-                          <span className="truncate">{link.title}</span>
-                          {isSelected && (
-                            <ChevronRight
-                              className="size-3 shrink-0"
-                              style={{ color: brandPrimaryColor }}
-                            />
-                          )}
-                        </Link>
-                      );
-                    })}
-                  </nav>
-                </div>
-              ))}
-
+            {/* SeesaaWiki 開閉ツリーナビゲーション */}
+            <WikiSidebarTree
+              sections={activeSidebarSections}
+              currentSlug={currentSlug}
+              siteSlug={siteSlug}
+              brandPrimaryColor={brandPrimaryColor}
+              isDark={isDark}
+            />
               {/* MediaWiki風「ツール」セクション */}
               {showToolsSection && (
                 <div className="space-y-1 pt-2 border-t border-slate-100 dark:border-slate-800/60">
@@ -913,7 +1012,6 @@ export default function SitePageClient() {
                   </nav>
                 </div>
               )}
-            </div>
 
             {/* サイドバーカスタマイズリンク (関係者のみ) */}
             {canEdit && (
@@ -963,92 +1061,40 @@ export default function SitePageClient() {
                   <X className="size-5" />
                 </button>
               </div>
-              <div className="space-y-4">
-                {activeSidebarSections.map((sec) => (
-                  <div key={sec.id} className="space-y-1">
-                    {sec.title && (
-                      <div className="text-xs font-bold text-slate-400 uppercase tracking-wider px-2 mb-1">
-                        {sec.title}
-                      </div>
-                    )}
-                    <nav className="space-y-1">
-                      {sec.links.map((link) => {
-                        const isExternal =
-                          link.isExternal ||
-                          link.url.startsWith('http://') ||
-                          link.url.startsWith('https://');
+              <div className="py-2">
+                <WikiSidebarTree
+                  sections={activeSidebarSections}
+                  currentSlug={currentSlug}
+                  siteSlug={siteSlug}
+                  brandPrimaryColor={brandPrimaryColor}
+                  isDark={isDark}
+                  onNavigate={() => setMobileMenuOpen(false)}
+                />
+              </div>
 
-                        if (isExternal) {
-                          return (
-                            <a
-                              key={link.id}
-                              href={link.url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="flex items-center justify-between px-3 py-2 rounded-xl text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-                            >
-                              <span>{link.title}</span>
-                              <ExternalLink className="size-3.5 text-slate-400" />
-                            </a>
-                          );
-                        }
-
-                        const cleanUrl = link.url.replace(/^\//, '');
-                        const isSelected =
-                          (cleanUrl === '' && (currentSlug === '' || currentSlug === 'index' || currentSlug === 'home')) ||
-                          (cleanUrl !== '' && (currentSlug === cleanUrl || currentSlug === `/${cleanUrl}`));
-
-                        const pageHref =
-                          cleanUrl === '' || cleanUrl === 'index' || cleanUrl === 'home'
-                            ? `/sites/${siteSlug}`
-                            : `/sites/${siteSlug}/${cleanUrl}`;
-
-                        return (
-                          <Link
-                            key={link.id}
-                            href={pageHref}
-                            onClick={() => setMobileMenuOpen(false)}
-                            style={isSelected ? { backgroundColor: brandPrimaryColor } : undefined}
-                            className={`flex items-center justify-between px-3 py-2 rounded-xl text-sm transition-colors ${
-                              isSelected
-                                ? 'text-white font-semibold'
-                                : isDark
-                                ? 'text-slate-300 hover:bg-slate-800'
-                                : 'text-slate-700 hover:bg-slate-100'
-                            }`}
-                          >
-                            <span>{link.title}</span>
-                            {isSelected && <ChevronRight className="size-4" />}
-                          </Link>
-                        );
-                      })}
-                    </nav>
+              {showToolsSection && (
+                <div className="pt-2 border-t border-border space-y-1">
+                  <div className="text-xs font-bold text-slate-400 uppercase tracking-wider px-2 mb-1">
+                    ツール
                   </div>
-                ))}
-
-                {showToolsSection && (
-                  <div className="pt-2 border-t border-border space-y-1">
-                    <div className="text-xs font-bold text-slate-400 uppercase tracking-wider px-2 mb-1">
-                      ツール
-                    </div>
-                    <Link
-                      href={getRandomPageHref()}
-                      onClick={() => setMobileMenuOpen(false)}
-                      className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-                    >
-                      <Dices className="size-4 text-slate-400" />
-                      <span>おまかせ表示</span>
-                    </Link>
-                    <Link
-                      href={`/sites/${siteSlug}/Special:Categories`}
-                      onClick={() => setMobileMenuOpen(false)}
-                      className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-                    >
-                      <FolderTree className="size-4 text-slate-400" />
-                      <span>カテゴリ一覧</span>
-                    </Link>
-                  </div>
-                )}
+                  <Link
+                    href={getRandomPageHref()}
+                    onClick={() => setMobileMenuOpen(false)}
+                    className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                  >
+                    <Dices className="size-4 text-slate-400" />
+                    <span>おまかせ表示</span>
+                  </Link>
+                  <Link
+                    href={`/sites/${siteSlug}/Special:Categories`}
+                    onClick={() => setMobileMenuOpen(false)}
+                    className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                  >
+                    <FolderTree className="size-4 text-slate-400" />
+                    <span>カテゴリ一覧</span>
+                  </Link>
+                </div>
+              )}
 
                 {/* モバイル用アカウント・管理ナビゲーション */}
                 <div className="pt-4 border-t border-border space-y-2">
@@ -1091,7 +1137,6 @@ export default function SitePageClient() {
                 </div>
               </div>
             </div>
-          </div>
         )}
 
         {/* メインコンテンツ記事領域 */}

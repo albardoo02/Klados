@@ -16,6 +16,8 @@ import {
   FolderKanban,
   Settings,
   AlertTriangle,
+  ShieldCheck,
+  CheckCircle2,
 } from 'lucide-react';
 import { authApi } from '@/lib/api';
 import { UserAvatar } from '@/components/user-avatar';
@@ -24,12 +26,27 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const t = useTranslations();
   const router = useRouter();
   const pathname = usePathname();
-  const { user, clearAuth } = useAuthStore();
+  const { user, clearAuth, updateUser } = useAuthStore();
   const [searchOpen, setSearchOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
   const [resending, setResending] = useState(false);
   const [resendStatus, setResendStatus] = useState<string | null>(null);
+  const [quickVerifying, setQuickVerifying] = useState(false);
+
+  const handleQuickVerify = async () => {
+    setQuickVerifying(true);
+    try {
+      await authApi.quickVerify();
+      if (user) {
+        updateUser({ email_verified: true });
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setQuickVerifying(false);
+    }
+  };
 
   const handleResend = async () => {
     setResending(true);
@@ -94,6 +111,20 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           <LocaleSwitcher />
 
           <div className="h-4 w-px bg-slate-200 hidden sm:block" />
+
+          {/* 認証・振り分け設定リンク */}
+          <Link
+            href="/dashboard/settings/auth"
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition-colors ${
+              pathname === '/dashboard/settings/auth'
+                ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+            }`}
+            title="認証・アクセス振り分け設定"
+          >
+            <ShieldCheck className="size-3.5" />
+            <span className="hidden md:inline">認証・SSO</span>
+          </Link>
 
           {/* APIキー設定リンク */}
           <Link
@@ -170,6 +201,18 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   </Link>
 
                   <Link
+                    href="/dashboard/settings/auth"
+                    onClick={() => setUserMenuOpen(false)}
+                    className="flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-slate-100 transition-colors text-slate-700 hover:text-slate-900"
+                  >
+                    <ShieldCheck className="size-4 text-emerald-600" />
+                    <div className="flex-1">
+                      <span>認証 & 振り分け設定</span>
+                      <span className="block text-[10px] text-slate-400 font-normal">メール確認・GitHub/Discord自動所属</span>
+                    </div>
+                  </Link>
+
+                  <Link
                     href="/dashboard/settings/api-keys"
                     onClick={() => setUserMenuOpen(false)}
                     className="flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-slate-100 transition-colors text-slate-700 hover:text-slate-900"
@@ -218,6 +261,16 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             </span>
           </div>
           <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={handleQuickVerify}
+              disabled={quickVerifying}
+              className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold transition-colors flex items-center gap-1 shadow-2xs disabled:opacity-50"
+              title="メールサーバー設定不要でワンクリックで認証済みにします"
+            >
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              <span>今すぐ認証完了（メール不要）</span>
+            </button>
             <Link
               href="/verify-email"
               className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-medium transition-colors"

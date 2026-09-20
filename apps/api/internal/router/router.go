@@ -142,6 +142,8 @@ func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
 		auth.POST("/demo-login", authH.DemoLogin)
 		auth.POST("/google", authH.GoogleLogin)
 		auth.POST("/github", authH.GitHubLogin)
+		auth.POST("/discord", authH.DiscordLogin)
+		auth.GET("/config", authH.GetAuthConfig)
 		auth.POST("/verify-email", authH.VerifyEmail)
 		auth.POST("/resend-verification", authH.ResendVerification)
 	}
@@ -154,6 +156,13 @@ func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
 		protected.PATCH("/auth/profile", authH.UpdateProfile)
 		protected.PATCH("/auth/password", authH.ChangePassword)
 		protected.POST("/auth/avatar", mediaH.UploadAvatar)
+		protected.PUT("/auth/config", authH.UpdateAuthConfig)
+		protected.POST("/auth/quick-verify", authH.QuickVerify)
+		protected.GET("/auth/routing-rules", authH.ListRoutingRules)
+		protected.POST("/auth/routing-rules", authH.CreateRoutingRule)
+		protected.PUT("/auth/routing-rules/:id", authH.UpdateRoutingRule)
+		protected.DELETE("/auth/routing-rules/:id", authH.DeleteRoutingRule)
+		protected.POST("/auth/routing-rules/test", authH.TestRoutingRule)
 
 		// Sites
 		protected.GET("/sites", siteH.List)

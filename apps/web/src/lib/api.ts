@@ -55,6 +55,46 @@ api.interceptors.response.use(
   }
 );
 
+// --- Auth Types ---
+export interface AuthConfig {
+  id: string;
+  require_email_verification: boolean;
+  default_role: string;
+  allowed_domains: string;
+  restrict_to_rules: boolean;
+  updated_at: string;
+}
+
+export interface AuthRoutingRule {
+  id: string;
+  name: string;
+  enabled: boolean;
+  provider: 'all' | 'google' | 'github' | 'discord' | 'email';
+  rule_type: 'github_org' | 'discord_guild' | 'email_domain' | 'email_list';
+  match_value: string;
+  action_type: 'assign_site_role' | 'none';
+  target_site_id?: string;
+  target_role: 'admin' | 'editor' | 'viewer';
+  auto_verify: boolean;
+  target_site?: {
+    id: string;
+    title: string;
+    slug: string;
+  };
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AppliedRuleResult {
+  rule_name: string;
+  rule_type: string;
+  match_value: string;
+  site_id?: string;
+  site_title?: string;
+  site_slug?: string;
+  role?: string;
+}
+
 // --- Auth ---
 export const authApi = {
   register: (data: { email: string; username: string; password: string; display_name?: string }) =>
@@ -74,8 +114,26 @@ export const authApi = {
     api.post('/auth/demo-login'),
   googleLogin: (data?: { email?: string; name?: string; token?: string; credential?: string }) =>
     api.post('/auth/google', data || {}),
-  githubLogin: (data?: { email?: string; name?: string; token?: string }) =>
+  githubLogin: (data?: { email?: string; name?: string; token?: string; org?: string }) =>
     api.post('/auth/github', data || {}),
+  discordLogin: (data?: { email?: string; name?: string; token?: string; guild_id?: string; guild_name?: string }) =>
+    api.post('/auth/discord', data || {}),
+  quickVerify: () =>
+    api.post<{ success: boolean; message: string }>('/auth/quick-verify'),
+  getAuthConfig: () =>
+    api.get<{ success: boolean; data: { config: AuthConfig; active_rules_count: number; oauth_providers: string[] } }>('/auth/config'),
+  updateAuthConfig: (data: Partial<AuthConfig>) =>
+    api.put<{ success: boolean; message: string; data: AuthConfig }>('/auth/config', data),
+  getRoutingRules: () =>
+    api.get<{ success: boolean; data: AuthRoutingRule[] }>('/auth/routing-rules'),
+  createRoutingRule: (data: Partial<AuthRoutingRule>) =>
+    api.post<{ success: boolean; message: string; data: AuthRoutingRule }>('/auth/routing-rules', data),
+  updateRoutingRule: (id: string, data: Partial<AuthRoutingRule>) =>
+    api.put<{ success: boolean; message: string; data: AuthRoutingRule }>(`/auth/routing-rules/${id}`, data),
+  deleteRoutingRule: (id: string) =>
+    api.delete<{ success: boolean; message: string }>(`/auth/routing-rules/${id}`),
+  testRoutingRule: (data: { provider: string; email: string; org?: string; guild_id?: string; guild_name?: string }) =>
+    api.post<{ success: boolean; data: { matched_count: number; matches: AppliedRuleResult[]; auto_verified: boolean } }>('/auth/routing-rules/test', data),
   uploadAvatar: (file: File) => {
     const formData = new FormData();
     formData.append('file', file);

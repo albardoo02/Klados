@@ -18,5 +18,7 @@ func Migrate(db *gorm.DB) error {
 		&model.APIKey{},
 		&model.SiteMember{},
 		&model.PageCategory{},
+		&model.AuthConfig{},
+		&model.AuthRoutingRule{},
 	)
 }

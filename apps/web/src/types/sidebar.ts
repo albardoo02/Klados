@@ -3,11 +3,13 @@ export interface SidebarLink {
   title: string;
   url: string; // スラグ (例: 'guide', '/terms') または外部URL (例: 'https://twitter.com')
   isExternal?: boolean;
+  children?: SidebarLink[]; // サブ項目（開閉ツリーメニュー用）
+  defaultOpen?: boolean; // 初期状態で開いているか（[-]ならtrue、[+]ならfalse。デフォルト: false）
 }
 
 export interface SidebarSection {
   id: string;
-  title: string; // セクション見出し (例: "メイン", "規約", "情報", "公開サーバー", "ツール")
+  title: string; // セクション見出し (例: "全体", "サーバー一覧")
   links: SidebarLink[];
 }
 
@@ -24,7 +26,7 @@ export function generateDefaultSidebar(pages: Array<{ id: string; slug: string; 
   return [
     {
       id: 'sec-main',
-      title: 'ナビゲーション',
+      title: '全体',
       links: pages.map((p) => ({
         id: p.id || p.slug,
         title: p.title,
@@ -36,75 +38,200 @@ export function generateDefaultSidebar(pages: Array<{ id: string; slug: string; 
 }
 
 /**
- * MediaWiki風のテキスト形式 (* セクション名 \n ** url|表示名) から SidebarSection[] にパースする
+ * MediaWiki & SeesaaWiki風のテキスト形式から SidebarSection[]（ツリー構造含む）にパースする
+ *
+ * 対応構文:
+ * - `* セクション名` (セクション見出し)
+ * - `** url|表示名` または `** 表示名` (セクション直下リンク)
+ * - `** [+] フォルダ名` (初期状態で閉じた折りたたみグループ)
+ * - `** [-] フォルダ名` (初期状態で開いた折りたたみグループ)
+ * - `*** サブリンク` (1階層ネスト)
+ * - `**** サブサブリンク` (多階層ネスト)
+ * - SeesaaWiki記法: `[+] フォルダ名` 〜 `[END]` / `[-] フォルダ名` 〜 `[END]`
  */
 export function parseMediaWikiSidebarText(text: string): SidebarSection[] {
   const lines = text.split('\n');
   const sections: SidebarSection[] = [];
   let currentSection: SidebarSection | null = null;
 
-  for (const rawLine of lines) {
-    const line = rawLine.trim();
-    if (!line) continue;
+  // スタック管理: 各階層の親リンクと深さ
+  const stack: Array<{ link: SidebarLink; depth: number }> = [];
 
-    // * セクション名
-    if (line.startsWith('*') && !line.startsWith('**')) {
-      const title = line.substring(1).trim();
+  for (const rawLine of lines) {
+    const trimmed = rawLine.trim();
+    if (!trimmed) continue;
+
+    // SeesaaWiki: [END] でスタックを1つポップ
+    if (trimmed.toUpperCase() === '[END]') {
+      if (stack.length > 0) {
+        stack.pop();
+      }
+      continue;
+    }
+
+    // * セクション名 (* 見出し だが ** ではない)
+    if (trimmed.startsWith('*') && !trimmed.startsWith('**')) {
+      const title = trimmed.substring(1).trim();
       currentSection = {
         id: `sec-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
         title,
         links: [],
       };
       sections.push(currentSection);
+      stack.length = 0; // セクションが変わったら階層スタックをリセット
       continue;
     }
 
-    // ** url|ラベル または ** ラベル
-    if (line.startsWith('**')) {
-      const content = line.substring(2).trim();
-      let url = content;
-      let title = content;
+    let depth = 2; // デフォルト深さ (セクション直下)
+    let content = trimmed;
+    let defaultOpen: boolean | undefined = undefined;
+    let isExplicitFolder = false;
 
-      if (content.includes('|')) {
-        const parts = content.split('|');
-        url = parts[0].trim();
-        title = parts[1].trim() || parts[0].trim();
-      }
+    // アスタリスク階層の検出 (** => 2, *** => 3, **** => 4 ...)
+    const asteriskMatch = trimmed.match(/^(\*{2,})\s*(.*)$/);
+    // ハイフン階層の検出 (- => 2, -- => 3 ...)
+    const dashMatch = trimmed.match(/^(-+)\s*(.*)$/);
 
-      const isExternal = url.startsWith('http://') || url.startsWith('https://');
+    if (asteriskMatch) {
+      depth = asteriskMatch[1].length;
+      content = asteriskMatch[2].trim();
+    } else if (dashMatch) {
+      depth = dashMatch[1].length + 1;
+      content = dashMatch[2].trim();
+    } else if (trimmed.startsWith('[+]') || trimmed.startsWith('[-]')) {
+      depth = stack.length > 0 ? stack[stack.length - 1].depth + 1 : 2;
+    } else {
+      depth = stack.length > 0 ? stack[stack.length - 1].depth + 1 : 2;
+    }
 
-      const link: SidebarLink = {
-        id: `link-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-        title,
-        url,
-        isExternal,
+    // [+] または [-] 開閉プレフィックスの抽出
+    if (content.startsWith('[+]') || content.startsWith('[＋]')) {
+      defaultOpen = false;
+      isExplicitFolder = true;
+      content = content.replace(/^\[[+＋]\]\s*/, '').trim();
+    } else if (content.startsWith('[-]') || content.startsWith('[ー]') || content.startsWith('[-]')) {
+      defaultOpen = true;
+      isExplicitFolder = true;
+      content = content.replace(/^\[[-ー]\]\s*/, '').trim();
+    }
+
+    let url = '';
+    let title = content;
+
+    if (content.includes('|')) {
+      const parts = content.split('|');
+      url = parts[0].trim();
+      title = parts[1].trim() || parts[0].trim();
+    } else {
+      url = content;
+    }
+
+    const isExternal = url.startsWith('http://') || url.startsWith('https://');
+
+    const link: SidebarLink = {
+      id: `link-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      title,
+      url,
+      isExternal,
+      ...(isExplicitFolder ? { children: [], defaultOpen } : {}),
+    };
+
+    if (!currentSection) {
+      currentSection = {
+        id: `sec-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        title: '全体',
+        links: [],
       };
+      sections.push(currentSection);
+    }
 
-      if (!currentSection) {
-        currentSection = {
-          id: `sec-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-          title: 'メイン',
-          links: [],
-        };
-        sections.push(currentSection);
+    // スタックを現在の深さに合わせて巻き戻す (現在の深さ以上の親をポップ)
+    while (stack.length > 0 && stack[stack.length - 1].depth >= depth) {
+      stack.pop();
+    }
+
+    if (stack.length > 0) {
+      // 直近の親の子要素として追加
+      const parent = stack[stack.length - 1].link;
+      if (!parent.children) {
+        parent.children = [];
       }
-
+      parent.children.push(link);
+    } else {
+      // セクション直下に追加
       currentSection.links.push(link);
     }
+
+    // フォルダであるか、または下位階層を持ち得る場合はスタックに積む
+    stack.push({ link, depth });
+  }
+
+  // 子要素を持たないリンクで、明示的なフォルダ指定もなかったものは children を整理
+  const cleanupChildren = (items: SidebarLink[]) => {
+    for (const item of items) {
+      if (item.children) {
+        if (item.children.length === 0 && item.defaultOpen === undefined) {
+          delete item.children;
+        } else {
+          cleanupChildren(item.children);
+        }
+      }
+    }
+  };
+
+  for (const sec of sections) {
+    cleanupChildren(sec.links);
   }
 
   return sections;
 }
 
 /**
- * SidebarSection[] を MediaWiki風のテキスト形式に変換する
+ * SidebarSection[] を MediaWiki & SeesaaWiki風のテキスト形式に変換する
  */
 export function stringifyMediaWikiSidebar(sections: SidebarSection[]): string {
+  const renderItem = (item: SidebarLink, depth: number): string => {
+    const asterisks = '*'.repeat(depth);
+    const prefix = item.children !== undefined
+      ? (item.defaultOpen ? '[-] ' : '[+] ')
+      : '';
+    const linkStr = item.url && item.url !== item.title
+      ? `${item.url}|${item.title}`
+      : item.title;
+
+    let line = `${asterisks} ${prefix}${linkStr}`;
+    if (item.children && item.children.length > 0) {
+      const childLines = item.children.map((c) => renderItem(c, depth + 1)).join('\n');
+      line += `\n${childLines}`;
+    }
+    return line;
+  };
+
   return sections
     .map((sec) => {
       const header = `* ${sec.title}`;
-      const links = sec.links.map((l) => `** ${l.url}|${l.title}`).join('\n');
+      const links = sec.links.map((l) => renderItem(l, 2)).join('\n');
       return links ? `${header}\n${links}` : header;
     })
     .join('\n\n');
+}
+
+/**
+ * リンクまたはその子孫に指定URL（スラグ）が含まれているかを判定
+ */
+export function containsUrl(item: SidebarLink, targetUrl: string): boolean {
+  const cleanTarget = targetUrl.replace(/^\//, '');
+  const cleanItemUrl = item.url.replace(/^\//, '');
+
+  if (cleanTarget === cleanItemUrl) return true;
+  if ((cleanTarget === '' || cleanTarget === 'index' || cleanTarget === 'home') &&
+      (cleanItemUrl === '' || cleanItemUrl === 'index' || cleanItemUrl === 'home')) {
+    return true;
+  }
+
+  if (item.children && item.children.length > 0) {
+    return item.children.some((c) => containsUrl(c, targetUrl));
+  }
+
+  return false;
 }

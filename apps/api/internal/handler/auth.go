@@ -45,6 +45,9 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
+	authConfig := h.getOrCreateAuthConfig()
+	emailVerified := !authConfig.RequireEmailVerification
+
 	pass := string(hashed)
 	verificationToken := uuid.New().String()
 	verificationExpires := time.Now().Add(24 * time.Hour)
@@ -53,7 +56,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		Username:              req.Username,
 		Password:              &pass,
 		DisplayName:           req.DisplayName,
-		EmailVerified:         false,
+		EmailVerified:         emailVerified,
 		VerificationToken:     &verificationToken,
 		VerificationExpiresAt: &verificationExpires,
 	}
@@ -62,6 +65,9 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		c.JSON(http.StatusConflict, gin.H{"error": "email or username already exists"})
 		return
 	}
+
+	// 振り分けルールの適用
+	h.applyRoutingRules(user, "email", "", "", "", req.Email, true)
 
 	token, err := h.generateToken(user.ID.String(), 24*time.Hour)
 	if err != nil {
@@ -75,6 +81,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 			"token":                token,
 			"user":                 user,
 			"dev_verification_url": "http://localhost:3000/verify-email?token=" + verificationToken,
+			"require_verification": authConfig.RequireEmailVerification,
 		},
 	})
 }
@@ -160,8 +167,8 @@ func (h *AuthHandler) ResendVerification(c *gin.Context) {
 
 	if user.EmailVerified {
 		c.JSON(http.StatusOK, gin.H{
-			"success": true,
-			"message": "このメールアドレスは既に認証済みです",
+			"success":          true,
+			"message":          "このメールアドレスは既に認証済みです",
 			"already_verified": true,
 		})
 		return
@@ -419,11 +426,15 @@ console.log("Hello, Klados!");
 }
 
 type oauthLoginRequest struct {
-	Provider  string `json:"provider"`
-	Email     string `json:"email"`
-	Name      string `json:"name"`
-	AvatarURL string `json:"avatar_url"`
-	Token     string `json:"token"`
+	Provider  string   `json:"provider"`
+	Email     string   `json:"email"`
+	Name      string   `json:"name"`
+	AvatarURL string   `json:"avatar_url"`
+	Token     string   `json:"token"`
+	Org       string   `json:"org"`        // GitHub 組織名
+	GuildID   string   `json:"guild_id"`   // Discord サーバーID
+	GuildName string   `json:"guild_name"` // Discord サーバー名
+	Roles     []string `json:"roles"`      // Discord ロール
 }
 
 func (h *AuthHandler) GoogleLogin(c *gin.Context) {
@@ -464,7 +475,69 @@ func (h *AuthHandler) GitHubLogin(c *gin.Context) {
 	h.handleOAuthUser(c, req)
 }
 
+func (h *AuthHandler) DiscordLogin(c *gin.Context) {
+	var req oauthLoginRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "リクエスト形式が不正です"})
+		return
+	}
+
+	if req.Email == "" {
+		req.Email = "discord.user@example.com"
+	}
+	if req.Name == "" {
+		req.Name = "Discord ユーザー"
+	}
+	req.Provider = "discord"
+
+	h.handleOAuthUser(c, req)
+}
+
 func (h *AuthHandler) handleOAuthUser(c *gin.Context, req oauthLoginRequest) {
+	authConfig := h.getOrCreateAuthConfig()
+
+	// 1. ドメインホワイトリスト制限チェック (AllowedDomains)
+	if authConfig.AllowedDomains != "" {
+		emailLower := strings.ToLower(strings.TrimSpace(req.Email))
+		emailDomain := ""
+		if atIdx := strings.LastIndex(emailLower, "@"); atIdx != -1 {
+			emailDomain = emailLower[atIdx:]
+		}
+		domains := strings.Split(authConfig.AllowedDomains, ",")
+		domainAllowed := false
+		for _, d := range domains {
+			d = strings.TrimSpace(strings.ToLower(d))
+			if !strings.HasPrefix(d, "@") {
+				d = "@" + d
+			}
+			if emailDomain == d {
+				domainAllowed = true
+				break
+			}
+		}
+		if !domainAllowed {
+			c.JSON(http.StatusForbidden, gin.H{
+				"error": fmt.Sprintf("このメールドメイン（%s）からのログインは許可されていません。", emailDomain),
+			})
+			return
+		}
+	}
+
+	// 2. 事前振り分けテスト（ホワイトリスト制限チェック用）
+	dummyUser := &model.User{Email: req.Email}
+	preMatches, _ := h.applyRoutingRules(dummyUser, req.Provider, req.Org, req.GuildID, req.GuildName, req.Email, false)
+
+	if authConfig.RestrictToRules {
+		var activeRuleCount int64
+		h.DB.Model(&model.AuthRoutingRule{}).Where("enabled = ?", true).Count(&activeRuleCount)
+		if activeRuleCount > 0 && len(preMatches) == 0 {
+			c.JSON(http.StatusForbidden, gin.H{
+				"error": "許可された組織（GitHub/Discord）または承認済みメールドメインのユーザーのみログインできます。",
+			})
+			return
+		}
+	}
+
 	var user model.User
 	err := h.DB.Where("email = ?", req.Email).First(&user).Error
 	if err != nil {
@@ -480,7 +553,7 @@ func (h *AuthHandler) handleOAuthUser(c *gin.Context, req oauthLoginRequest) {
 			Username:      username,
 			DisplayName:   req.Name,
 			AvatarURL:     req.AvatarURL,
-			EmailVerified: true, // Google / OAuthプロバイダー認証済み
+			EmailVerified: true, // Google / GitHub / Discord OAuth認証済み
 			Plan:          model.PlanFree,
 		}
 		if err := h.DB.Create(&user).Error; err != nil {
@@ -516,6 +589,9 @@ func (h *AuthHandler) handleOAuthUser(c *gin.Context, req oauthLoginRequest) {
 		}
 	}
 
+	// 3. 振り分けルールの永続実行（サイト所属・ロール付与）
+	appliedRules, _ := h.applyRoutingRules(&user, req.Provider, req.Org, req.GuildID, req.GuildName, req.Email, true)
+
 	token, err := h.generateToken(user.ID.String(), 30*24*time.Hour)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "トークンの生成に失敗しました"})
@@ -525,8 +601,9 @@ func (h *AuthHandler) handleOAuthUser(c *gin.Context, req oauthLoginRequest) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
-			"token": token,
-			"user":  user,
+			"token":           token,
+			"user":            user,
+			"routing_matches": appliedRules,
 		},
 	})
 }

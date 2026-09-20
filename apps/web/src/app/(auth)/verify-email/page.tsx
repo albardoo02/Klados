@@ -65,6 +65,24 @@ function VerifyEmailContent() {
     }
   };
 
+  const [quickLoading, setQuickLoading] = useState(false);
+  const handleQuickVerify = async () => {
+    setQuickLoading(true);
+    try {
+      const res = await authApi.quickVerify();
+      setStatus('success');
+      setMessage(res.data?.message || 'メールアドレスを認証済みに設定しました！');
+      if (user) {
+        updateUser({ email_verified: true });
+      }
+    } catch (err: any) {
+      setStatus('error');
+      setMessage(err?.response?.data?.error || '即時認証に失敗しました');
+    } finally {
+      setQuickLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-50 px-4 py-12">
       <div className="w-full max-w-md bg-white rounded-3xl shadow-xl border border-slate-200/80 p-8 text-center">
@@ -161,7 +179,37 @@ function VerifyEmailContent() {
               ご登録いただいたメールアドレス宛に認証トークン付きリンクをお送りしています。届いたトークンを入力するか、メールのリンクをクリックしてください。
             </p>
 
-            <form onSubmit={handleManualSubmit} className="space-y-3 pt-2 text-left">
+            <div className="p-3.5 bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200 rounded-2xl text-left space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-emerald-900">メール設定なしで認証</span>
+                <span className="text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded font-bold">開発・簡単利用</span>
+              </div>
+              <p className="text-[11px] text-emerald-800">
+                メールサーバーを用意せず、今すぐこのアカウントを認証済みにします。
+              </p>
+              <button
+                type="button"
+                onClick={handleQuickVerify}
+                disabled={quickLoading}
+                className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-1.5 disabled:opacity-50 cursor-pointer"
+              >
+                {quickLoading ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                )}
+                今すぐワンクリックで認証完了にする
+              </button>
+            </div>
+
+            <div className="relative flex items-center justify-center my-3">
+              <div className="border-t border-slate-200 w-full" />
+              <span className="bg-white px-2 text-[10px] text-slate-400 absolute">
+                またはトークンを入力
+              </span>
+            </div>
+
+            <form onSubmit={handleManualSubmit} className="space-y-3 pt-1 text-left">
               <div>
                 <label className="block text-xs font-medium text-slate-700 mb-1">
                   認証トークン
