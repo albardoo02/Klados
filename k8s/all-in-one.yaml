@@ -274,23 +274,6 @@ spec:
         - name: web
           image: ghcr.io/albardoo02/klados-web:latest
           imagePullPolicy: Always
-          command:
-            - /bin/sh
-            - -c
-            - |
-              find /app -name routes-manifest.json -exec sed -i 's|http://127.0.0.1:8080|http://klados-api:8080|g' {} +
-              ENTRY=$(find /app -name server.js | head -n 1)
-              if [ -n "$ENTRY" ]; then
-                DIR=$(dirname "$ENTRY")
-                mkdir -p "$DIR/.next"
-                cp -rn /app/.next/static "$DIR/.next/" 2>/dev/null || true
-                cp -rn /app/public "$DIR/" 2>/dev/null || true
-                echo "Starting Next.js server from $DIR"
-                cd "$DIR" && exec node server.js
-              else
-                echo "server.js not found under /app"
-                exit 1
-              fi
           ports:
             - containerPort: 3000
           env:
