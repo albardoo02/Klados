@@ -1090,13 +1090,12 @@ export default function PageEditPage() {
   useEffect(() => {
     if (!editorRef.current || !page || viewRef.current) return;
 
-    const initialContent = page.content ?? '';
+    const initialContent = (page.content ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
     const keybindingCompartment = new Compartment();
     keybindingCompartmentRef.current = keybindingCompartment;
 
     const startState = EditorState.create({
       doc: initialContent,
-      selection: { anchor: initialContent.length }, // 初期カーソル位置を末尾に設定
       extensions: [
         basicSetup,
         markdown(),
@@ -1140,8 +1139,14 @@ export default function PageEditPage() {
 
     const view = new EditorView({ state: startState, parent: editorRef.current });
     viewRef.current = view;
+
+    // 初期カーソル位置を安全に末尾に設定
+    const docLength = view.state.doc.length;
+    view.dispatch({
+      selection: { anchor: docLength, head: docLength },
+    });
     setPreview(initialContent);
-    lastSelectionRef.current = { from: initialContent.length, to: initialContent.length };
+    lastSelectionRef.current = { from: docLength, to: docLength };
 
     return () => {
       view.destroy();
