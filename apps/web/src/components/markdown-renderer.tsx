@@ -6,7 +6,7 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeHighlight from 'rehype-highlight';
 import rehypeKatex from 'rehype-katex';
-import { Check, Copy } from 'lucide-react';
+import { Check, Copy, Image as ImageIcon } from 'lucide-react';
 import { resolveMediaUrl } from '@/lib/media';
 
 interface MarkdownRendererProps {
@@ -201,6 +201,64 @@ function extractText(node: React.ReactNode): string {
     return extractText((node.props as any).children);
   }
   return '';
+}
+
+/**
+ * 画像コンポーネント (エラー時フォールバック付き)
+ */
+function MarkdownImage({
+  src,
+  rawSrc,
+  alt,
+  ...props
+}: {
+  src: string;
+  rawSrc: string;
+  alt?: string;
+  [key: string]: any;
+}) {
+  const [error, setError] = useState(false);
+  const [triedFallback, setTriedFallback] = useState(false);
+
+  const handleError = () => {
+    if (rawSrc && src !== rawSrc && !triedFallback) {
+      setTriedFallback(true);
+    } else {
+      setError(true);
+    }
+  };
+
+  if (error) {
+    return (
+      <div className="my-6 p-4 rounded-xl border border-dashed border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/30 flex items-center justify-center gap-2.5 text-xs text-slate-400 select-none">
+        <ImageIcon className="size-4 text-slate-400 shrink-0" />
+        <span className="font-mono text-[11px] truncate max-w-xs">
+          {alt || rawSrc || '画像'}
+        </span>
+        <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-800 text-slate-500 font-medium">
+          読み込み失敗 (404)
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <figure className="my-6">
+      <img
+        src={triedFallback ? rawSrc : src}
+        alt={alt || 'image'}
+        className="rounded-xl shadow-md max-w-full h-auto mx-auto border border-border transition-transform hover:scale-[1.01]"
+        loading="lazy"
+        onError={handleError}
+        {...props}
+      />
+      {alt && (
+        <figcaption className="text-center text-xs text-muted-foreground mt-2 italic">
+          {alt}
+        </figcaption>
+      )}
+    </figure>
+  );
 }
 
 export function MarkdownRenderer({ content, className = '', siteSlug }: MarkdownRendererProps) {
@@ -430,31 +488,44 @@ export function MarkdownRenderer({ content, className = '', siteSlug }: Markdown
               </a>
             );
           },
+          p({ children, ...props }) {
+            // HTML仕様: <p> の直下に <figure> などのブロック要素を配置することはできないため、
+            // 子要素に画像やブロックが含まれる場合は <div> としてレンダリングし Hydration エラーを防ぐ
+            const hasBlockOrImage = React.Children.toArray(children).some((child) => {
+              if (!React.isValidElement(child)) return false;
+              const childProps = child.props as any;
+              return (
+                childProps?.node?.tagName === 'img' ||
+                childProps?.src !== undefined ||
+                child.type === 'img' ||
+                child.type === 'figure' ||
+                child.type === 'div'
+              );
+            });
+
+            if (hasBlockOrImage) {
+              return (
+                <div className="my-4 leading-relaxed" {...props}>
+                  {children}
+                </div>
+              );
+            }
+            return (
+              <p className="my-4 leading-relaxed" {...props}>
+                {children}
+              </p>
+            );
+          },
           img({ src, alt, ...props }) {
             const rawSrc = typeof src === 'string' ? src : '';
             const resolvedSrc = resolveMediaUrl(rawSrc);
             return (
-              <figure className="my-6">
-                <img
-                  src={resolvedSrc}
-                  alt={alt || 'image'}
-                  className="rounded-xl shadow-md max-w-full h-auto mx-auto border border-border transition-transform hover:scale-[1.01]"
-                  loading="lazy"
-                  onError={(e) => {
-                    const target = e.currentTarget;
-                    if (rawSrc && target.src !== rawSrc && !target.dataset.triedFallback) {
-                      target.dataset.triedFallback = 'true';
-                      target.src = rawSrc;
-                    }
-                  }}
-                  {...props}
-                />
-                {alt && (
-                  <figcaption className="text-center text-xs text-muted-foreground mt-2 italic">
-                    {alt}
-                  </figcaption>
-                )}
-              </figure>
+              <MarkdownImage
+                src={resolvedSrc}
+                rawSrc={rawSrc}
+                alt={alt}
+                {...props}
+              />
             );
           },
         }}

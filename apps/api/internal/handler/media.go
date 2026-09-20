@@ -16,18 +16,18 @@ import (
 )
 
 type MediaHandler struct {
-	DB          *gorm.DB
-	Minio       *minio.Client
-	Bucket      string
-	Endpoint    string
+	DB       *gorm.DB
+	Minio    *minio.Client
+	Bucket   string
+	Endpoint string
 }
 
 var allowedMimeTypes = map[string]bool{
-	"image/jpeg": true,
-	"image/png":  true,
-	"image/gif":  true,
-	"image/webp": true,
-	"image/svg+xml": true,
+	"image/jpeg":      true,
+	"image/png":       true,
+	"image/gif":       true,
+	"image/webp":      true,
+	"image/svg+xml":   true,
 	"application/pdf": true,
 }
 
@@ -233,9 +233,12 @@ func (h *MediaHandler) ServeByID(c *gin.Context) {
 	}
 
 	var media model.MediaFile
-	if err := h.DB.Where("id = ?", uUID).First(&media).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "media not found"})
-		return
+	if err := h.DB.Where("id = ?", uUID).Limit(1).Find(&media).Error; err != nil || media.ID == uuid.Nil {
+		// Fallback: search by storage_key or file_name containing the cleanID
+		if err2 := h.DB.Where("storage_key LIKE ? OR file_name LIKE ?", "%"+cleanID+"%", "%"+cleanID+"%").Limit(1).Find(&media).Error; err2 != nil || media.ID == uuid.Nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "media not found"})
+			return
+		}
 	}
 
 	if c.Query("format") == "json" {

@@ -1127,6 +1127,7 @@ export default function SitePageClient() {
               <PageActionTabs
                 page={activePage}
                 site={site}
+                allPages={pages}
                 onOpenComments={() => setCommentsOpen(true)}
                 commentsCount={comments.length}
                 canEdit={canEdit}

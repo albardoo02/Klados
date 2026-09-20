@@ -276,7 +276,7 @@ func (h *SiteHandler) GetBySlug(c *gin.Context) {
 						role = string(model.RoleOwner)
 					} else {
 						var member model.SiteMember
-						if err := h.DB.Where("site_id = ? AND user_id = ?", site.ID, uid).First(&member).Error; err == nil {
+						if err := h.DB.Where("site_id = ? AND user_id = ?", site.ID, uid).Limit(1).Find(&member).Error; err == nil && member.ID != uuid.Nil {
 							role = string(member.Role)
 							if member.Role == model.RoleAdmin || member.Role == model.RoleEditor {
 								canEdit = true
