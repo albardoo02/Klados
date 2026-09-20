@@ -112,19 +112,21 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
           <div className="h-4 w-px bg-slate-200 hidden sm:block" />
 
-          {/* 認証・振り分け設定リンク */}
-          <Link
-            href="/dashboard/settings/auth"
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition-colors ${
-              pathname === '/dashboard/settings/auth'
-                ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-            }`}
-            title="認証・アクセス振り分け設定"
-          >
-            <ShieldCheck className="size-3.5" />
-            <span className="hidden md:inline">認証・SSO</span>
-          </Link>
+          {/* 認証・振り分け設定リンク (root管理者のみ表示) */}
+          {user?.is_root && (
+            <Link
+              href="/dashboard/settings/auth"
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition-colors ${
+                pathname === '/dashboard/settings/auth'
+                  ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+              }`}
+              title="認証・アクセス振り分け設定 (root管理者)"
+            >
+              <ShieldCheck className="size-3.5 text-blue-600" />
+              <span className="hidden md:inline">認証・SSO</span>
+            </Link>
+          )}
 
           {/* APIキー設定リンク */}
           <Link
@@ -157,8 +159,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 size="sm"
               />
               <div className="hidden sm:flex flex-col text-left">
-                <span className="text-xs font-semibold text-slate-800 leading-tight">
+                <span className="text-xs font-semibold text-slate-800 leading-tight flex items-center gap-1">
                   {user.display_name || user.username}
+                  {user.is_root && (
+                    <span className="px-1.5 py-0.2 rounded text-[9px] bg-amber-100 text-amber-800 font-bold">
+                      root
+                    </span>
+                  )}
                 </span>
               </div>
               <ChevronDown className={`size-3.5 text-slate-400 transition-transform ${userMenuOpen ? 'rotate-180' : ''}`} />
@@ -176,9 +183,16 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                       size="md"
                     />
                     <div className="min-w-0 flex-1">
-                      <p className="text-xs font-bold text-slate-900 truncate">
-                        {user.display_name || user.username}
-                      </p>
+                      <div className="flex items-center gap-1.5">
+                        <p className="text-xs font-bold text-slate-900 truncate">
+                          {user.display_name || user.username}
+                        </p>
+                        {user.is_root && (
+                          <span className="px-1.5 py-0.5 rounded text-[10px] bg-amber-100 text-amber-800 font-bold shrink-0">
+                            root
+                          </span>
+                        )}
+                      </div>
                       <p className="text-[11px] text-slate-400 truncate">
                         {user.email}
                       </p>
@@ -200,17 +214,19 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                     </div>
                   </Link>
 
-                  <Link
-                    href="/dashboard/settings/auth"
-                    onClick={() => setUserMenuOpen(false)}
-                    className="flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-slate-100 transition-colors text-slate-700 hover:text-slate-900"
-                  >
-                    <ShieldCheck className="size-4 text-emerald-600" />
-                    <div className="flex-1">
-                      <span>認証 & 振り分け設定</span>
-                      <span className="block text-[10px] text-slate-400 font-normal">メール確認・GitHub/Discord自動所属</span>
-                    </div>
-                  </Link>
+                  {user.is_root && (
+                    <Link
+                      href="/dashboard/settings/auth"
+                      onClick={() => setUserMenuOpen(false)}
+                      className="flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-slate-100 transition-colors text-slate-700 hover:text-slate-900"
+                    >
+                      <ShieldCheck className="size-4 text-emerald-600" />
+                      <div className="flex-1">
+                        <span>認証 & 振り分け設定</span>
+                        <span className="block text-[10px] text-slate-400 font-normal">システム管理者(root)専用</span>
+                      </div>
+                    </Link>
+                  )}
 
                   <Link
                     href="/dashboard/settings/api-keys"

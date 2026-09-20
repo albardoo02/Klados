@@ -3,6 +3,7 @@ package handler
 import (
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -17,6 +18,23 @@ import (
 type AuthHandler struct {
 	DB        *gorm.DB
 	JWTSecret string
+}
+
+func (h *AuthHandler) determineIfRoot(email, username string) bool {
+	rootEmail := strings.TrimSpace(os.Getenv("ROOT_EMAIL"))
+	rootUsername := strings.TrimSpace(os.Getenv("ROOT_USERNAME"))
+
+	if rootEmail != "" && strings.EqualFold(email, rootEmail) {
+		return true
+	}
+	if rootUsername != "" && strings.EqualFold(username, rootUsername) {
+		return true
+	}
+
+	// ユーザーがまだ0人の場合、最初のユーザーを自動でrootにする
+	var userCount int64
+	h.DB.Model(&model.User{}).Count(&userCount)
+	return userCount == 0
 }
 
 type registerRequest struct {
@@ -39,14 +57,63 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
+	authConfig := h.getOrCreateAuthConfig()
+
+	var userCount int64
+	h.DB.Model(&model.User{}).Count(&userCount)
+
+	// システム初回構築（ユーザー0人）以外の新規登録セキュリティチェック
+	if userCount > 0 {
+		if !authConfig.EnableEmailLogin || !authConfig.AllowEmailRegistration {
+			c.JSON(http.StatusForbidden, gin.H{"error": "メールアドレスによる新規登録は制限されています。公式DiscordまたはGitHubでログインしてください。"})
+			return
+		}
+
+		// ドメイン制限チェック
+		if authConfig.AllowedDomains != "" {
+			emailLower := strings.ToLower(strings.TrimSpace(req.Email))
+			emailDomain := ""
+			if atIdx := strings.LastIndex(emailLower, "@"); atIdx != -1 {
+				emailDomain = emailLower[atIdx:]
+			}
+			domainAllowed := false
+			for _, d := range strings.Split(authConfig.AllowedDomains, ",") {
+				d = strings.TrimSpace(strings.ToLower(d))
+				if !strings.HasPrefix(d, "@") {
+					d = "@" + d
+				}
+				if emailDomain == d {
+					domainAllowed = true
+					break
+				}
+			}
+			if !domainAllowed {
+				c.JSON(http.StatusForbidden, gin.H{"error": fmt.Sprintf("このメールドメイン（%s）からの登録は許可されていません。", emailDomain)})
+				return
+			}
+		}
+
+		// ルール一致制限チェック
+		if authConfig.RestrictToRules {
+			dummyUser := &model.User{Email: req.Email}
+			matches, _ := h.applyRoutingRules(dummyUser, "email", "", "", "", req.Email, false)
+			var activeRuleCount int64
+			h.DB.Model(&model.AuthRoutingRule{}).Where("enabled = ?", true).Count(&activeRuleCount)
+			if activeRuleCount > 0 && len(matches) == 0 {
+				c.JSON(http.StatusForbidden, gin.H{"error": "承認された関係者リストまたは所属ルールに合致するメールアドレスのみ登録できます。"})
+				return
+			}
+		}
+	}
+
 	hashed, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to hash password"})
 		return
 	}
 
-	authConfig := h.getOrCreateAuthConfig()
 	emailVerified := !authConfig.RequireEmailVerification
+	isRoot := h.determineIfRoot(req.Email, req.Username)
 
 	pass := string(hashed)
 	verificationToken := uuid.New().String()
@@ -56,6 +123,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		Username:              req.Username,
 		Password:              &pass,
 		DisplayName:           req.DisplayName,
+		IsRoot:                isRoot,
 		EmailVerified:         emailVerified,
 		VerificationToken:     &verificationToken,
 		VerificationExpiresAt: &verificationExpires,
@@ -217,6 +285,57 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
+	authConfig := h.getOrCreateAuthConfig()
+
+	// root 管理者以外に対するセキュリティ制限チェック
+	if !user.IsRoot {
+		if !authConfig.EnableEmailLogin {
+			c.JSON(http.StatusForbidden, gin.H{"error": "メールアドレスによるログインは無効化されています。指定の認証プロバイダーをご利用ください。"})
+			return
+		}
+
+		if authConfig.RequireEmailVerification && !user.EmailVerified {
+			c.JSON(http.StatusForbidden, gin.H{"error": "メールアドレスの確認が完了していません。確認メールのリンクをご確認ください。"})
+			return
+		}
+
+		// ドメイン制限チェック
+		if authConfig.AllowedDomains != "" {
+			emailLower := strings.ToLower(strings.TrimSpace(user.Email))
+			emailDomain := ""
+			if atIdx := strings.LastIndex(emailLower, "@"); atIdx != -1 {
+				emailDomain = emailLower[atIdx:]
+			}
+			domainAllowed := false
+			for _, d := range strings.Split(authConfig.AllowedDomains, ",") {
+				d = strings.TrimSpace(strings.ToLower(d))
+				if !strings.HasPrefix(d, "@") {
+					d = "@" + d
+				}
+				if emailDomain == d {
+					domainAllowed = true
+					break
+				}
+			}
+			if !domainAllowed {
+				c.JSON(http.StatusForbidden, gin.H{"error": fmt.Sprintf("このメールドメイン（%s）からのログインは許可されていません。", emailDomain)})
+				return
+			}
+		}
+
+		// ルール一致制限チェック
+		if authConfig.RestrictToRules {
+			dummyUser := &model.User{Email: user.Email}
+			matches, _ := h.applyRoutingRules(dummyUser, "email", "", "", "", user.Email, false)
+			var activeRuleCount int64
+			h.DB.Model(&model.AuthRoutingRule{}).Where("enabled = ?", true).Count(&activeRuleCount)
+			if activeRuleCount > 0 && len(matches) == 0 {
+				c.JSON(http.StatusForbidden, gin.H{"error": "承認された関係者リストまたは所属ルールに合致するユーザーのみログインできます。"})
+				return
+			}
+		}
+	}
+
 	// remember_me=true → 30日、false → 1日（ブラウザセッション相当）
 	ttl := 24 * time.Hour
 	if req.RememberMe {
@@ -330,6 +449,12 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 
 // ワンクリック簡単ログイン (Demo / Guest Account)
 func (h *AuthHandler) DemoLogin(c *gin.Context) {
+	authConfig := h.getOrCreateAuthConfig()
+	if !authConfig.EnableDemoLogin {
+		c.JSON(http.StatusForbidden, gin.H{"error": "デモログインは無効化されています。"})
+		return
+	}
+
 	var user model.User
 	demoEmail := "demo@klados.app"
 
@@ -343,6 +468,7 @@ func (h *AuthHandler) DemoLogin(c *gin.Context) {
 			Username:      "demo_user",
 			DisplayName:   "デモ体験ユーザー",
 			Password:      &passStr,
+			IsRoot:        true, // デモ環境ではroot操作を試せる
 			EmailVerified: true,
 			Plan:          model.PlanFree,
 		}
@@ -408,6 +534,9 @@ console.log("Hello, Klados!");
 			}
 			h.DB.Create(&page)
 		}
+	} else if !user.IsRoot {
+		user.IsRoot = true
+		h.DB.Model(&user).Update("is_root", true)
 	}
 
 	token, err := h.generateToken(user.ID.String(), 30*24*time.Hour)
@@ -496,6 +625,20 @@ func (h *AuthHandler) DiscordLogin(c *gin.Context) {
 func (h *AuthHandler) handleOAuthUser(c *gin.Context, req oauthLoginRequest) {
 	authConfig := h.getOrCreateAuthConfig()
 
+	// 0. プロバイダーの有効/無効チェック
+	if req.Provider == "google" && !authConfig.EnableGoogleLogin {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Googleログインは無効化されています。"})
+		return
+	}
+	if req.Provider == "github" && !authConfig.EnableGithubLogin {
+		c.JSON(http.StatusForbidden, gin.H{"error": "GitHubログインは無効化されています。"})
+		return
+	}
+	if req.Provider == "discord" && !authConfig.EnableDiscordLogin {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Discordログインは無効化されています。"})
+		return
+	}
+
 	// 1. ドメインホワイトリスト制限チェック (AllowedDomains)
 	if authConfig.AllowedDomains != "" {
 		emailLower := strings.ToLower(strings.TrimSpace(req.Email))
@@ -548,11 +691,13 @@ func (h *AuthHandler) handleOAuthUser(c *gin.Context, req oauthLoginRequest) {
 			username = fmt.Sprintf("%s_%s", username, uuid.New().String()[:5])
 		}
 
+		isRoot := h.determineIfRoot(req.Email, username)
 		user = model.User{
 			Email:         req.Email,
 			Username:      username,
 			DisplayName:   req.Name,
 			AvatarURL:     req.AvatarURL,
+			IsRoot:        isRoot,
 			EmailVerified: true, // Google / GitHub / Discord OAuth認証済み
 			Plan:          model.PlanFree,
 		}
@@ -568,7 +713,12 @@ func (h *AuthHandler) handleOAuthUser(c *gin.Context, req oauthLoginRequest) {
 		}
 		h.DB.Create(&oauthAcc)
 	} else {
-		// 既存ユーザー: OAuthログインによりメール認証済みフラグをtrueに更新
+		// 既存ユーザー: 環境変数指定のroot昇格チェック
+		if !user.IsRoot && h.determineIfRoot(user.Email, user.Username) {
+			user.IsRoot = true
+			h.DB.Model(&user).Update("is_root", true)
+		}
+		// OAuthログインによりメール認証済みフラグをtrueに更新
 		if !user.EmailVerified {
 			user.EmailVerified = true
 			h.DB.Model(&user).Update("email_verified", true)

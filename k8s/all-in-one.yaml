@@ -1,0 +1,397 @@
+# ==============================================================================
+# Klados (アジ鯖公式Wiki) Kubernetes Deployment Manifest
+# すべてのリソースは namespace: klados にデプロイされます。
+# 適用コマンド: kubectl apply -f k8s/
+# ==============================================================================
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: klados
+---
+# ------------------------------------------------------------------------------
+# Secret & ConfigMap (環境変数・機密情報)
+# ------------------------------------------------------------------------------
+apiVersion: v1
+kind: Secret
+metadata:
+  name: klados-secrets
+  namespace: klados
+type: Opaque
+stringData:
+  # ※ 本番環境ではランダムな長い文字列に変更してください
+  JWT_SECRET: "azisaba-wiki-jwt-secret-very-secure-random-token-2026"
+  POSTGRES_PASSWORD: "azisaba-wiki-db-secure-pass"
+  MINIO_ROOT_USER: "azisaba-minio"
+  MINIO_ROOT_PASSWORD: "azisaba-minio-super-secret-password"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: klados-config
+  namespace: klados
+data:
+  ENVIRONMENT: "production"
+  PORT: "8080"
+  DATABASE_URL: "host=klados-postgres user=klados password=azisaba-wiki-db-secure-pass dbname=klados port=5432 sslmode=disable"
+  REDIS_URL: "redis://klados-redis:6379"
+  MINIO_ENDPOINT: "klados-minio:9000"
+  MINIO_ACCESS_KEY: "azisaba-minio"
+  MINIO_SECRET_KEY: "azisaba-minio-super-secret-password"
+  MINIO_BUCKET: "klados-media"
+  MINIO_USE_SSL: "false"
+  # アジ鯖Wikiの公開ドメインに合わせて指定（例: wiki.azisaba.net）
+  ALLOW_ORIGINS: "*"
+  INTERNAL_API_URL: "http://klados-api:8080/v1"
+---
+# ------------------------------------------------------------------------------
+# PostgreSQL (データベース)
+# ------------------------------------------------------------------------------
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-pvc
+  namespace: klados
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: klados-postgres
+  namespace: klados
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: klados-postgres
+  template:
+    metadata:
+      labels:
+        app: klados-postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: "klados"
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: klados-secrets
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              value: "klados"
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "1Gi"
+      volumes:
+        - name: postgres-data
+          persistentVolumeClaim:
+            claimName: postgres-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: klados-postgres
+  namespace: klados
+spec:
+  ports:
+    - port: 5432
+      targetPort: 5432
+  selector:
+    app: klados-postgres
+---
+# ------------------------------------------------------------------------------
+# Redis (キャッシュ & セッション)
+# ------------------------------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: klados-redis
+  namespace: klados
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: klados-redis
+  template:
+    metadata:
+      labels:
+        app: klados-redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          ports:
+            - containerPort: 6379
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "256Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: klados-redis
+  namespace: klados
+spec:
+  ports:
+    - port: 6379
+      targetPort: 6379
+  selector:
+    app: klados-redis
+---
+# ------------------------------------------------------------------------------
+# MinIO (画像・添付メディアストレージ)
+# ------------------------------------------------------------------------------
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: minio-pvc
+  namespace: klados
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: klados-minio
+  namespace: klados
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: klados-minio
+  template:
+    metadata:
+      labels:
+        app: klados-minio
+    spec:
+      containers:
+        - name: minio
+          image: quay.io/minio/minio:latest
+          command:
+            - /bin/sh
+            - -c
+            - minio server /data --console-address ":9001"
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: klados-secrets
+                  key: MINIO_ROOT_USER
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: klados-secrets
+                  key: MINIO_ROOT_PASSWORD
+          ports:
+            - containerPort: 9000
+            - containerPort: 9001
+          volumeMounts:
+            - name: minio-data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+      volumes:
+        - name: minio-data
+          persistentVolumeClaim:
+            claimName: minio-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: klados-minio
+  namespace: klados
+spec:
+  ports:
+    - name: api
+      port: 9000
+      targetPort: 9000
+    - name: console
+      port: 9001
+      targetPort: 9001
+  selector:
+    app: klados-minio
+---
+# ------------------------------------------------------------------------------
+# Backend API (Go / Gin / GORM)
+# ------------------------------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: klados-api
+  namespace: klados
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: klados-api
+  template:
+    metadata:
+      labels:
+        app: klados-api
+    spec:
+      containers:
+        - name: api
+          image: ghcr.io/your-org/klados-api:latest # ※ビルドしたイメージ名に変更
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: klados-config
+            - secretRef:
+                name: klados-secrets
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: klados-api
+  namespace: klados
+spec:
+  ports:
+    - port: 8080
+      targetPort: 8080
+  selector:
+    app: klados-api
+---
+# ------------------------------------------------------------------------------
+# Frontend Web (Next.js / SSR / UI)
+# ------------------------------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: klados-web
+  namespace: klados
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: klados-web
+  template:
+    metadata:
+      labels:
+        app: klados-web
+    spec:
+      containers:
+        - name: web
+          image: ghcr.io/your-org/klados-web:latest # ※ビルドしたイメージ名に変更
+          ports:
+            - containerPort: 3000
+          env:
+            - name: PORT
+              value: "3000"
+            - name: NODE_ENV
+              value: "production"
+            - name: INTERNAL_API_URL
+              value: "http://klados-api:8080/v1"
+            - name: NEXT_PUBLIC_API_URL
+              value: "/v1"
+          readinessProbe:
+            httpGet:
+              path: /login
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /login
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: klados-web
+  namespace: klados
+spec:
+  ports:
+    - port: 3000
+      targetPort: 3000
+  selector:
+    app: klados-web
+---
+# ------------------------------------------------------------------------------
+# Ingress (ドメイン・TLSルーティング)
+# ------------------------------------------------------------------------------
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: klados-ingress
+  namespace: klados
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/proxy-body-size: "100m"
+    nginx.ingress.kubernetes.io/websocket-services: "klados-web"
+spec:
+  tls:
+    - hosts:
+        - wiki.azisaba.net # ※利用するドメインに変更
+      secretName: azisaba-wiki-tls
+  rules:
+    - host: wiki.azisaba.net # ※利用するドメインに変更
+      http:
+        paths:
+          # Next.js が内部で /v1 を klados-api にプロキシするため、すべてのトラフィックを klados-web に向けるだけでOK！
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: klados-web
+                port:
+                  number: 3000

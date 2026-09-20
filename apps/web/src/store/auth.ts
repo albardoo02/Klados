@@ -8,6 +8,7 @@ interface User {
   display_name: string;
   avatar_url: string;
   plan: 'free' | 'pro' | 'team';
+  is_root?: boolean;
   email_verified?: boolean;
 }
 

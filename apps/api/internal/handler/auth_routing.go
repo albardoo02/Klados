@@ -20,12 +20,33 @@ type AppliedRuleResult struct {
 	Role       string `json:"role,omitempty"`
 }
 
+func (h *AuthHandler) requireRootUser(c *gin.Context) bool {
+	userID := c.GetString("user_id")
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "認証が必要です"})
+		return false
+	}
+	var user model.User
+	if err := h.DB.Where("id = ?", userID).First(&user).Error; err != nil || !user.IsRoot {
+		c.JSON(http.StatusForbidden, gin.H{"error": "システム管理者(root)権限が必要です"})
+		return false
+	}
+	return true
+}
+
 func (h *AuthHandler) getOrCreateAuthConfig() *model.AuthConfig {
 	var cfg model.AuthConfig
 	if err := h.DB.Where("id = ?", "default").First(&cfg).Error; err != nil {
 		cfg = model.AuthConfig{
 			ID:                       "default",
 			RequireEmailVerification: false, // デフォルト任意（メールサービス設定不要）
+			AllowEmailRegistration:   true,  // デフォルト: メール新規登録許可
+			EnableEmailLogin:         true,  // デフォルト: メールログイン有効
+			EnableGithubLogin:        true,  // デフォルト: GitHub有効
+			EnableDiscordLogin:       true,  // デフォルト: Discord有効
+			EnableGoogleLogin:        true,  // デフォルト: Google有効
+			EnableDemoLogin:          true,  // デフォルト: デモログイン有効
+			OnlyRootCanCreateSites:   true,  // デフォルト: サイト作成はroot管理者のみ
 			DefaultRole:              "viewer",
 			AllowedDomains:           "",
 			RestrictToRules:          false,
@@ -42,25 +63,47 @@ func (h *AuthHandler) GetAuthConfig(c *gin.Context) {
 	var ruleCount int64
 	h.DB.Model(&model.AuthRoutingRule{}).Where("enabled = ?", true).Count(&ruleCount)
 
+	providers := make([]string, 0)
+	if cfg.EnableGoogleLogin {
+		providers = append(providers, "google")
+	}
+	if cfg.EnableGithubLogin {
+		providers = append(providers, "github")
+	}
+	if cfg.EnableDiscordLogin {
+		providers = append(providers, "discord")
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
 			"config":             cfg,
 			"active_rules_count": ruleCount,
-			"oauth_providers":    []string{"google", "github", "discord"},
+			"oauth_providers":    providers,
 		},
 	})
 }
 
 type updateAuthConfigRequest struct {
 	RequireEmailVerification *bool   `json:"require_email_verification"`
+	AllowEmailRegistration   *bool   `json:"allow_email_registration"`
+	EnableEmailLogin         *bool   `json:"enable_email_login"`
+	EnableGithubLogin        *bool   `json:"enable_github_login"`
+	EnableDiscordLogin       *bool   `json:"enable_discord_login"`
+	EnableGoogleLogin        *bool   `json:"enable_google_login"`
+	EnableDemoLogin          *bool   `json:"enable_demo_login"`
+	OnlyRootCanCreateSites   *bool   `json:"only_root_can_create_sites"`
 	DefaultRole              *string `json:"default_role"`
 	AllowedDomains           *string `json:"allowed_domains"`
 	RestrictToRules          *bool   `json:"restrict_to_rules"`
 }
 
-// PUT /v1/auth/config (要認証・認証設定の更新)
+// PUT /v1/auth/config (要root認証・認証設定の更新)
 func (h *AuthHandler) UpdateAuthConfig(c *gin.Context) {
+	if !h.requireRootUser(c) {
+		return
+	}
+
 	var req updateAuthConfigRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -70,6 +113,27 @@ func (h *AuthHandler) UpdateAuthConfig(c *gin.Context) {
 	cfg := h.getOrCreateAuthConfig()
 	if req.RequireEmailVerification != nil {
 		cfg.RequireEmailVerification = *req.RequireEmailVerification
+	}
+	if req.AllowEmailRegistration != nil {
+		cfg.AllowEmailRegistration = *req.AllowEmailRegistration
+	}
+	if req.EnableEmailLogin != nil {
+		cfg.EnableEmailLogin = *req.EnableEmailLogin
+	}
+	if req.EnableGithubLogin != nil {
+		cfg.EnableGithubLogin = *req.EnableGithubLogin
+	}
+	if req.EnableDiscordLogin != nil {
+		cfg.EnableDiscordLogin = *req.EnableDiscordLogin
+	}
+	if req.EnableGoogleLogin != nil {
+		cfg.EnableGoogleLogin = *req.EnableGoogleLogin
+	}
+	if req.EnableDemoLogin != nil {
+		cfg.EnableDemoLogin = *req.EnableDemoLogin
+	}
+	if req.OnlyRootCanCreateSites != nil {
+		cfg.OnlyRootCanCreateSites = *req.OnlyRootCanCreateSites
 	}
 	if req.DefaultRole != nil {
 		cfg.DefaultRole = *req.DefaultRole
@@ -141,6 +205,10 @@ type createRoutingRuleRequest struct {
 
 // POST /v1/auth/routing-rules (振り分けルールの作成)
 func (h *AuthHandler) CreateRoutingRule(c *gin.Context) {
+	if !h.requireRootUser(c) {
+		return
+	}
+
 	var req createRoutingRuleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -202,6 +270,10 @@ func (h *AuthHandler) CreateRoutingRule(c *gin.Context) {
 
 // PUT /v1/auth/routing-rules/:id (振り分けルールの更新)
 func (h *AuthHandler) UpdateRoutingRule(c *gin.Context) {
+	if !h.requireRootUser(c) {
+		return
+	}
+
 	id := c.Param("id")
 	var rule model.AuthRoutingRule
 	if err := h.DB.Where("id = ?", id).First(&rule).Error; err != nil {
@@ -253,6 +325,10 @@ func (h *AuthHandler) UpdateRoutingRule(c *gin.Context) {
 
 // DELETE /v1/auth/routing-rules/:id (振り分けルールの削除)
 func (h *AuthHandler) DeleteRoutingRule(c *gin.Context) {
+	if !h.requireRootUser(c) {
+		return
+	}
+
 	id := c.Param("id")
 	if err := h.DB.Where("id = ?", id).Delete(&model.AuthRoutingRule{}).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "ルールの削除に失敗しました"})

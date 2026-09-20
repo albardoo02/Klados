@@ -104,6 +104,23 @@ func (h *SiteHandler) Create(c *gin.Context) {
 
 	uid, _ := uuid.Parse(userID)
 
+	// root制限チェック: OnlyRootCanCreateSites が true の場合、rootユーザー以外はサイト新規作成不可
+	var user model.User
+	if err := h.DB.Where("id = ?", uid).First(&user).Error; err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "ユーザーが見つかりません"})
+		return
+	}
+
+	var authConfig model.AuthConfig
+	if err := h.DB.Where("id = ?", "default").First(&authConfig).Error; err == nil {
+		if authConfig.OnlyRootCanCreateSites && !user.IsRoot {
+			c.JSON(http.StatusForbidden, gin.H{
+				"error": "サイトの新規作成はシステム管理者(root)のみ許可されています。割り当てられたサイトをご利用ください。",
+			})
+			return
+		}
+	}
+
 	theme := req.Theme
 	if theme == "" {
 		theme = "minimal"

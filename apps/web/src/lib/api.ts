@@ -59,6 +59,13 @@ api.interceptors.response.use(
 export interface AuthConfig {
   id: string;
   require_email_verification: boolean;
+  allow_email_registration?: boolean;
+  enable_email_login?: boolean;
+  enable_github_login?: boolean;
+  enable_discord_login?: boolean;
+  enable_google_login?: boolean;
+  enable_demo_login?: boolean;
+  only_root_can_create_sites: boolean;
   default_role: string;
   allowed_domains: string;
   restrict_to_rules: boolean;

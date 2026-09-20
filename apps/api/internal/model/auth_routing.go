@@ -10,6 +10,13 @@ import (
 type AuthConfig struct {
 	ID                       string    `gorm:"primaryKey;default:'default'" json:"id"`
 	RequireEmailVerification bool      `gorm:"default:false" json:"require_email_verification"`
+	AllowEmailRegistration   bool      `gorm:"default:true" json:"allow_email_registration"`   // メールアドレスによる新規登録を許可
+	EnableEmailLogin         bool      `gorm:"default:true" json:"enable_email_login"`         // メール・パスワード認証（ログイン/登録）
+	EnableGithubLogin        bool      `gorm:"default:true" json:"enable_github_login"`        // GitHub OAuthログイン
+	EnableDiscordLogin       bool      `gorm:"default:true" json:"enable_discord_login"`       // Discord OAuthログイン
+	EnableGoogleLogin        bool      `gorm:"default:true" json:"enable_google_login"`        // Google OAuthログイン
+	EnableDemoLogin          bool      `gorm:"default:true" json:"enable_demo_login"`          // ワンクリックかんたんログイン（デモ）
+	OnlyRootCanCreateSites   bool      `gorm:"default:true" json:"only_root_can_create_sites"` // サイト新規作成をrootユーザーのみに限定
 	DefaultRole              string    `gorm:"default:'viewer'" json:"default_role"`
 	AllowedDomains           string    `json:"allowed_domains"`                        // カンマ区切りの許可ドメイン (空欄なら全ドメイン許可)
 	RestrictToRules          bool      `gorm:"default:false" json:"restrict_to_rules"` // 振り分けルールに合致しないユーザーのログインを拒否

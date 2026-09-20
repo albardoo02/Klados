@@ -10,6 +10,7 @@ import {
   AppliedRuleResult,
 } from '@/lib/api';
 import Link from 'next/link';
+import { useAuthStore } from '@/store/auth';
 import {
   ShieldCheck,
   Plus,
@@ -27,6 +28,8 @@ import {
   CheckCircle2,
   XCircle,
   ExternalLink,
+  Crown,
+  Lock,
 } from 'lucide-react';
 
 interface SiteItem {
@@ -37,6 +40,7 @@ interface SiteItem {
 
 export default function AuthSettingsPage() {
   const queryClient = useQueryClient();
+  const { user } = useAuthStore();
 
   // 認証設定の取得
   const { data: configData, isLoading: isConfigLoading } = useQuery({
@@ -58,6 +62,13 @@ export default function AuthSettingsPage() {
 
   // 設定フォーム状態
   const [requireEmail, setRequireEmail] = useState<boolean | null>(null);
+  const [allowEmailRegistration, setAllowEmailRegistration] = useState<boolean>(true);
+  const [enableEmailLogin, setEnableEmailLogin] = useState<boolean>(true);
+  const [enableGithubLogin, setEnableGithubLogin] = useState<boolean>(true);
+  const [enableDiscordLogin, setEnableDiscordLogin] = useState<boolean>(true);
+  const [enableGoogleLogin, setEnableGoogleLogin] = useState<boolean>(true);
+  const [enableDemoLogin, setEnableDemoLogin] = useState<boolean>(true);
+  const [onlyRootCanCreateSites, setOnlyRootCanCreateSites] = useState<boolean>(true);
   const [defaultRole, setDefaultRole] = useState<string>('viewer');
   const [allowedDomains, setAllowedDomains] = useState<string>('');
   const [restrictToRules, setRestrictToRules] = useState<boolean>(false);
@@ -68,6 +79,13 @@ export default function AuthSettingsPage() {
     if (configData?.config) {
       if (requireEmail === null) {
         setRequireEmail(configData.config.require_email_verification);
+        setAllowEmailRegistration(configData.config.allow_email_registration ?? true);
+        setEnableEmailLogin(configData.config.enable_email_login ?? true);
+        setEnableGithubLogin(configData.config.enable_github_login ?? true);
+        setEnableDiscordLogin(configData.config.enable_discord_login ?? true);
+        setEnableGoogleLogin(configData.config.enable_google_login ?? true);
+        setEnableDemoLogin(configData.config.enable_demo_login ?? true);
+        setOnlyRootCanCreateSites(configData.config.only_root_can_create_sites ?? true);
         setDefaultRole(configData.config.default_role || 'viewer');
         setAllowedDomains(configData.config.allowed_domains || '');
         setRestrictToRules(configData.config.restrict_to_rules || false);
@@ -80,7 +98,7 @@ export default function AuthSettingsPage() {
     mutationFn: (data: Partial<AuthConfig>) => authApi.updateAuthConfig(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['auth-config'] });
-      setConfigSuccessMsg('認証設定を正常に保存しました！');
+      setConfigSuccessMsg('認証・システム設定を正常に保存しました！');
       setTimeout(() => setConfigSuccessMsg(null), 3500);
     },
   });
@@ -88,10 +106,32 @@ export default function AuthSettingsPage() {
   const handleSaveConfig = () => {
     updateConfigMutation.mutate({
       require_email_verification: requireEmail ?? false,
+      allow_email_registration: allowEmailRegistration,
+      enable_email_login: enableEmailLogin,
+      enable_github_login: enableGithubLogin,
+      enable_discord_login: enableDiscordLogin,
+      enable_google_login: enableGoogleLogin,
+      enable_demo_login: enableDemoLogin,
+      only_root_can_create_sites: onlyRootCanCreateSites,
       default_role: defaultRole,
       allowed_domains: allowedDomains,
       restrict_to_rules: restrictToRules,
     });
+  };
+
+  // アジ鯖公式Wiki推奨プリセットを適用
+  const applyAzisabaPreset = () => {
+    setOnlyRootCanCreateSites(true);
+    setEnableEmailLogin(false);
+    setAllowEmailRegistration(false);
+    setEnableDemoLogin(false);
+    setEnableGoogleLogin(false);
+    setEnableGithubLogin(true);
+    setEnableDiscordLogin(true);
+    setRestrictToRules(true);
+    setRequireEmail(false);
+    setConfigSuccessMsg('アジ鯖公式Wiki推奨プリセットをフォームに反映しました。「設定を保存する」をクリックして確定してください。');
+    setTimeout(() => setConfigSuccessMsg(null), 6000);
   };
 
   // ルール作成/編集モーダル
@@ -213,6 +253,29 @@ export default function AuthSettingsPage() {
     });
   };
 
+  if (user && !user.is_root) {
+    return (
+      <div className="max-w-md mx-auto py-20 text-center space-y-4">
+        <div className="w-14 h-14 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center mx-auto shadow-inner">
+          <Lock className="w-7 h-7" />
+        </div>
+        <h2 className="text-xl font-bold text-slate-900">管理者権限（root）が必要です</h2>
+        <p className="text-xs text-slate-500 max-w-sm mx-auto leading-relaxed">
+          認証ポリシーや自動振り分けルールの設定は、システム管理者（root）のみアクセスできます。
+        </p>
+        <div className="pt-2">
+          <Link
+            href="/dashboard"
+            className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-colors shadow-sm"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" />
+            ダッシュボードへ戻る
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-6xl mx-auto space-y-8 pb-16">
       {/* ページヘッダー */}
@@ -227,26 +290,195 @@ export default function AuthSettingsPage() {
               ダッシュボードへ戻る
             </Link>
           </div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900 flex items-center gap-2.5">
-            <ShieldCheck className="w-6 h-6 text-blue-600" />
-            認証 & アクセス振り分け設定
-          </h1>
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-2xl font-bold tracking-tight text-slate-900 flex items-center gap-2.5">
+              <ShieldCheck className="w-6 h-6 text-blue-600" />
+              認証 & アクセス振り分け設定
+            </h1>
+            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-200 shadow-2xs">
+              <Crown className="w-3.5 h-3.5 text-amber-600" />
+              root専用
+            </span>
+          </div>
           <p className="text-sm text-slate-500 mt-1">
-            メール認証の必須/任意モード切替や、GitHub組織・Discordサーバー・メールドメインに応じたサイト自動所属を設定します。
+            メール認証の必須/任意モード切替、サイト新規作成制限、GitHub組織・Discordサーバーに応じたサイト自動所属を設定します。
           </p>
         </div>
       </div>
 
-      {/* メールアドレス認証モード設定カード */}
+      {/* アジ鯖公式Wiki 推奨プリセット適用バナー */}
+      <div className="bg-gradient-to-r from-blue-600 to-indigo-700 rounded-2xl p-5 text-white shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2 font-bold text-sm">
+            <Sparkles className="w-4 h-4 text-amber-300" />
+            <span>アジ鯖公式Wiki クイック構成プリセット</span>
+          </div>
+          <p className="text-xs text-blue-100 max-w-xl">
+            「Discord &amp; GitHub認証のみ許可」「メール・デモログインの完全遮断」「サイト新規作成をroot限定」をワンクリックで一括セットします。
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={applyAzisabaPreset}
+          className="px-4 py-2 bg-white text-blue-700 hover:bg-blue-50 text-xs font-bold rounded-xl shadow transition-all shrink-0 cursor-pointer flex items-center justify-center gap-1.5"
+        >
+          <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+          推奨プリセットを適用
+        </button>
+      </div>
+
+      {/* ログイン方法（プロバイダー）有効/無効カード */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-6">
+        <div>
+          <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+            <Lock className="w-5 h-5 text-blue-600" />
+            許可するログイン方法（認証プロバイダー）
+          </h2>
+          <p className="text-xs text-slate-500 mt-1">
+            ユーザーに提供するログイン方法を選択します。オフにしたログイン方法はログイン画面から非表示になり、APIでも遮断されます。
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
+          {/* GitHubログイン */}
+          <div className="border border-slate-200 rounded-xl p-4 flex items-center justify-between bg-slate-50/50">
+            <div>
+              <span className="text-xs font-bold text-slate-900 flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-slate-800" />
+                GitHub OAuth ログイン
+              </span>
+              <span className="text-[11px] text-slate-500 block">組織所属（GitHub Org）による振り分けに対応</span>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={enableGithubLogin}
+                onChange={(e) => setEnableGithubLogin(e.target.checked)}
+                className="sr-only peer"
+              />
+              <div className="w-10 h-5 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+            </label>
+          </div>
+
+          {/* Discordログイン */}
+          <div className="border border-slate-200 rounded-xl p-4 flex items-center justify-between bg-slate-50/50">
+            <div>
+              <span className="text-xs font-bold text-slate-900 flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-[#5865F2]" />
+                Discord OAuth ログイン
+              </span>
+              <span className="text-[11px] text-slate-500 block">公式Discordサーバー所属による振り分けに対応</span>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={enableDiscordLogin}
+                onChange={(e) => setEnableDiscordLogin(e.target.checked)}
+                className="sr-only peer"
+              />
+              <div className="w-10 h-5 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+            </label>
+          </div>
+
+          {/* Googleログイン */}
+          <div className="border border-slate-200 rounded-xl p-4 flex items-center justify-between bg-slate-50/50">
+            <div>
+              <span className="text-xs font-bold text-slate-900 flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-red-500" />
+                Google OAuth ログイン
+              </span>
+              <span className="text-[11px] text-slate-500 block">Googleアカウントでのワンタップログイン</span>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={enableGoogleLogin}
+                onChange={(e) => setEnableGoogleLogin(e.target.checked)}
+                className="sr-only peer"
+              />
+              <div className="w-10 h-5 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+            </label>
+          </div>
+
+          {/* デモログイン */}
+          <div className="border border-slate-200 rounded-xl p-4 flex items-center justify-between bg-slate-50/50">
+            <div>
+              <span className="text-xs font-bold text-slate-900 flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-purple-500" />
+                ワンクリック簡単ログイン (デモ体験)
+              </span>
+              <span className="text-[11px] text-slate-500 block">本番運用時はOFF（非表示・無効化）を推奨</span>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={enableDemoLogin}
+                onChange={(e) => setEnableDemoLogin(e.target.checked)}
+                className="sr-only peer"
+              />
+              <div className="w-10 h-5 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+            </label>
+          </div>
+
+          {/* メール/パスワードログイン */}
+          <div className="border border-slate-200 rounded-xl p-4 bg-slate-50/50 space-y-3 md:col-span-2">
+            <div className="flex items-center justify-between">
+              <div>
+                <span className="text-xs font-bold text-slate-900 flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-indigo-500" />
+                  メールアドレス / パスワードログイン
+                </span>
+                <span className="text-[11px] text-slate-500 block">
+                  オフにするとログイン画面からメール入力フォームが消え、Discord/GitHub等のOAuthのみに絞り込めます
+                </span>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={enableEmailLogin}
+                  onChange={(e) => setEnableEmailLogin(e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-10 h-5 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+              </label>
+            </div>
+
+            {/* メール新規登録の許可/禁止（メールログイン有効時のみ） */}
+            {enableEmailLogin && (
+              <div className="pt-2.5 border-t border-slate-200/80 flex items-center justify-between">
+                <div>
+                  <span className="text-xs font-semibold text-slate-800 block">
+                    メールアドレス新規登録（/register）の許可
+                  </span>
+                  <span className="text-[11px] text-slate-500">
+                    オフにすると誰でもアカウントを勝手に作成できる穴を塞ぎます（招待制・既存ユーザー限定）
+                  </span>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={allowEmailRegistration}
+                    onChange={(e) => setAllowEmailRegistration(e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-10 h-5 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                </label>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* メールアドレス認証 & サイト作成ポリシー設定カード */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-6">
         <div className="flex items-start justify-between gap-4">
           <div>
             <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
               <Mail className="w-5 h-5 text-indigo-600" />
-              メールアドレス認証ポリシー
+              セキュリティ &amp; サイト作成ポリシー
             </h2>
             <p className="text-xs text-slate-500 mt-1">
-              メールサービスの事前準備が難しい場合や、社内利用・テスト目的では「任意（不要）」に設定できます。
+              組織公式Wikiの運用に合わせ、一般ユーザーによるサイト乱立の防止やメール認証の要否を設定します。
             </p>
           </div>
           {configSuccessMsg && (
@@ -263,6 +495,48 @@ export default function AuthSettingsPage() {
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
+            {/* サイト新規作成ポリシー (root限定) */}
+            <div className="border border-slate-200 rounded-2xl p-5 bg-slate-50/50 space-y-3 md:col-span-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
+                    <Crown className="w-4 h-4 text-amber-500" />
+                    サイト新規作成を root 管理者のみに制限
+                  </span>
+                  <span className="text-xs text-slate-500">
+                    オン（推奨）：組織関係者による個人サイトの乱立を防止し、公式Wikiのみを運用
+                  </span>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={onlyRootCanCreateSites}
+                    onChange={(e) => setOnlyRootCanCreateSites(e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                </label>
+              </div>
+
+              <div
+                className={`text-xs p-3 rounded-xl border ${
+                  onlyRootCanCreateSites
+                    ? 'bg-blue-50 text-blue-900 border-blue-200'
+                    : 'bg-amber-50 text-amber-900 border-amber-200'
+                }`}
+              >
+                {onlyRootCanCreateSites ? (
+                  <p className="text-[11px] leading-relaxed">
+                    <strong>公式Wikiモード（アジ鯖専用）:</strong> 一般スタッフやメンバーのダッシュボードからは「新しいサイトを作成」ボタンが隠れ、API経由でも作成が拒否（403 Forbidden）されます。スタッフは招待・振り分けられた公式Wikiのみを編集できます。
+                  </p>
+                ) : (
+                  <p className="text-[11px] leading-relaxed">
+                    <strong>オープンSaaSモード:</strong> ログインしたすべてのユーザーが、個人で新しいサイト（Wiki）を自由に作成できます。
+                  </p>
+                )}
+              </div>
+            </div>
+
             {/* メール認証必須/任意トグル */}
             <div className="border border-slate-200 rounded-2xl p-5 bg-slate-50/50 space-y-3">
               <div className="flex items-center justify-between">

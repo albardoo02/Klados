@@ -2,11 +2,11 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslations } from 'next-intl';
-import { sitesApi } from '@/lib/api';
+import { sitesApi, authApi } from '@/lib/api';
 import { useAuthStore } from '@/store/auth';
 import Link from 'next/link';
 import { useState } from 'react';
-import { AlertCircle, Globe } from 'lucide-react';
+import { AlertCircle, Globe, Crown, Shield, Lock } from 'lucide-react';
 
 interface Site {
   id: string;
@@ -24,10 +24,21 @@ export default function DashboardPage() {
   const t = useTranslations();
   const queryClient = useQueryClient();
   const { user } = useAuthStore();
+  const isRoot = user?.is_root ?? false;
+
   const { data, isLoading } = useQuery({
     queryKey: ['sites'],
     queryFn: () => sitesApi.list().then((r) => r.data.data as Site[]),
   });
+
+  // 認証設定の取得（サイト作成ポリシー参照用）
+  const { data: authConfigData } = useQuery({
+    queryKey: ['auth-config'],
+    queryFn: () => authApi.getAuthConfig().then((r) => r.data.data),
+  });
+
+  const onlyRootCanCreate = authConfigData?.config?.only_root_can_create_sites ?? true;
+  const canCreateSite = isRoot || !onlyRootCanCreate;
 
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState({ slug: '', title: '', description: '' });
@@ -72,14 +83,42 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-slate-900 dark:text-white">{t('dashboard.my_sites')}</h1>
-        <button
-          onClick={handleOpenCreate}
-          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-medium transition-colors shadow-sm flex items-center gap-1.5"
-        >
-          {t('dashboard.new_site')}
-        </button>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-2xl font-bold text-slate-900 dark:text-white">{t('dashboard.my_sites')}</h1>
+            {isRoot ? (
+              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border border-amber-200 dark:border-amber-800 shadow-2xs">
+                <Crown className="w-3.5 h-3.5 text-amber-600" />
+                root管理者
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                <Shield className="w-3 h-3 text-blue-500" />
+                参加メンバー
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-slate-500 mt-1">
+            {isRoot
+              ? '全サイトの管理およびシステム設定権限（root）'
+              : '参加・所属しているWikiサイトの一覧'}
+          </p>
+        </div>
+
+        {canCreateSite ? (
+          <button
+            onClick={handleOpenCreate}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-medium transition-colors shadow-sm flex items-center gap-1.5 self-start sm:self-auto cursor-pointer"
+          >
+            {t('dashboard.new_site')}
+          </button>
+        ) : (
+          <div className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 dark:bg-slate-800/80 rounded-xl text-xs text-slate-500 font-medium">
+            <Lock className="w-3.5 h-3.5 text-slate-400" />
+            <span>サイト新規作成はroot管理者のみ許可</span>
+          </div>
+        )}
       </div>
 
       {showCreate && (

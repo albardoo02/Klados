@@ -16,13 +16,14 @@ const (
 )
 
 type User struct {
-	ID          uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
-	Email       string    `gorm:"uniqueIndex;not null" json:"email"`
-	Username    string    `gorm:"uniqueIndex;not null" json:"username"`
-	Password    *string   `json:"-"`
-	DisplayName string    `json:"display_name"`
-	AvatarURL   string    `json:"avatar_url"`
+	ID                    uuid.UUID  `gorm:"type:uuid;primaryKey" json:"id"`
+	Email                 string     `gorm:"uniqueIndex;not null" json:"email"`
+	Username              string     `gorm:"uniqueIndex;not null" json:"username"`
+	Password              *string    `json:"-"`
+	DisplayName           string     `json:"display_name"`
+	AvatarURL             string     `json:"avatar_url"`
 	Plan                  Plan       `gorm:"default:free" json:"plan"`
+	IsRoot                bool       `gorm:"default:false" json:"is_root"`
 	EmailVerified         bool       `gorm:"default:false" json:"email_verified"`
 	VerificationToken     *string    `gorm:"type:varchar(255);index" json:"-"`
 	VerificationExpiresAt *time.Time `json:"-"`
