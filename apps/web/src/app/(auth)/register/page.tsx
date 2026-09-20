@@ -7,6 +7,7 @@ import { useTranslations } from 'next-intl';
 import { authApi } from '@/lib/api';
 import { useAuthStore } from '@/store/auth';
 import { SocialLogin } from '@/components/social-login';
+import { Eye, EyeOff } from 'lucide-react';
 
 export default function RegisterPage() {
   const t = useTranslations();
@@ -15,6 +16,7 @@ export default function RegisterPage() {
   const [form, setForm] = useState({ email: '', username: '', password: '', display_name: '' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -23,6 +25,21 @@ export default function RegisterPage() {
     try {
       const res = await authApi.register(form);
       setAuth(res.data.data.user, res.data.data.token);
+
+      // ブラウザのパスワードマネージャーに「パスワードを保存しますか？」プロンプトをトリガー
+      if (typeof window !== 'undefined' && 'PasswordCredential' in window && navigator.credentials?.store) {
+        try {
+          const cred = new (window as any).PasswordCredential({
+            id: form.email,
+            password: form.password,
+            name: form.display_name || form.username || form.email,
+          });
+          await navigator.credentials.store(cred);
+        } catch {
+          // ブラウザの拒否や非対応時はそのまま進行
+        }
+      }
+
       router.push('/dashboard');
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } } };
@@ -51,52 +68,97 @@ export default function RegisterPage() {
 
         <SocialLogin mode="register" onError={(msg) => setError(msg)} />
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form
+          method="post"
+          action="#"
+          autoComplete="on"
+          onSubmit={handleSubmit}
+          className="space-y-4"
+        >
           <div>
-            <label className="block text-sm font-medium mb-1">{t('auth.display_name')}</label>
+            <label htmlFor="reg-display-name" className="block text-sm font-medium mb-1 text-slate-700">
+              {t('auth.display_name')}
+            </label>
             <input
+              id="reg-display-name"
+              name="name"
               type="text"
+              autoComplete="name"
               value={form.display_name}
               onChange={(e) => setForm({ ...form, display_name: e.target.value })}
-              className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors"
+              placeholder="山田 太郎"
             />
           </div>
+
           <div>
-            <label className="block text-sm font-medium mb-1">{t('auth.username')}</label>
+            <label htmlFor="reg-username" className="block text-sm font-medium mb-1 text-slate-700">
+              {t('auth.username')}
+            </label>
             <input
+              id="reg-username"
+              name="nickname"
               type="text"
               required
+              autoComplete="username"
               pattern="[a-zA-Z0-9_-]{3,30}"
               value={form.username}
               onChange={(e) => setForm({ ...form, username: e.target.value })}
-              className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors"
+              placeholder="yamada_taro"
             />
           </div>
+
           <div>
-            <label className="block text-sm font-medium mb-1">{t('auth.email')}</label>
+            <label htmlFor="reg-email" className="block text-sm font-medium mb-1 text-slate-700">
+              {t('auth.email')}
+            </label>
             <input
+              id="reg-email"
+              name="email"
               type="email"
               required
+              autoComplete="email"
               value={form.email}
               onChange={(e) => setForm({ ...form, email: e.target.value })}
-              className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors"
+              placeholder="name@example.com"
             />
           </div>
+
           <div>
-            <label className="block text-sm font-medium mb-1">{t('auth.register.password_hint')}</label>
-            <input
-              type="password"
-              required
-              minLength={8}
-              value={form.password}
-              onChange={(e) => setForm({ ...form, password: e.target.value })}
-              className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
+            <label htmlFor="reg-password" className="block text-sm font-medium mb-1 text-slate-700">
+              {t('auth.register.password_hint')}
+            </label>
+            <div className="relative">
+              <input
+                id="reg-password"
+                name="password"
+                type={showPassword ? 'text' : 'password'}
+                required
+                minLength={8}
+                autoComplete="new-password"
+                value={form.password}
+                onChange={(e) => setForm({ ...form, password: e.target.value })}
+                className="w-full border border-slate-200 rounded-xl px-3 py-2 pr-10 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors"
+                placeholder="•••••••• (8文字以上)"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                tabIndex={-1}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
+                title={showPassword ? 'パスワードを隠す' : 'パスワードを表示'}
+              >
+                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
           </div>
+
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-blue-500 hover:bg-blue-600 text-white rounded-lg py-2 font-semibold transition-colors disabled:opacity-50"
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white rounded-xl py-2.5 font-bold transition-colors shadow-sm disabled:opacity-50 cursor-pointer"
           >
             {loading ? t('auth.register.submitting') : t('auth.register.submit')}
           </button>

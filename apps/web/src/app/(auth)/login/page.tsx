@@ -7,6 +7,7 @@ import { useTranslations } from 'next-intl';
 import { authApi } from '@/lib/api';
 import { useAuthStore } from '@/store/auth';
 import { SocialLogin } from '@/components/social-login';
+import { Eye, EyeOff } from 'lucide-react';
 
 export default function LoginPage() {
   const t = useTranslations();
@@ -16,6 +17,7 @@ export default function LoginPage() {
   const [rememberMe, setRememberMe] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -24,6 +26,21 @@ export default function LoginPage() {
     try {
       const res = await authApi.login({ ...form, remember_me: rememberMe });
       setAuth(res.data.data.user, res.data.data.token, rememberMe);
+
+      // ブラウザのパスワードマネージャーに「パスワードを保存しますか？」プロンプトをトリガー
+      if (typeof window !== 'undefined' && 'PasswordCredential' in window && navigator.credentials?.store) {
+        try {
+          const cred = new (window as any).PasswordCredential({
+            id: form.email,
+            password: form.password,
+            name: res.data.data.user?.display_name || form.email,
+          });
+          await navigator.credentials.store(cred);
+        } catch {
+          // ブラウザの拒否や非対応時はそのまま進行
+        }
+      }
+
       router.push('/dashboard');
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } } };
@@ -52,32 +69,66 @@ export default function LoginPage() {
 
         <SocialLogin mode="login" onError={(msg) => setError(msg)} />
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form
+          method="post"
+          action="#"
+          autoComplete="on"
+          onSubmit={handleSubmit}
+          className="space-y-4"
+        >
           <div>
-            <label className="block text-sm font-medium mb-1">{t('auth.email')}</label>
+            <label htmlFor="email" className="block text-sm font-medium mb-1 text-slate-700">
+              {t('auth.email')}
+            </label>
             <input
+              id="email"
+              name="username"
               type="email"
               required
+              autoComplete="username"
               value={form.email}
               onChange={(e) => setForm({ ...form, email: e.target.value })}
-              className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors"
+              placeholder="name@example.com"
             />
           </div>
+
           <div>
-            <label className="block text-sm font-medium mb-1">{t('auth.password')}</label>
-            <input
-              type="password"
-              required
-              value={form.password}
-              onChange={(e) => setForm({ ...form, password: e.target.value })}
-              className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
+            <div className="flex items-center justify-between mb-1">
+              <label htmlFor="password" className="block text-sm font-medium text-slate-700">
+                {t('auth.password')}
+              </label>
+            </div>
+            <div className="relative">
+              <input
+                id="password"
+                name="password"
+                type={showPassword ? 'text' : 'password'}
+                required
+                autoComplete="current-password"
+                value={form.password}
+                onChange={(e) => setForm({ ...form, password: e.target.value })}
+                className="w-full border border-slate-200 rounded-xl px-3 py-2 pr-10 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors"
+                placeholder="••••••••"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                tabIndex={-1}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
+                title={showPassword ? 'パスワードを隠す' : 'パスワードを表示'}
+              >
+                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
           </div>
 
           {/* 30日間ログイン保持 */}
           <label className="flex items-center gap-2.5 cursor-pointer select-none group">
             <div className="relative">
               <input
+                id="remember_me"
+                name="remember_me"
                 type="checkbox"
                 checked={rememberMe}
                 onChange={(e) => setRememberMe(e.target.checked)}
@@ -99,7 +150,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-blue-500 hover:bg-blue-600 text-white rounded-lg py-2 font-semibold transition-colors disabled:opacity-50"
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white rounded-xl py-2.5 font-bold transition-colors shadow-sm disabled:opacity-50 cursor-pointer"
           >
             {loading ? t('auth.login.submitting') : t('auth.login.submit')}
           </button>
