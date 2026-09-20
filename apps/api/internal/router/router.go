@@ -86,7 +86,7 @@ func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
 	_ = minioClient.SetBucketPolicy(context.Background(), cfg.MinioBucket, policy)
 
 	// ハンドラー
-	authH := &handler.AuthHandler{DB: db, JWTSecret: cfg.JWTSecret}
+	authH := &handler.AuthHandler{DB: db, JWTSecret: cfg.JWTSecret, Cfg: cfg}
 	siteH := &handler.SiteHandler{DB: db, JWTSecret: cfg.JWTSecret}
 	memberH := &handler.MemberHandler{DB: db}
 	pageH := &handler.PageHandler{DB: db}
@@ -150,6 +150,8 @@ func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
 		auth.POST("/google", authH.GoogleLogin)
 		auth.POST("/github", authH.GitHubLogin)
 		auth.POST("/discord", authH.DiscordLogin)
+		auth.GET("/:provider/url", authH.GetOAuthURL)
+		auth.POST("/oauth/callback", authH.OAuthCallback)
 		auth.GET("/config", authH.GetAuthConfig)
 		auth.POST("/verify-email", authH.VerifyEmail)
 		auth.POST("/resend-verification", authH.ResendVerification)

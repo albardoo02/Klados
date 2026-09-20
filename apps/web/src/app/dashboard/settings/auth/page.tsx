@@ -30,6 +30,8 @@ import {
   ExternalLink,
   Crown,
   Lock,
+  Copy,
+  KeyRound,
 } from 'lucide-react';
 
 interface SiteItem {
@@ -72,6 +74,11 @@ export default function AuthSettingsPage() {
   const [defaultRole, setDefaultRole] = useState<string>('viewer');
   const [allowedDomains, setAllowedDomains] = useState<string>('');
   const [restrictToRules, setRestrictToRules] = useState<boolean>(false);
+  const [githubClientId, setGithubClientId] = useState<string>('');
+  const [githubClientSecret, setGithubClientSecret] = useState<string>('');
+  const [discordClientId, setDiscordClientId] = useState<string>('');
+  const [discordClientSecret, setDiscordClientSecret] = useState<string>('');
+  const [copiedCallback, setCopiedCallback] = useState<string | null>(null);
   const [configSuccessMsg, setConfigSuccessMsg] = useState<string | null>(null);
 
   // 初期値反映
@@ -89,9 +96,17 @@ export default function AuthSettingsPage() {
         setDefaultRole(configData.config.default_role || 'viewer');
         setAllowedDomains(configData.config.allowed_domains || '');
         setRestrictToRules(configData.config.restrict_to_rules || false);
+        setGithubClientId(configData.config.github_client_id || '');
+        setDiscordClientId(configData.config.discord_client_id || '');
       }
     }
   }, [configData, requireEmail]);
+
+  const handleCopy = (text: string, key: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedCallback(key);
+    setTimeout(() => setCopiedCallback(null), 2000);
+  };
 
   // 設定更新ミューテーション
   const updateConfigMutation = useMutation({
@@ -116,6 +131,10 @@ export default function AuthSettingsPage() {
       default_role: defaultRole,
       allowed_domains: allowedDomains,
       restrict_to_rules: restrictToRules,
+      github_client_id: githubClientId,
+      github_client_secret: githubClientSecret || undefined,
+      discord_client_id: discordClientId,
+      discord_client_secret: discordClientSecret || undefined,
     });
   };
 
@@ -465,6 +484,201 @@ export default function AuthSettingsPage() {
                 </label>
               </div>
             )}
+          </div>
+        </div>
+      </div>
+
+      {/* OAuth アプリケーション接続設定（GitHub / Discord）カード */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-6">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+              <KeyRound className="w-5 h-5 text-indigo-600" />
+              OAuth アプリケーション接続設定（GitHub / Discord）
+            </h2>
+            <p className="text-xs text-slate-500 mt-1">
+              ソーシャルログイン（GitHub / Discord）を使用するための OAuth2 クライアント情報です。環境変数（Kubernetes Secret等）が優先され、未設定時はここで保存した値が利用されます。
+            </p>
+          </div>
+          <button
+            onClick={handleSaveConfig}
+            disabled={updateConfigMutation.isPending}
+            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-xl shadow-sm transition-colors disabled:opacity-50"
+          >
+            {updateConfigMutation.isPending ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Check className="w-4 h-4" />
+            )}
+            OAuth設定を保存
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pt-2">
+          {/* GitHub OAuth 設定 */}
+          <div className="border border-slate-200 rounded-2xl p-5 bg-slate-50/50 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-slate-800 text-sm">GitHub OAuth App</span>
+                {configData?.config.github_configured ? (
+                  <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-100/80 px-2 py-0.5 rounded-full">
+                    <CheckCircle2 className="w-3.5 h-3.5" /> 設定完了
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-700 bg-amber-100/80 px-2 py-0.5 rounded-full">
+                    <AlertTriangle className="w-3.5 h-3.5" /> 未設定
+                  </span>
+                )}
+              </div>
+              <a
+                href="https://github.com/settings/developers"
+                target="_blank"
+                rel="noreferrer"
+                className="text-[11px] text-blue-600 hover:text-blue-800 flex items-center gap-1"
+              >
+                GitHub Developer Settings <ExternalLink className="w-3 h-3" />
+              </a>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Authorization callback URL (登録用)
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  readOnly
+                  value={typeof window !== 'undefined' ? `${window.location.origin}/auth/callback?provider=github` : 'https://cms.azisaba.net/auth/callback?provider=github'}
+                  className="w-full text-xs font-mono bg-white border border-slate-200 rounded-lg px-3 py-2 text-slate-600 select-all"
+                />
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleCopy(
+                      typeof window !== 'undefined' ? `${window.location.origin}/auth/callback?provider=github` : 'https://cms.azisaba.net/auth/callback?provider=github',
+                      'github_cb'
+                    )
+                  }
+                  className="px-3 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg text-xs font-medium transition-colors flex items-center gap-1 shrink-0"
+                >
+                  {copiedCallback === 'github_cb' ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                  {copiedCallback === 'github_cb' ? 'コピー済' : 'コピー'}
+                </button>
+              </div>
+              <p className="text-[11px] text-slate-500 mt-1">
+                GitHub の OAuth App 作成画面で上記 URL を「Authorization callback URL」に指定してください。
+              </p>
+            </div>
+
+            <div className="space-y-3 pt-2 border-t border-slate-200">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Client ID
+                </label>
+                <input
+                  type="text"
+                  placeholder="Iv1.xxxxxxxxx or Ov23xxxxxxxx"
+                  value={githubClientId}
+                  onChange={(e) => setGithubClientId(e.target.value)}
+                  className="w-full text-xs font-mono bg-white border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Client Secret
+                </label>
+                <input
+                  type="password"
+                  placeholder={configData?.config.github_configured ? '•••••••••••••••• (設定済み・変更時のみ入力)' : 'Client Secret を入力'}
+                  value={githubClientSecret}
+                  onChange={(e) => setGithubClientSecret(e.target.value)}
+                  className="w-full text-xs font-mono bg-white border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Discord OAuth 設定 */}
+          <div className="border border-slate-200 rounded-2xl p-5 bg-slate-50/50 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-slate-800 text-sm">Discord OAuth2</span>
+                {configData?.config.discord_configured ? (
+                  <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-100/80 px-2 py-0.5 rounded-full">
+                    <CheckCircle2 className="w-3.5 h-3.5" /> 設定完了
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-700 bg-amber-100/80 px-2 py-0.5 rounded-full">
+                    <AlertTriangle className="w-3.5 h-3.5" /> 未設定
+                  </span>
+                )}
+              </div>
+              <a
+                href="https://discord.com/developers/applications"
+                target="_blank"
+                rel="noreferrer"
+                className="text-[11px] text-indigo-600 hover:text-indigo-800 flex items-center gap-1"
+              >
+                Discord Developer Portal <ExternalLink className="w-3 h-3" />
+              </a>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Redirect URI (登録用)
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  readOnly
+                  value={typeof window !== 'undefined' ? `${window.location.origin}/auth/callback?provider=discord` : 'https://cms.azisaba.net/auth/callback?provider=discord'}
+                  className="w-full text-xs font-mono bg-white border border-slate-200 rounded-lg px-3 py-2 text-slate-600 select-all"
+                />
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleCopy(
+                      typeof window !== 'undefined' ? `${window.location.origin}/auth/callback?provider=discord` : 'https://cms.azisaba.net/auth/callback?provider=discord',
+                      'discord_cb'
+                    )
+                  }
+                  className="px-3 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg text-xs font-medium transition-colors flex items-center gap-1 shrink-0"
+                >
+                  {copiedCallback === 'discord_cb' ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                  {copiedCallback === 'discord_cb' ? 'コピー済' : 'コピー'}
+                </button>
+              </div>
+              <p className="text-[11px] text-slate-500 mt-1">
+                Discord Developer Portal の OAuth2 &gt; Redirects に上記 URL を追加してください。
+              </p>
+            </div>
+
+            <div className="space-y-3 pt-2 border-t border-slate-200">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Client ID (Application ID)
+                </label>
+                <input
+                  type="text"
+                  placeholder="123456789012345678"
+                  value={discordClientId}
+                  onChange={(e) => setDiscordClientId(e.target.value)}
+                  className="w-full text-xs font-mono bg-white border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Client Secret
+                </label>
+                <input
+                  type="password"
+                  placeholder={configData?.config.discord_configured ? '•••••••••••••••• (設定済み・変更時のみ入力)' : 'Client Secret を入力'}
+                  value={discordClientSecret}
+                  onChange={(e) => setDiscordClientSecret(e.target.value)}
+                  className="w-full text-xs font-mono bg-white border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            </div>
           </div>
         </div>
       </div>

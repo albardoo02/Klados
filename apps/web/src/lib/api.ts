@@ -69,6 +69,12 @@ export interface AuthConfig {
   default_role: string;
   allowed_domains: string;
   restrict_to_rules: boolean;
+  github_client_id?: string;
+  github_client_secret?: string;
+  github_configured?: boolean;
+  discord_client_id?: string;
+  discord_client_secret?: string;
+  discord_configured?: boolean;
   updated_at: string;
 }
 
@@ -125,10 +131,34 @@ export const authApi = {
     api.post('/auth/github', data || {}),
   discordLogin: (data?: { email?: string; name?: string; token?: string; guild_id?: string; guild_name?: string }) =>
     api.post('/auth/discord', data || {}),
+  getOAuthUrl: (provider: string, redirectUri?: string) =>
+    api.get<{ success: boolean; data: { url: string } }>(
+      `/auth/${provider}/url${redirectUri ? `?redirect_uri=${encodeURIComponent(redirectUri)}` : ''}`
+    ),
+  oauthCallback: (data: { provider: string; code: string; redirect_uri?: string }) =>
+    api.post<{
+      success: boolean;
+      data: {
+        token: string;
+        user: any;
+        routing_matches?: AppliedRuleResult[];
+      };
+    }>('/auth/oauth/callback', data),
   quickVerify: () =>
     api.post<{ success: boolean; message: string }>('/auth/quick-verify'),
   getAuthConfig: () =>
-    api.get<{ success: boolean; data: { config: AuthConfig; active_rules_count: number; oauth_providers: string[] } }>('/auth/config'),
+    api.get<{
+      success: boolean;
+      data: {
+        config: AuthConfig;
+        active_rules_count: number;
+        oauth_providers: string[];
+        github_configured?: boolean;
+        discord_configured?: boolean;
+        github_client_id?: string;
+        discord_client_id?: string;
+      };
+    }>('/auth/config'),
   updateAuthConfig: (data: Partial<AuthConfig>) =>
     api.put<{ success: boolean; message: string; data: AuthConfig }>('/auth/config', data),
   getRoutingRules: () =>

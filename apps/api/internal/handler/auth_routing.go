@@ -35,23 +35,27 @@ func (h *AuthHandler) requireRootUser(c *gin.Context) bool {
 }
 
 func (h *AuthHandler) getOrCreateAuthConfig() *model.AuthConfig {
+	defaultCfg := &model.AuthConfig{
+		ID:                       "default",
+		RequireEmailVerification: false, // デフォルト任意（メールサービス設定不要）
+		AllowEmailRegistration:   true,  // デフォルト: メール新規登録許可
+		EnableEmailLogin:         true,  // デフォルト: メールログイン有効
+		EnableGithubLogin:        true,  // デフォルト: GitHub有効
+		EnableDiscordLogin:       true,  // デフォルト: Discord有効
+		EnableGoogleLogin:        true,  // デフォルト: Google有効
+		EnableDemoLogin:          true,  // デフォルト: デモログイン有効
+		OnlyRootCanCreateSites:   true,  // デフォルト: サイト作成はroot管理者のみ
+		DefaultRole:              "viewer",
+		AllowedDomains:           "",
+		RestrictToRules:          false,
+		UpdatedAt:                time.Now(),
+	}
+	if h.DB == nil {
+		return defaultCfg
+	}
 	var cfg model.AuthConfig
 	if err := h.DB.Where("id = ?", "default").First(&cfg).Error; err != nil {
-		cfg = model.AuthConfig{
-			ID:                       "default",
-			RequireEmailVerification: false, // デフォルト任意（メールサービス設定不要）
-			AllowEmailRegistration:   true,  // デフォルト: メール新規登録許可
-			EnableEmailLogin:         true,  // デフォルト: メールログイン有効
-			EnableGithubLogin:        true,  // デフォルト: GitHub有効
-			EnableDiscordLogin:       true,  // デフォルト: Discord有効
-			EnableGoogleLogin:        true,  // デフォルト: Google有効
-			EnableDemoLogin:          true,  // デフォルト: デモログイン有効
-			OnlyRootCanCreateSites:   true,  // デフォルト: サイト作成はroot管理者のみ
-			DefaultRole:              "viewer",
-			AllowedDomains:           "",
-			RestrictToRules:          false,
-			UpdatedAt:                time.Now(),
-		}
+		cfg = *defaultCfg
 		h.DB.Create(&cfg)
 	}
 	return &cfg
@@ -62,6 +66,9 @@ func (h *AuthHandler) GetAuthConfig(c *gin.Context) {
 	cfg := h.getOrCreateAuthConfig()
 	var ruleCount int64
 	h.DB.Model(&model.AuthRoutingRule{}).Where("enabled = ?", true).Count(&ruleCount)
+
+	ghID, ghSecret := h.getGithubCredentials()
+	dcID, dcSecret := h.getDiscordCredentials()
 
 	providers := make([]string, 0)
 	if cfg.EnableGoogleLogin {
@@ -80,6 +87,10 @@ func (h *AuthHandler) GetAuthConfig(c *gin.Context) {
 			"config":             cfg,
 			"active_rules_count": ruleCount,
 			"oauth_providers":    providers,
+			"github_configured":  ghID != "" && ghSecret != "",
+			"discord_configured": dcID != "" && dcSecret != "",
+			"github_client_id":   ghID,
+			"discord_client_id":  dcID,
 		},
 	})
 }
@@ -96,6 +107,10 @@ type updateAuthConfigRequest struct {
 	DefaultRole              *string `json:"default_role"`
 	AllowedDomains           *string `json:"allowed_domains"`
 	RestrictToRules          *bool   `json:"restrict_to_rules"`
+	GithubClientID           *string `json:"github_client_id"`
+	GithubClientSecret       *string `json:"github_client_secret"`
+	DiscordClientID          *string `json:"discord_client_id"`
+	DiscordClientSecret      *string `json:"discord_client_secret"`
 }
 
 // PUT /v1/auth/config (要root認証・認証設定の更新)
@@ -143,6 +158,18 @@ func (h *AuthHandler) UpdateAuthConfig(c *gin.Context) {
 	}
 	if req.RestrictToRules != nil {
 		cfg.RestrictToRules = *req.RestrictToRules
+	}
+	if req.GithubClientID != nil {
+		cfg.GithubClientID = strings.TrimSpace(*req.GithubClientID)
+	}
+	if req.GithubClientSecret != nil && strings.TrimSpace(*req.GithubClientSecret) != "" {
+		cfg.GithubClientSecret = strings.TrimSpace(*req.GithubClientSecret)
+	}
+	if req.DiscordClientID != nil {
+		cfg.DiscordClientID = strings.TrimSpace(*req.DiscordClientID)
+	}
+	if req.DiscordClientSecret != nil && strings.TrimSpace(*req.DiscordClientSecret) != "" {
+		cfg.DiscordClientSecret = strings.TrimSpace(*req.DiscordClientSecret)
 	}
 	cfg.UpdatedAt = time.Now()
 
@@ -374,17 +401,47 @@ func (h *AuthHandler) TestRoutingRule(c *gin.Context) {
 	})
 }
 
+type DiscordGuildInfo struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+type OAuthMatchContext struct {
+	Provider string
+	Orgs     []string
+	Guilds   []DiscordGuildInfo
+	Email    string
+}
+
 // 組織・サーバー・メールドメインによる振り分けルールの適用
 func (h *AuthHandler) applyRoutingRules(
 	user *model.User,
 	provider, org, guildID, guildName, email string,
 	persist bool,
 ) ([]AppliedRuleResult, error) {
+	ctx := OAuthMatchContext{
+		Provider: provider,
+		Email:    email,
+	}
+	if org != "" {
+		ctx.Orgs = []string{org}
+	}
+	if guildID != "" || guildName != "" {
+		ctx.Guilds = []DiscordGuildInfo{{ID: guildID, Name: guildName}}
+	}
+	return h.applyRoutingRulesContext(user, ctx, persist)
+}
+
+func (h *AuthHandler) applyRoutingRulesContext(
+	user *model.User,
+	ctx OAuthMatchContext,
+	persist bool,
+) ([]AppliedRuleResult, error) {
 	var rules []model.AuthRoutingRule
 	h.DB.Where("enabled = ?", true).Preload("TargetSite").Find(&rules)
 
 	var applied []AppliedRuleResult
-	emailLower := strings.ToLower(strings.TrimSpace(email))
+	emailLower := strings.ToLower(strings.TrimSpace(ctx.Email))
 	emailDomain := ""
 	if atIdx := strings.LastIndex(emailLower, "@"); atIdx != -1 {
 		emailDomain = emailLower[atIdx:]
@@ -392,7 +449,7 @@ func (h *AuthHandler) applyRoutingRules(
 
 	for _, rule := range rules {
 		// プロバイダー照合
-		if rule.Provider != "all" && rule.Provider != "" && rule.Provider != provider {
+		if rule.Provider != "all" && rule.Provider != "" && rule.Provider != ctx.Provider {
 			continue
 		}
 
@@ -402,12 +459,18 @@ func (h *AuthHandler) applyRoutingRules(
 
 		switch rule.RuleType {
 		case "github_org":
-			if org != "" && strings.EqualFold(org, matchVal) {
-				matched = true
+			for _, o := range ctx.Orgs {
+				if strings.EqualFold(o, matchVal) {
+					matched = true
+					break
+				}
 			}
 		case "discord_guild":
-			if (guildID != "" && guildID == matchVal) || (guildName != "" && strings.EqualFold(guildName, matchVal)) {
-				matched = true
+			for _, g := range ctx.Guilds {
+				if (g.ID != "" && g.ID == matchVal) || (g.Name != "" && strings.EqualFold(g.Name, matchVal)) {
+					matched = true
+					break
+				}
 			}
 		case "email_domain":
 			domainTarget := matchValLower

@@ -65,6 +65,16 @@ export function SocialLogin({ mode = 'login', onError, config: initialConfig, sh
   ) => {
     setLoadingType(provider);
     try {
+      if (provider === 'github' || provider === 'discord') {
+        const redirectUri = `${window.location.origin}/auth/callback?provider=${provider}`;
+        const res = await authApi.getOAuthUrl(provider, redirectUri);
+        const url = res.data.data.url;
+        if (url) {
+          window.location.href = url;
+          return;
+        }
+      }
+
       let res;
       if (provider === 'google') {
         res = await authApi.googleLogin({ email: email || undefined, name: name || undefined });

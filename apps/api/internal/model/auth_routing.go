@@ -20,6 +20,10 @@ type AuthConfig struct {
 	DefaultRole              string    `gorm:"default:'viewer'" json:"default_role"`
 	AllowedDomains           string    `json:"allowed_domains"`                        // カンマ区切りの許可ドメイン (空欄なら全ドメイン許可)
 	RestrictToRules          bool      `gorm:"default:false" json:"restrict_to_rules"` // 振り分けルールに合致しないユーザーのログインを拒否
+	GithubClientID           string    `json:"github_client_id"`
+	GithubClientSecret       string    `json:"github_client_secret,omitempty"`
+	DiscordClientID          string    `json:"discord_client_id"`
+	DiscordClientSecret      string    `json:"discord_client_secret,omitempty"`
 	UpdatedAt                time.Time `json:"updated_at"`
 }
 

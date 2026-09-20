@@ -1,15 +1,21 @@
 package handler
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	"github.com/klados/api/internal/config"
 	"github.com/klados/api/internal/model"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
@@ -18,6 +24,7 @@ import (
 type AuthHandler struct {
 	DB        *gorm.DB
 	JWTSecret string
+	Cfg       *config.Config
 }
 
 func (h *AuthHandler) determineIfRoot(email, username string) bool {
@@ -554,94 +561,448 @@ console.log("Hello, Klados!");
 	})
 }
 
-type oauthLoginRequest struct {
-	Provider  string   `json:"provider"`
-	Email     string   `json:"email"`
-	Name      string   `json:"name"`
-	AvatarURL string   `json:"avatar_url"`
-	Token     string   `json:"token"`
-	Org       string   `json:"org"`        // GitHub 組織名
-	GuildID   string   `json:"guild_id"`   // Discord サーバーID
-	GuildName string   `json:"guild_name"` // Discord サーバー名
-	Roles     []string `json:"roles"`      // Discord ロール
+func (h *AuthHandler) getGithubCredentials() (clientID, clientSecret string) {
+	if h.Cfg != nil {
+		clientID = h.Cfg.GithubClientID
+		clientSecret = h.Cfg.GithubClientSecret
+	}
+	if clientID == "" || clientSecret == "" {
+		cfg := h.getOrCreateAuthConfig()
+		if clientID == "" {
+			clientID = cfg.GithubClientID
+		}
+		if clientSecret == "" {
+			clientSecret = cfg.GithubClientSecret
+		}
+	}
+	return strings.TrimSpace(clientID), strings.TrimSpace(clientSecret)
 }
 
-func (h *AuthHandler) GoogleLogin(c *gin.Context) {
-	var req oauthLoginRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "リクエスト形式が不正です"})
-		return
+func (h *AuthHandler) getDiscordCredentials() (clientID, clientSecret string) {
+	if h.Cfg != nil {
+		clientID = h.Cfg.DiscordClientID
+		clientSecret = h.Cfg.DiscordClientSecret
 	}
-
-	if req.Email == "" {
-		req.Email = "google.user@example.com"
+	if clientID == "" || clientSecret == "" {
+		cfg := h.getOrCreateAuthConfig()
+		if clientID == "" {
+			clientID = cfg.DiscordClientID
+		}
+		if clientSecret == "" {
+			clientSecret = cfg.DiscordClientSecret
+		}
 	}
-	if req.Name == "" {
-		req.Name = "Google ユーザー"
-	}
-	if req.Provider == "" {
-		req.Provider = "google"
-	}
-
-	h.handleOAuthUser(c, req)
+	return strings.TrimSpace(clientID), strings.TrimSpace(clientSecret)
 }
 
-func (h *AuthHandler) GitHubLogin(c *gin.Context) {
-	var req oauthLoginRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "リクエスト形式が不正です"})
-		return
-	}
+// GET /v1/auth/:provider/url?redirect_uri=...
+func (h *AuthHandler) GetOAuthURL(c *gin.Context) {
+	provider := strings.ToLower(c.Param("provider"))
+	redirectURI := c.Query("redirect_uri")
+	state := c.DefaultQuery("state", uuid.New().String())
 
-	if req.Email == "" {
-		req.Email = "github.user@example.com"
-	}
-	if req.Name == "" {
-		req.Name = "GitHub ユーザー"
-	}
-	req.Provider = "github"
-
-	h.handleOAuthUser(c, req)
-}
-
-func (h *AuthHandler) DiscordLogin(c *gin.Context) {
-	var req oauthLoginRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "リクエスト形式が不正です"})
-		return
-	}
-
-	if req.Email == "" {
-		req.Email = "discord.user@example.com"
-	}
-	if req.Name == "" {
-		req.Name = "Discord ユーザー"
-	}
-	req.Provider = "discord"
-
-	h.handleOAuthUser(c, req)
-}
-
-func (h *AuthHandler) handleOAuthUser(c *gin.Context, req oauthLoginRequest) {
 	authConfig := h.getOrCreateAuthConfig()
 
-	// 0. プロバイダーの有効/無効チェック
-	if req.Provider == "google" && !authConfig.EnableGoogleLogin {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Googleログインは無効化されています。"})
+	switch provider {
+	case "github":
+		if !authConfig.EnableGithubLogin {
+			c.JSON(http.StatusForbidden, gin.H{"error": "GitHubログインは無効化されています。"})
+			return
+		}
+		clientID, _ := h.getGithubCredentials()
+		if clientID == "" {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "GitHub OAuth の Client ID が設定されていません。管理画面（認証設定）または環境変数 GITHUB_CLIENT_ID を設定してください。",
+			})
+			return
+		}
+		authURL := fmt.Sprintf(
+			"https://github.com/login/oauth/authorize?client_id=%s&redirect_uri=%s&scope=%s&state=%s",
+			url.QueryEscape(clientID),
+			url.QueryEscape(redirectURI),
+			url.QueryEscape("read:user user:email read:org"),
+			url.QueryEscape(state),
+		)
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"data": gin.H{
+				"url": authURL,
+			},
+		})
+
+	case "discord":
+		if !authConfig.EnableDiscordLogin {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Discordログインは無効化されています。"})
+			return
+		}
+		clientID, _ := h.getDiscordCredentials()
+		if clientID == "" {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "Discord OAuth の Client ID が設定されていません。管理画面（認証設定）または環境変数 DISCORD_CLIENT_ID を設定してください。",
+			})
+			return
+		}
+		authURL := fmt.Sprintf(
+			"https://discord.com/api/oauth2/authorize?client_id=%s&redirect_uri=%s&response_type=code&scope=%s&state=%s",
+			url.QueryEscape(clientID),
+			url.QueryEscape(redirectURI),
+			url.QueryEscape("identify email guilds"),
+			url.QueryEscape(state),
+		)
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"data": gin.H{
+				"url": authURL,
+			},
+		})
+
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("未対応のOAuthプロバイダーです: %s", provider)})
+	}
+}
+
+type oauthCallbackRequest struct {
+	Provider    string `json:"provider" binding:"required"`
+	Code        string `json:"code" binding:"required"`
+	RedirectURI string `json:"redirect_uri"`
+}
+
+// POST /v1/auth/oauth/callback
+func (h *AuthHandler) OAuthCallback(c *gin.Context) {
+	var req oauthCallbackRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "リクエスト形式が不正です"})
 		return
 	}
-	if req.Provider == "github" && !authConfig.EnableGithubLogin {
-		c.JSON(http.StatusForbidden, gin.H{"error": "GitHubログインは無効化されています。"})
+
+	provider := strings.ToLower(req.Provider)
+	authConfig := h.getOrCreateAuthConfig()
+
+	var (
+		providerID  string
+		email       string
+		username    string
+		displayName string
+		avatarURL   string
+		orgs        []string
+		guilds      []DiscordGuildInfo
+	)
+
+	switch provider {
+	case "github":
+		if !authConfig.EnableGithubLogin {
+			c.JSON(http.StatusForbidden, gin.H{"error": "GitHubログインは無効化されています。"})
+			return
+		}
+		clientID, clientSecret := h.getGithubCredentials()
+		if clientID == "" || clientSecret == "" {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "GitHub OAuth の Client ID または Client Secret が設定されていません。管理画面（認証設定）または環境変数を設定してください。",
+			})
+			return
+		}
+
+		pID, em, un, dn, av, ogs, err := h.exchangeGitHubCode(c.Request.Context(), req.Code, req.RedirectURI, clientID, clientSecret)
+		if err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "GitHub認証に失敗しました: " + err.Error()})
+			return
+		}
+		providerID = pID
+		email = em
+		username = un
+		displayName = dn
+		avatarURL = av
+		orgs = ogs
+
+	case "discord":
+		if !authConfig.EnableDiscordLogin {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Discordログインは無効化されています。"})
+			return
+		}
+		clientID, clientSecret := h.getDiscordCredentials()
+		if clientID == "" || clientSecret == "" {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "Discord OAuth の Client ID または Client Secret が設定されていません。管理画面（認証設定）または環境変数を設定してください。",
+			})
+			return
+		}
+
+		pID, em, un, dn, av, glds, err := h.exchangeDiscordCode(c.Request.Context(), req.Code, req.RedirectURI, clientID, clientSecret)
+		if err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Discord認証に失敗しました: " + err.Error()})
+			return
+		}
+		providerID = pID
+		email = em
+		username = un
+		displayName = dn
+		avatarURL = av
+		guilds = glds
+
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"error": "未対応のプロバイダーです: " + provider})
 		return
 	}
-	if req.Provider == "discord" && !authConfig.EnableDiscordLogin {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Discordログインは無効化されています。"})
-		return
+
+	h.completeOAuthLogin(c, provider, providerID, email, username, displayName, avatarURL, orgs, guilds)
+}
+
+func (h *AuthHandler) exchangeGitHubCode(ctx context.Context, code, redirectURI, clientID, clientSecret string) (
+	providerID, email, username, displayName, avatarURL string,
+	orgs []string,
+	err error,
+) {
+	client := &http.Client{Timeout: 10 * time.Second}
+
+	form := url.Values{}
+	form.Set("client_id", clientID)
+	form.Set("client_secret", clientSecret)
+	form.Set("code", code)
+	if redirectURI != "" {
+		form.Set("redirect_uri", redirectURI)
 	}
+
+	tokenReq, err := http.NewRequestWithContext(ctx, "POST", "https://github.com/login/oauth/access_token", strings.NewReader(form.Encode()))
+	if err != nil {
+		return "", "", "", "", "", nil, err
+	}
+	tokenReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	tokenReq.Header.Set("Accept", "application/json")
+
+	tokenResp, err := client.Do(tokenReq)
+	if err != nil {
+		return "", "", "", "", "", nil, fmt.Errorf("トークン取得通信エラー: %w", err)
+	}
+	defer tokenResp.Body.Close()
+
+	var tokenData struct {
+		AccessToken      string `json:"access_token"`
+		TokenType        string `json:"token_type"`
+		Scope            string `json:"scope"`
+		Error            string `json:"error"`
+		ErrorDescription string `json:"error_description"`
+	}
+	if err := json.NewDecoder(tokenResp.Body).Decode(&tokenData); err != nil {
+		return "", "", "", "", "", nil, fmt.Errorf("トークン解析エラー: %w", err)
+	}
+	if tokenData.AccessToken == "" {
+		errMsg := tokenData.ErrorDescription
+		if errMsg == "" {
+			errMsg = tokenData.Error
+		}
+		if errMsg == "" {
+			errMsg = "access_token が取得できませんでした"
+		}
+		return "", "", "", "", "", nil, errors.New(errMsg)
+	}
+
+	// ユーザー情報取得
+	userReq, _ := http.NewRequestWithContext(ctx, "GET", "https://api.github.com/user", nil)
+	userReq.Header.Set("Authorization", "Bearer "+tokenData.AccessToken)
+	userReq.Header.Set("User-Agent", "Klados-CMS")
+	userReq.Header.Set("Accept", "application/vnd.github.v3+json")
+
+	userResp, err := client.Do(userReq)
+	if err != nil {
+		return "", "", "", "", "", nil, fmt.Errorf("ユーザー情報取得通信エラー: %w", err)
+	}
+	defer userResp.Body.Close()
+
+	var ghUser struct {
+		ID        int64  `json:"id"`
+		Login     string `json:"login"`
+		Name      string `json:"name"`
+		Email     string `json:"email"`
+		AvatarURL string `json:"avatar_url"`
+	}
+	if err := json.NewDecoder(userResp.Body).Decode(&ghUser); err != nil {
+		return "", "", "", "", "", nil, fmt.Errorf("ユーザー情報解析エラー: %w", err)
+	}
+
+	providerID = strconv.FormatInt(ghUser.ID, 10)
+	username = ghUser.Login
+	displayName = ghUser.Name
+	if displayName == "" {
+		displayName = ghUser.Login
+	}
+	avatarURL = ghUser.AvatarURL
+	email = ghUser.Email
+
+	// メールアドレスが非公開の場合、メール一覧APIからプライマリメールを取得
+	if email == "" {
+		emailReq, _ := http.NewRequestWithContext(ctx, "GET", "https://api.github.com/user/emails", nil)
+		emailReq.Header.Set("Authorization", "Bearer "+tokenData.AccessToken)
+		emailReq.Header.Set("User-Agent", "Klados-CMS")
+		emailReq.Header.Set("Accept", "application/vnd.github.v3+json")
+
+		if emailResp, err := client.Do(emailReq); err == nil {
+			defer emailResp.Body.Close()
+			var emails []struct {
+				Email    string `json:"email"`
+				Primary  bool   `json:"primary"`
+				Verified bool   `json:"verified"`
+			}
+			if json.NewDecoder(emailResp.Body).Decode(&emails) == nil {
+				for _, em := range emails {
+					if em.Primary && em.Verified {
+						email = em.Email
+						break
+					}
+				}
+				if email == "" && len(emails) > 0 {
+					email = emails[0].Email
+				}
+			}
+		}
+	}
+	if email == "" {
+		email = fmt.Sprintf("%s@users.noreply.github.com", ghUser.Login)
+	}
+
+	// 所属Organization一覧取得（ルーティングルール照合用）
+	orgsReq, _ := http.NewRequestWithContext(ctx, "GET", "https://api.github.com/user/orgs", nil)
+	orgsReq.Header.Set("Authorization", "Bearer "+tokenData.AccessToken)
+	orgsReq.Header.Set("User-Agent", "Klados-CMS")
+	orgsReq.Header.Set("Accept", "application/vnd.github.v3+json")
+
+	if orgsResp, err := client.Do(orgsReq); err == nil {
+		defer orgsResp.Body.Close()
+		var ghOrgs []struct {
+			Login string `json:"login"`
+		}
+		if json.NewDecoder(orgsResp.Body).Decode(&ghOrgs) == nil {
+			for _, o := range ghOrgs {
+				if o.Login != "" {
+					orgs = append(orgs, o.Login)
+				}
+			}
+		}
+	}
+
+	return providerID, email, username, displayName, avatarURL, orgs, nil
+}
+
+func (h *AuthHandler) exchangeDiscordCode(ctx context.Context, code, redirectURI, clientID, clientSecret string) (
+	providerID, email, username, displayName, avatarURL string,
+	guilds []DiscordGuildInfo,
+	err error,
+) {
+	client := &http.Client{Timeout: 10 * time.Second}
+
+	form := url.Values{}
+	form.Set("client_id", clientID)
+	form.Set("client_secret", clientSecret)
+	form.Set("grant_type", "authorization_code")
+	form.Set("code", code)
+	if redirectURI != "" {
+		form.Set("redirect_uri", redirectURI)
+	}
+
+	tokenReq, err := http.NewRequestWithContext(ctx, "POST", "https://discord.com/api/oauth2/token", strings.NewReader(form.Encode()))
+	if err != nil {
+		return "", "", "", "", "", nil, err
+	}
+	tokenReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	tokenReq.Header.Set("Accept", "application/json")
+
+	tokenResp, err := client.Do(tokenReq)
+	if err != nil {
+		return "", "", "", "", "", nil, fmt.Errorf("トークン取得通信エラー: %w", err)
+	}
+	defer tokenResp.Body.Close()
+
+	var tokenData struct {
+		AccessToken      string `json:"access_token"`
+		TokenType        string `json:"token_type"`
+		Error            string `json:"error"`
+		ErrorDescription string `json:"error_description"`
+	}
+	if err := json.NewDecoder(tokenResp.Body).Decode(&tokenData); err != nil {
+		return "", "", "", "", "", nil, fmt.Errorf("トークン解析エラー: %w", err)
+	}
+	if tokenData.AccessToken == "" {
+		errMsg := tokenData.ErrorDescription
+		if errMsg == "" {
+			errMsg = tokenData.Error
+		}
+		if errMsg == "" {
+			errMsg = "access_token が取得できませんでした"
+		}
+		return "", "", "", "", "", nil, errors.New(errMsg)
+	}
+
+	// ユーザー情報取得
+	userReq, _ := http.NewRequestWithContext(ctx, "GET", "https://discord.com/api/users/@me", nil)
+	userReq.Header.Set("Authorization", "Bearer "+tokenData.AccessToken)
+	userReq.Header.Set("User-Agent", "Klados-CMS")
+
+	userResp, err := client.Do(userReq)
+	if err != nil {
+		return "", "", "", "", "", nil, fmt.Errorf("ユーザー情報取得通信エラー: %w", err)
+	}
+	defer userResp.Body.Close()
+
+	var dcUser struct {
+		ID         string `json:"id"`
+		Username   string `json:"username"`
+		GlobalName string `json:"global_name"`
+		Email      string `json:"email"`
+		Avatar     string `json:"avatar"`
+		Verified   bool   `json:"verified"`
+	}
+	if err := json.NewDecoder(userResp.Body).Decode(&dcUser); err != nil {
+		return "", "", "", "", "", nil, fmt.Errorf("ユーザー情報解析エラー: %w", err)
+	}
+
+	providerID = dcUser.ID
+	username = dcUser.Username
+	displayName = dcUser.GlobalName
+	if displayName == "" {
+		displayName = dcUser.Username
+	}
+	if dcUser.Avatar != "" {
+		avatarURL = fmt.Sprintf("https://cdn.discordapp.com/avatars/%s/%s.png", dcUser.ID, dcUser.Avatar)
+	}
+	email = dcUser.Email
+	if email == "" {
+		email = fmt.Sprintf("%s@discord.user", dcUser.ID)
+	}
+
+	// 所属Guild一覧取得（ルーティングルール照合用）
+	guildsReq, _ := http.NewRequestWithContext(ctx, "GET", "https://discord.com/api/users/@me/guilds", nil)
+	guildsReq.Header.Set("Authorization", "Bearer "+tokenData.AccessToken)
+	guildsReq.Header.Set("User-Agent", "Klados-CMS")
+
+	if guildsResp, err := client.Do(guildsReq); err == nil {
+		defer guildsResp.Body.Close()
+		var dcGuilds []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		}
+		if json.NewDecoder(guildsResp.Body).Decode(&dcGuilds) == nil {
+			for _, g := range dcGuilds {
+				guilds = append(guilds, DiscordGuildInfo{
+					ID:   g.ID,
+					Name: g.Name,
+				})
+			}
+		}
+	}
+
+	return providerID, email, username, displayName, avatarURL, guilds, nil
+}
+
+func (h *AuthHandler) completeOAuthLogin(
+	c *gin.Context,
+	provider, providerID, email, username, displayName, avatarURL string,
+	orgs []string,
+	guilds []DiscordGuildInfo,
+) {
+	authConfig := h.getOrCreateAuthConfig()
 
 	// 1. ドメインホワイトリスト制限チェック (AllowedDomains)
 	if authConfig.AllowedDomains != "" {
-		emailLower := strings.ToLower(strings.TrimSpace(req.Email))
+		emailLower := strings.ToLower(strings.TrimSpace(email))
 		emailDomain := ""
 		if atIdx := strings.LastIndex(emailLower, "@"); atIdx != -1 {
 			emailDomain = emailLower[atIdx:]
@@ -667,8 +1028,14 @@ func (h *AuthHandler) handleOAuthUser(c *gin.Context, req oauthLoginRequest) {
 	}
 
 	// 2. 事前振り分けテスト（ホワイトリスト制限チェック用）
-	dummyUser := &model.User{Email: req.Email}
-	preMatches, _ := h.applyRoutingRules(dummyUser, req.Provider, req.Org, req.GuildID, req.GuildName, req.Email, false)
+	matchCtx := OAuthMatchContext{
+		Provider: provider,
+		Orgs:     orgs,
+		Guilds:   guilds,
+		Email:    email,
+	}
+	dummyUser := &model.User{Email: email}
+	preMatches, _ := h.applyRoutingRulesContext(dummyUser, matchCtx, false)
 
 	if authConfig.RestrictToRules {
 		var activeRuleCount int64
@@ -681,67 +1048,84 @@ func (h *AuthHandler) handleOAuthUser(c *gin.Context, req oauthLoginRequest) {
 		}
 	}
 
+	// 3. ユーザー検索（OAuthAccount または Email）
 	var user model.User
-	err := h.DB.Where("email = ?", req.Email).First(&user).Error
-	if err != nil {
-		// ユーザー新規作成
-		username := strings.Split(req.Email, "@")[0]
+	var oauthAcc model.OAuthAccount
+	err := h.DB.Where("provider = ? AND provider_id = ?", provider, providerID).First(&oauthAcc).Error
+	if err == nil {
+		h.DB.Where("id = ?", oauthAcc.UserID).First(&user)
+	} else {
+		err = h.DB.Where("email = ?", email).First(&user).Error
+		if err == nil {
+			newAcc := model.OAuthAccount{
+				UserID:     user.ID,
+				Provider:   provider,
+				ProviderID: providerID,
+			}
+			h.DB.Create(&newAcc)
+		}
+	}
+
+	if user.ID == uuid.Nil {
+		cleanUsername := strings.ToLower(strings.ReplaceAll(username, " ", "_"))
+		cleanUsername = strings.Map(func(r rune) rune {
+			if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+				return r
+			}
+			return -1
+		}, cleanUsername)
+		if len(cleanUsername) < 3 {
+			cleanUsername = fmt.Sprintf("user_%s", uuid.New().String()[:6])
+		}
 		var existingUser model.User
-		if h.DB.Where("username = ?", username).First(&existingUser).Error == nil {
-			username = fmt.Sprintf("%s_%s", username, uuid.New().String()[:5])
+		if h.DB.Where("username = ?", cleanUsername).First(&existingUser).Error == nil {
+			cleanUsername = fmt.Sprintf("%s_%s", cleanUsername, uuid.New().String()[:4])
 		}
 
-		isRoot := h.determineIfRoot(req.Email, username)
+		isRoot := h.determineIfRoot(email, cleanUsername)
 		user = model.User{
-			Email:         req.Email,
-			Username:      username,
-			DisplayName:   req.Name,
-			AvatarURL:     req.AvatarURL,
+			Email:         email,
+			Username:      cleanUsername,
+			DisplayName:   displayName,
+			AvatarURL:     avatarURL,
 			IsRoot:        isRoot,
-			EmailVerified: true, // Google / GitHub / Discord OAuth認証済み
+			EmailVerified: true,
 			Plan:          model.PlanFree,
 		}
 		if err := h.DB.Create(&user).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "OAuthユーザーの登録に失敗しました"})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "OAuthユーザーの登録に失敗しました: " + err.Error()})
 			return
 		}
 
-		oauthAcc := model.OAuthAccount{
+		newAcc := model.OAuthAccount{
 			UserID:     user.ID,
-			Provider:   req.Provider,
-			ProviderID: req.Email,
+			Provider:   provider,
+			ProviderID: providerID,
 		}
-		h.DB.Create(&oauthAcc)
+		h.DB.Create(&newAcc)
 	} else {
-		// 既存ユーザー: 環境変数指定のroot昇格チェック
 		if !user.IsRoot && h.determineIfRoot(user.Email, user.Username) {
 			user.IsRoot = true
 			h.DB.Model(&user).Update("is_root", true)
 		}
-		// OAuthログインによりメール認証済みフラグをtrueに更新
 		if !user.EmailVerified {
 			user.EmailVerified = true
 			h.DB.Model(&user).Update("email_verified", true)
 		}
-		if req.AvatarURL != "" && user.AvatarURL == "" {
-			user.AvatarURL = req.AvatarURL
-			h.DB.Model(&user).Update("avatar_url", req.AvatarURL)
+		if avatarURL != "" && user.AvatarURL == "" {
+			user.AvatarURL = avatarURL
+			h.DB.Model(&user).Update("avatar_url", avatarURL)
 		}
-
-		var oauthAcc model.OAuthAccount
-		if h.DB.Where("user_id = ? AND provider = ?", user.ID, req.Provider).First(&oauthAcc).Error != nil {
-			oauthAcc = model.OAuthAccount{
-				UserID:     user.ID,
-				Provider:   req.Provider,
-				ProviderID: req.Email,
-			}
-			h.DB.Create(&oauthAcc)
+		if displayName != "" && user.DisplayName == "" {
+			user.DisplayName = displayName
+			h.DB.Model(&user).Update("display_name", displayName)
 		}
 	}
 
-	// 3. 振り分けルールの永続実行（サイト所属・ロール付与）
-	appliedRules, _ := h.applyRoutingRules(&user, req.Provider, req.Org, req.GuildID, req.GuildName, req.Email, true)
+	// 4. 自動振り分けルールの永続実行
+	appliedRules, _ := h.applyRoutingRulesContext(&user, matchCtx, true)
 
+	// 5. JWTトークン発行
 	token, err := h.generateToken(user.ID.String(), 30*24*time.Hour)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "トークンの生成に失敗しました"})
@@ -756,4 +1140,77 @@ func (h *AuthHandler) handleOAuthUser(c *gin.Context, req oauthLoginRequest) {
 			"routing_matches": appliedRules,
 		},
 	})
+}
+
+// 後方互換性およびテスト用の直接ログインハンドラー
+type oauthLoginRequest struct {
+	Provider  string   `json:"provider"`
+	Email     string   `json:"email"`
+	Name      string   `json:"name"`
+	AvatarURL string   `json:"avatar_url"`
+	Token     string   `json:"token"`
+	Org       string   `json:"org"`
+	GuildID   string   `json:"guild_id"`
+	GuildName string   `json:"guild_name"`
+	Roles     []string `json:"roles"`
+}
+
+func (h *AuthHandler) GoogleLogin(c *gin.Context) {
+	var req oauthLoginRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "リクエスト形式が不正です"})
+		return
+	}
+	if req.Email == "" {
+		req.Email = "google.user@example.com"
+	}
+	if req.Name == "" {
+		req.Name = "Google ユーザー"
+	}
+	req.Provider = "google"
+	h.handleOAuthUser(c, req)
+}
+
+func (h *AuthHandler) GitHubLogin(c *gin.Context) {
+	var req oauthLoginRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "リクエスト形式が不正です"})
+		return
+	}
+	if req.Email == "" {
+		req.Email = "github.user@example.com"
+	}
+	if req.Name == "" {
+		req.Name = "GitHub ユーザー"
+	}
+	req.Provider = "github"
+	h.handleOAuthUser(c, req)
+}
+
+func (h *AuthHandler) DiscordLogin(c *gin.Context) {
+	var req oauthLoginRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "リクエスト形式が不正です"})
+		return
+	}
+	if req.Email == "" {
+		req.Email = "discord.user@example.com"
+	}
+	if req.Name == "" {
+		req.Name = "Discord ユーザー"
+	}
+	req.Provider = "discord"
+	h.handleOAuthUser(c, req)
+}
+
+func (h *AuthHandler) handleOAuthUser(c *gin.Context, req oauthLoginRequest) {
+	var orgs []string
+	if req.Org != "" {
+		orgs = []string{req.Org}
+	}
+	var guilds []DiscordGuildInfo
+	if req.GuildID != "" || req.GuildName != "" {
+		guilds = []DiscordGuildInfo{{ID: req.GuildID, Name: req.GuildName}}
+	}
+	h.completeOAuthLogin(c, req.Provider, req.Email, req.Email, strings.Split(req.Email, "@")[0], req.Name, req.AvatarURL, orgs, guilds)
 }

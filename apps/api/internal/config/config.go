@@ -19,6 +19,10 @@ type Config struct {
 	MinioUseSSL     bool
 	AllowOrigins    string
 	Environment     string
+	GithubClientID     string
+	GithubClientSecret string
+	DiscordClientID    string
+	DiscordClientSecret string
 }
 
 func Load() *Config {
@@ -45,6 +49,10 @@ func Load() *Config {
 		MinioUseSSL:    getEnv("MINIO_USE_SSL", "false") == "true",
 		AllowOrigins:   getEnv("ALLOW_ORIGINS", "http://localhost:3000"),
 		Environment:    getEnv("ENVIRONMENT", "development"),
+		GithubClientID:     getEnv("GITHUB_CLIENT_ID", ""),
+		GithubClientSecret: getEnv("GITHUB_CLIENT_SECRET", ""),
+		DiscordClientID:    getEnv("DISCORD_CLIENT_ID", ""),
+		DiscordClientSecret: getEnv("DISCORD_CLIENT_SECRET", ""),
 	}
 }
 
