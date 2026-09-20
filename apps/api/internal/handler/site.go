@@ -419,13 +419,19 @@ func (h *SiteHandler) VerifyDomain(c *gin.Context) {
 	}
 
 	cleanCNAME := strings.ToLower(strings.TrimSuffix(cname, "."))
-	isVerified := cleanCNAME == "cname.klados.app" || cleanCNAME == "klados.app"
+	cnameTarget := strings.ToLower(strings.TrimSpace(os.Getenv("CNAME_TARGET")))
+	if cnameTarget == "" {
+		cnameTarget = "cms.azisaba.net"
+	}
+	isVerified := cleanCNAME == "cname.klados.app" || cleanCNAME == "klados.app" ||
+		cleanCNAME == cnameTarget || strings.HasSuffix(cleanCNAME, ".azisaba.net") ||
+		strings.HasSuffix(cleanCNAME, ".cfargotunnel.com")
 
 	var message string
 	if isVerified {
 		message = "Custom domain successfully verified."
 	} else {
-		message = fmt.Sprintf("CNAME points to '%s', but must point to cname.klados.app or klados.app", cleanCNAME)
+		message = fmt.Sprintf("CNAME points to '%s', but must point to %s or Cloudflare Tunnel", cleanCNAME, cnameTarget)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -434,7 +440,7 @@ func (h *SiteHandler) VerifyDomain(c *gin.Context) {
 			"verified": isVerified,
 			"domain":   site.CustomDomain,
 			"cname":    cleanCNAME,
-			"expected": []string{"cname.klados.app", "klados.app"},
+			"expected": []string{cnameTarget, "cname.klados.app", "*.cfargotunnel.com"},
 			"message":  message,
 		},
 	})
