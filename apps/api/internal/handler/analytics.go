@@ -45,7 +45,7 @@ func (h *AnalyticsHandler) RecordView(c *gin.Context) {
 	slug := c.Param("slug")
 
 	var site model.Site
-	if err := h.DB.Where("slug = ? AND is_public = ?", slug, true).First(&site).Error; err != nil {
+	if err := h.DB.Where("(slug = ? OR custom_domain = ?) AND is_public = ?", slug, slug, true).First(&site).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "site not found"})
 		return
 	}

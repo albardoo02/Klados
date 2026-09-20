@@ -5,35 +5,37 @@ export function middleware(req: NextRequest) {
   const url = req.nextUrl;
   const hostname = req.headers.get('host')?.split(':')[0]?.toLowerCase() || '';
 
-  // メイン管理画面ドメインやローカル開発環境の場合はリライトしない
-  const mainDomains = [
-    'cms.azisaba.net',
-    'localhost',
-    '127.0.0.1',
-  ];
-
-  // 内部API、静的ファイル、Next.js内部通信、管理画面・認証関連はそのまま通す
+  // 内部API、静的ファイル、Next.js内部通信はそのまま通す
   if (
     url.pathname.startsWith('/_next') ||
     url.pathname.startsWith('/api') ||
     url.pathname.startsWith('/v1') ||
-    url.pathname.startsWith('/favicon.ico') ||
-    url.pathname.startsWith('/dashboard') ||
-    url.pathname.startsWith('/login') ||
-    url.pathname.startsWith('/register') ||
-    url.pathname.startsWith('/verify-email') ||
-    mainDomains.includes(hostname) ||
-    hostname.endsWith('.trycloudflare.com')
+    url.pathname.startsWith('/favicon.ico')
   ) {
     return NextResponse.next();
   }
 
-  // newiki.azisaba.net のアクセスを /sites/wiki にリライト（アドレスバーは newiki.azisaba.net を維持）
-  if (hostname === 'newiki.azisaba.net') {
-    if (url.pathname.startsWith('/sites/')) {
-      return NextResponse.next();
-    }
-    const targetPath = url.pathname === '/' ? '/sites/wiki' : `/sites/wiki${url.pathname}`;
+  // メイン管理画面ドメイン（CMS）やローカル開発環境の場合はリライトしない
+  const mainDomains = [
+    process.env.MAIN_DOMAIN?.toLowerCase() || 'cms.azisaba.net',
+    'cms.azisaba.net',
+    'klados.app',
+    'localhost',
+    '127.0.0.1',
+  ];
+
+  const isMainDomain = mainDomains.includes(hostname) || hostname.endsWith('.trycloudflare.com');
+
+  if (isMainDomain) {
+    return NextResponse.next();
+  }
+
+  // 独自ドメイン（例: newiki.azisaba.net など、管理画面以外の任意のドメイン）からのアクセス:
+  // アクセスされたホスト名（hostname）をキーにして、DBのカスタムドメインと一致するサイトへ動的リライト！
+  // 例: / -> /sites/newiki.azisaba.net
+  //     /about -> /sites/newiki.azisaba.net/about
+  if (!url.pathname.startsWith('/sites/')) {
+    const targetPath = url.pathname === '/' ? `/sites/${hostname}` : `/sites/${hostname}${url.pathname}`;
     url.pathname = targetPath;
     return NextResponse.rewrite(url);
   }

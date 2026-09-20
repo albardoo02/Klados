@@ -151,7 +151,7 @@ func (h *CommentHandler) resolvePublicPage(c *gin.Context) (*model.Site, *model.
 	}
 
 	var site model.Site
-	if err := h.DB.Where("slug = ? AND is_public = ?", siteSlug, true).First(&site).Error; err != nil {
+	if err := h.DB.Where("(slug = ? OR custom_domain = ?) AND is_public = ?", siteSlug, siteSlug, true).First(&site).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "site not found"})
 		return nil, nil, false
 	}

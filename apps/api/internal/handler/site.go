@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -450,7 +451,7 @@ func (h *SiteHandler) VerifyDomain(c *gin.Context) {
 func (h *SiteHandler) GetSitemap(c *gin.Context) {
 	slug := c.Param("slug")
 	var site model.Site
-	if err := h.DB.Where("slug = ? AND is_public = ?", slug, true).First(&site).Error; err != nil {
+	if err := h.DB.Where("(slug = ? OR custom_domain = ?) AND is_public = ?", slug, slug, true).First(&site).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "site not found"})
 		return
 	}
@@ -505,7 +506,7 @@ func (h *SiteHandler) GetSitemap(c *gin.Context) {
 func (h *SiteHandler) GetRobotsTxt(c *gin.Context) {
 	slug := c.Param("slug")
 	var site model.Site
-	if err := h.DB.Where("slug = ? AND is_public = ?", slug, true).First(&site).Error; err != nil {
+	if err := h.DB.Where("(slug = ? OR custom_domain = ?) AND is_public = ?", slug, slug, true).First(&site).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "site not found"})
 		return
 	}
