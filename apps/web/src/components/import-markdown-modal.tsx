@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useDropzone } from 'react-dropzone';
 import {
   X,
@@ -14,9 +14,12 @@ import {
   ArrowRight,
   Globe,
   FileCheck,
+  FolderTree,
+  Tag,
+  Plus,
 } from 'lucide-react';
-import { ParsedMarkdownPage, parseUploadedFiles } from '@/lib/markdown-import';
-import { pagesApi, PageItem } from '@/lib/api';
+import { ParsedMarkdownPage, parseUploadedFiles, appendCategoriesToMarkdown } from '@/lib/markdown-import';
+import { pagesApi, categoriesApi, CategorySummary } from '@/lib/api';
 
 interface ImportMarkdownModalProps {
   isOpen: boolean;
@@ -40,6 +43,32 @@ export function ImportMarkdownModal({
   const [isImporting, setIsImporting] = useState<boolean>(false);
   const [progress, setProgress] = useState<{ current: number; total: number }>({ current: 0, total: 0 });
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // カテゴリ管理用ステート
+  const [siteCategories, setSiteCategories] = useState<CategorySummary[]>([]);
+  const [commonCategories, setCommonCategories] = useState<string[]>([]);
+  const [commonCatInput, setCommonCatInput] = useState<string>('');
+  const [editingCatIndex, setEditingCatIndex] = useState<number | null>(null);
+  const [pageCatInput, setPageCatInput] = useState<string>('');
+
+  // サイト内既存カテゴリの取得
+  useEffect(() => {
+    if (!isOpen) return;
+    let isMounted = true;
+    categoriesApi
+      .listForSite(siteId)
+      .then((res) => {
+        if (isMounted && res.data?.data) {
+          setSiteCategories(res.data.data);
+        }
+      })
+      .catch(() => {
+        // オフラインまたはフォールバック
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, [isOpen, siteId]);
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     if (acceptedFiles.length === 0) return;
@@ -91,6 +120,48 @@ export function ImportMarkdownModal({
     });
   };
 
+  // 共通カテゴリ操作
+  const handleAddCommonCategory = (cat: string) => {
+    const trimmed = cat.trim();
+    if (!trimmed) return;
+    if (!commonCategories.includes(trimmed)) {
+      setCommonCategories((prev) => [...prev, trimmed]);
+    }
+    setCommonCatInput('');
+  };
+
+  const handleRemoveCommonCategory = (cat: string) => {
+    setCommonCategories((prev) => prev.filter((c) => c !== cat));
+  };
+
+  // ページ個別カテゴリ操作
+  const handleAddPageCategory = (index: number, cat: string) => {
+    const trimmed = cat.trim();
+    if (!trimmed) return;
+    setParsedPages((prev) => {
+      const next = [...prev];
+      const cats = next[index].categories || [];
+      if (!cats.includes(trimmed)) {
+        next[index] = { ...next[index], categories: [...cats, trimmed] };
+      }
+      return next;
+    });
+    setPageCatInput('');
+    setEditingCatIndex(null);
+  };
+
+  const handleRemovePageCategory = (pageIndex: number, cat: string) => {
+    setParsedPages((prev) => {
+      const next = [...prev];
+      const cats = next[pageIndex].categories || [];
+      next[pageIndex] = {
+        ...next[pageIndex],
+        categories: cats.filter((c) => c !== cat),
+      };
+      return next;
+    });
+  };
+
   // インポート実行
   const handleExecuteImport = async () => {
     if (parsedPages.length === 0) return;
@@ -105,6 +176,12 @@ export function ImportMarkdownModal({
         const item = parsedPages[i];
         setProgress({ current: i + 1, total: parsedPages.length });
 
+        // カテゴリを MediaWiki 構文 [[Category:xxx]] として本文末尾に反映
+        const pageCats = Array.from(
+          new Set([...(item.categories || []), ...commonCategories])
+        );
+        const finalContent = appendCategoriesToMarkdown(item.content, pageCats);
+
         // 同一スラグのページが既に存在するか確認
         const existing = existingPages.find(
           (p) => p.slug === item.slug || p.slug === `/${item.slug}`
@@ -114,7 +191,7 @@ export function ImportMarkdownModal({
           // 上書き更新
           await pagesApi.update(existing.id, {
             title: item.title,
-            content: item.content,
+            content: finalContent,
             status: isPublishing ? 'published' : 'draft',
           });
         } else {
@@ -122,7 +199,7 @@ export function ImportMarkdownModal({
           const res = await pagesApi.create(siteId, {
             slug: item.slug,
             title: item.title,
-            content: item.content,
+            content: finalContent,
           });
 
           // 即時公開が選択されている場合は status を published に更新
@@ -140,6 +217,7 @@ export function ImportMarkdownModal({
       onClose();
       // リセット
       setParsedPages([]);
+      setCommonCategories([]);
     } catch (err: any) {
       setErrorMessage(
         `インポート処理中にエラーが発生しました (${successCount} 件完了): ` +
@@ -217,6 +295,108 @@ export function ImportMarkdownModal({
             </div>
           </div>
 
+          {/* 一括共通カテゴリ指定エリア */}
+          <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <FolderTree className="size-4 text-blue-600 dark:text-blue-400" />
+                <span className="font-semibold text-xs text-slate-800 dark:text-slate-200">
+                  共通カテゴリ (全アップロードページに適用)
+                </span>
+              </div>
+              {commonCategories.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setCommonCategories([])}
+                  className="text-[11px] text-slate-400 hover:text-rose-500 transition-colors"
+                >
+                  共通カテゴリをクリア
+                </button>
+              )}
+            </div>
+
+            {/* 現在設定されている共通カテゴリバッジ */}
+            <div className="flex flex-wrap items-center gap-1.5 min-h-6">
+              {commonCategories.map((cat) => (
+                <span
+                  key={cat}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-100 dark:bg-blue-950/80 text-blue-700 dark:text-blue-300 text-xs font-medium border border-blue-200 dark:border-blue-800"
+                >
+                  <Tag className="size-3 text-blue-500" />
+                  <span>{cat}</span>
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveCommonCategory(cat)}
+                    className="hover:text-rose-600 ml-0.5 rounded-full"
+                  >
+                    <X className="size-3" />
+                  </button>
+                </span>
+              ))}
+
+              {/* 追加入力フォーム */}
+              <div className="flex items-center gap-1">
+                <input
+                  type="text"
+                  value={commonCatInput}
+                  onChange={(e) => setCommonCatInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleAddCommonCategory(commonCatInput);
+                    }
+                  }}
+                  placeholder="カテゴリ名を入力..."
+                  className="px-2.5 py-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+                <button
+                  type="button"
+                  onClick={() => handleAddCommonCategory(commonCatInput)}
+                  disabled={!commonCatInput.trim()}
+                  className="px-2.5 py-1 bg-slate-200 dark:bg-slate-700 hover:bg-blue-600 hover:text-white dark:hover:bg-blue-600 text-slate-700 dark:text-slate-200 text-xs rounded-lg transition-colors disabled:opacity-40 cursor-pointer"
+                >
+                  追加
+                </button>
+              </div>
+            </div>
+
+            {/* サイト内の既存カテゴリ候補 */}
+            {siteCategories.length > 0 && (
+              <div className="pt-2 border-t border-slate-200/60 dark:border-slate-800/80">
+                <div className="text-[11px] text-slate-400 mb-1.5 flex items-center gap-1">
+                  <span>サイト内の既存カテゴリから選択:</span>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {siteCategories.map((sc) => {
+                    const isAlreadyAdded = commonCategories.includes(sc.name);
+                    return (
+                      <button
+                        key={sc.name}
+                        type="button"
+                        onClick={() => {
+                          if (isAlreadyAdded) {
+                            handleRemoveCommonCategory(sc.name);
+                          } else {
+                            handleAddCommonCategory(sc.name);
+                          }
+                        }}
+                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] transition-colors cursor-pointer border ${
+                          isAlreadyAdded
+                            ? 'bg-blue-50 text-blue-600 border-blue-200 dark:bg-blue-950/40 dark:border-blue-800'
+                            : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:border-blue-300'
+                        }`}
+                      >
+                        <Plus className={`size-2.5 ${isAlreadyAdded ? 'rotate-45 text-blue-500' : ''}`} />
+                        <span>{sc.name}</span>
+                        <span className="text-[9px] opacity-60 font-mono">({sc.total_count})</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* 読み込み済みページリスト */}
           {parsedPages.length > 0 && (
             <div className="space-y-3">
@@ -233,7 +413,7 @@ export function ImportMarkdownModal({
                 </button>
               </div>
 
-              <div className="border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden divide-y divide-slate-100 dark:divide-slate-800 max-h-60 overflow-y-auto">
+              <div className="border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden divide-y divide-slate-100 dark:divide-slate-800 max-h-72 overflow-y-auto">
                 {parsedPages.map((item, index) => {
                   const isConflict = existingPages.some(
                     (p) => p.slug === item.slug || p.slug === `/${item.slug}`
@@ -242,47 +422,119 @@ export function ImportMarkdownModal({
                   return (
                     <div
                       key={index}
-                      className="p-3 bg-white dark:bg-slate-900/60 flex items-center justify-between gap-3 text-xs"
+                      className="p-3 bg-white dark:bg-slate-900/60 flex flex-col gap-2 text-xs"
                     >
-                      <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                        <FileText className="size-4 text-blue-500 shrink-0" />
-                        <div className="min-w-0 flex-1 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                          <input
-                            type="text"
-                            value={item.title}
-                            onChange={(e) => handleTitleChange(index, e.target.value)}
-                            placeholder="ページタイトル"
-                            className="bg-slate-50 dark:bg-slate-800 px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs truncate"
-                          />
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-slate-400 font-mono text-[10px]">/</span>
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                          <FileText className="size-4 text-blue-500 shrink-0" />
+                          <div className="min-w-0 flex-1 grid grid-cols-1 sm:grid-cols-2 gap-2">
                             <input
                               type="text"
-                              value={item.slug}
-                              onChange={(e) => handleSlugChange(index, e.target.value)}
-                              placeholder="スラグ"
-                              className="bg-slate-50 dark:bg-slate-800 px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 font-mono text-xs flex-1 truncate"
+                              value={item.title}
+                              onChange={(e) => handleTitleChange(index, e.target.value)}
+                              placeholder="ページタイトル"
+                              className="bg-slate-50 dark:bg-slate-800 px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs truncate"
                             />
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-slate-400 font-mono text-[10px]">/</span>
+                              <input
+                                type="text"
+                                value={item.slug}
+                                onChange={(e) => handleSlugChange(index, e.target.value)}
+                                placeholder="スラグ"
+                                className="bg-slate-50 dark:bg-slate-800 px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 font-mono text-xs flex-1 truncate"
+                              />
+                            </div>
                           </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          {isConflict && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300 font-medium">
+                              上書き対象
+                            </span>
+                          )}
+                          <span className="text-[10px] text-slate-400 font-mono hidden sm:inline">
+                            {item.content.length.toLocaleString()} 字
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleRemovePage(index)}
+                            className="p-1 rounded-md text-slate-400 hover:text-rose-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                          >
+                            <Trash2 className="size-3.5" />
+                          </button>
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2 shrink-0">
-                        {isConflict && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300 font-medium">
-                            上書き対象
-                          </span>
-                        )}
-                        <span className="text-[10px] text-slate-400 font-mono hidden sm:inline">
-                          {item.content.length.toLocaleString()} 字
+                      {/* ページ個別カテゴリ行 */}
+                      <div className="flex flex-wrap items-center gap-1.5 pl-6">
+                        <span className="text-[11px] text-slate-400 flex items-center gap-1">
+                          <Tag className="size-3 text-slate-400" />
+                          <span>個別カテゴリ:</span>
                         </span>
-                        <button
-                          type="button"
-                          onClick={() => handleRemovePage(index)}
-                          className="p-1 rounded-md text-slate-400 hover:text-rose-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-                        >
-                          <Trash2 className="size-3.5" />
-                        </button>
+                        {(item.categories || []).map((cat) => (
+                          <span
+                            key={cat}
+                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-[10px] border border-slate-200 dark:border-slate-700"
+                          >
+                            <span>{cat}</span>
+                            <button
+                              type="button"
+                              onClick={() => handleRemovePageCategory(index, cat)}
+                              className="text-slate-400 hover:text-rose-500 ml-0.5"
+                            >
+                              <X className="size-2.5" />
+                            </button>
+                          </span>
+                        ))}
+
+                        {editingCatIndex === index ? (
+                          <div className="inline-flex items-center gap-1">
+                            <input
+                              type="text"
+                              autoFocus
+                              value={pageCatInput}
+                              onChange={(e) => setPageCatInput(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  handleAddPageCategory(index, pageCatInput);
+                                } else if (e.key === 'Escape') {
+                                  setEditingCatIndex(null);
+                                }
+                              }}
+                              placeholder="カテゴリ名..."
+                              className="px-1.5 py-0.5 bg-white dark:bg-slate-800 border border-blue-400 rounded text-[11px] w-24"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleAddPageCategory(index, pageCatInput)}
+                              className="text-[10px] px-1.5 py-0.5 bg-blue-600 text-white rounded cursor-pointer"
+                            >
+                              追加
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEditingCatIndex(null)}
+                              className="text-[10px] text-slate-400 hover:text-slate-600"
+                            >
+                              取消
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingCatIndex(index);
+                              setPageCatInput('');
+                            }}
+                            className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-slate-800 border border-dashed border-slate-300 dark:border-slate-700 transition-colors cursor-pointer"
+                          >
+                            <Plus className="size-2.5" />
+                            <span>追加</span>
+                          </button>
+                        )}
                       </div>
                     </div>
                   );

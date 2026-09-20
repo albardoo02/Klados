@@ -78,15 +78,30 @@ export default function SiteDetailPage() {
   });
 
   const [showCreate, setShowCreate] = useState(false);
-  const [form, setForm] = useState({ slug: '', title: '' });
+  const [form, setForm] = useState({ slug: '', title: '', category: '' });
 
   // ページ新規作成
   const createMutation = useMutation({
-    mutationFn: () => pagesApi.create(id, form),
+    mutationFn: () => {
+      const payload: { slug: string; title: string; content?: string } = {
+        slug: form.slug,
+        title: form.title,
+      };
+      if (form.category?.trim()) {
+        const cats = form.category
+          .split(',')
+          .map((c) => c.trim())
+          .filter(Boolean);
+        if (cats.length > 0) {
+          payload.content = cats.map((c) => `[[Category:${c}]]`).join('\n') + '\n';
+        }
+      }
+      return pagesApi.create(id, payload);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['pages', id] });
       setShowCreate(false);
-      setForm({ slug: '', title: '' });
+      setForm({ slug: '', title: '', category: '' });
       showToast('ページを作成しました');
     },
   });
@@ -359,6 +374,12 @@ export default function SiteDetailPage() {
                     className="w-full border rounded-r-xl px-3.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
                   />
                 </div>
+                <input
+                  placeholder="カテゴリ (任意・カンマ区切り、例: ドキュメント, ガイド)"
+                  value={form.category}
+                  onChange={(e) => setForm({ ...form, category: e.target.value })}
+                  className="w-full border rounded-xl px-3.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
                 <div className="flex gap-2 pt-1">
                   <button
                     onClick={() => createMutation.mutate()}

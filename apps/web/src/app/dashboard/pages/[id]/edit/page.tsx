@@ -1,7 +1,7 @@
 'use client';
 
 import {useMutation, useQuery, useQueryClient} from '@tanstack/react-query';
-import {commentsApi, mediaApi, pagesApi, PageVersion, sitesApi} from '@/lib/api';
+import {commentsApi, mediaApi, pagesApi, PageVersion, sitesApi, categoriesApi, CategorySummary} from '@/lib/api';
 import {useParams, useRouter} from 'next/navigation';
 import {useEffect, useMemo, useRef, useState} from 'react';
 import {basicSetup, EditorView} from 'codemirror';
@@ -15,6 +15,7 @@ import { MediaLibraryModal } from '@/components/media-library-modal';
 import { CommentsDrawer } from '@/components/comments-drawer';
 import { useAuthStore } from '@/store/auth';
 import { formatMediaRef } from '@/lib/media';
+import { parseMarkdownFrontmatter, appendCategoriesToMarkdown } from '@/lib/markdown-import';
 import Link from 'next/link';
 import {
   ArrowLeft,
@@ -45,6 +46,7 @@ import {
   MessageSquare,
   Minus,
   Palette,
+  Plus,
   Quote,
   RotateCcw,
   Save,
@@ -52,6 +54,7 @@ import {
   Sparkles,
   Strikethrough,
   Table as TableIcon,
+  Tag,
   Terminal,
   UploadCloud,
   X,
@@ -110,6 +113,27 @@ export default function PageEditPage() {
   const [selectedVersion, setSelectedVersion] = useState<PageVersion | null>(null);
   const [isReverting, setIsReverting] = useState(false);
   const [revertSuccessMsg, setRevertSuccessMsg] = useState<string | null>(null);
+
+  // Markdownファイル読み込み & カテゴリ指定モーダル ステート
+  const [mdUploadModal, setMdUploadModal] = useState<{
+    isOpen: boolean;
+    fileName: string;
+    parsedTitle: string;
+    content: string;
+    categories: string[];
+    catInput: string;
+    insertMode: 'replace' | 'append';
+    updateTitle: boolean;
+  }>({
+    isOpen: false,
+    fileName: '',
+    parsedTitle: '',
+    content: '',
+    categories: [],
+    catInput: '',
+    insertMode: 'replace',
+    updateTitle: false,
+  });
 
   // エディタ設定: Vim / Standard / nano
   const [keybinding, setKeybinding] = useState<'standard' | 'vim' | 'nano'>('standard');
@@ -220,6 +244,84 @@ export default function PageEditPage() {
     mutationFn: (status: 'published' | 'draft') => pagesApi.update(id, { status }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['page', id] }),
   });
+
+  // サイト内既存カテゴリの取得
+  const { data: siteCategoriesData } = useQuery<CategorySummary[]>({
+    queryKey: ['site-categories', page?.site_id],
+    queryFn: () => categoriesApi.listForSite(page!.site_id).then((r) => r.data?.data ?? []),
+    enabled: Boolean(page?.site_id),
+  });
+  const siteCategories = siteCategoriesData ?? [];
+
+  // Markdown ファイル読み込み処理
+  const handleMdFileSelect = async (file: File) => {
+    try {
+      const raw = await file.text();
+      // 改行コード正規化 (CRLF / CR -> LF) で CodeMirror エラーを防止
+      const normalized = (raw ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+      const parsed = parseMarkdownFrontmatter(normalized, file.name);
+
+      setMdUploadModal({
+        isOpen: true,
+        fileName: file.name,
+        parsedTitle: parsed.title,
+        content: parsed.content,
+        categories: parsed.categories || [],
+        catInput: '',
+        insertMode: 'replace',
+        updateTitle: Boolean(parsed.title && parsed.title !== page?.title),
+      });
+    } catch (err: any) {
+      alert('ファイルの読み込みに失敗しました: ' + (err?.message || '不明なエラー'));
+    }
+  };
+
+  // Markdown ファイル読み込みの確定反映
+  const handleApplyMdUpload = () => {
+    if (!viewRef.current) return;
+
+    // 選択されたカテゴリを MediaWiki 構文 ([[Category:xxx]]) として末尾に反映
+    const contentWithCategories = appendCategoriesToMarkdown(
+      mdUploadModal.content,
+      mdUploadModal.categories
+    );
+
+    if (mdUploadModal.insertMode === 'replace') {
+      viewRef.current.dispatch({
+        changes: {
+          from: 0,
+          to: viewRef.current.state.doc.length,
+          insert: contentWithCategories,
+        },
+      });
+      setPreview(contentWithCategories);
+      setSaved(false);
+      broadcastDocChange(contentWithCategories);
+    } else {
+      // 現在のカーソル位置、または末尾に挿入
+      const insertPos = lastSelectionRef.current?.to ?? viewRef.current.state.doc.length;
+      viewRef.current.dispatch({
+        changes: {
+          from: insertPos,
+          to: insertPos,
+          insert: '\n\n' + contentWithCategories,
+        },
+      });
+      const newContent = viewRef.current.state.doc.toString();
+      setPreview(newContent);
+      setSaved(false);
+      broadcastDocChange(newContent);
+    }
+
+    // タイトル更新が選択されている場合
+    if (mdUploadModal.updateTitle && mdUploadModal.parsedTitle) {
+      pagesApi.update(id, { title: mdUploadModal.parsedTitle }).then(() => {
+        queryClient.invalidateQueries({ queryKey: ['page', id] });
+      });
+    }
+
+    setMdUploadModal((prev) => ({ ...prev, isOpen: false }));
+  };
 
   // --- テキスト挿入ユーティリティ ---
   const insertText = (
@@ -1539,7 +1641,7 @@ export default function PageEditPage() {
           {/* MDファイル読み込みボタン */}
           <label
             className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground border border-border hover:bg-muted rounded-lg transition-colors cursor-pointer"
-            title="手元の .md ファイルを読み込んでエディタに反映"
+            title="手元の .md ファイルを読み込んでエディタに反映 (カテゴリ指定可能)"
           >
             <UploadCloud className="size-3.5" />
             <span className="hidden md:inline">MD読込</span>
@@ -1550,21 +1652,7 @@ export default function PageEditPage() {
               onChange={async (e) => {
                 const file = e.target.files?.[0];
                 if (file) {
-                  const text = await file.text();
-                  if (!preview || confirm('エディタの内容を読み込んだファイルで上書きしますか？')) {
-                    if (viewRef.current) {
-                      viewRef.current.dispatch({
-                        changes: {
-                          from: 0,
-                          to: viewRef.current.state.doc.length,
-                          insert: text,
-                        },
-                      });
-                    }
-                    setPreview(text);
-                    setSaved(false);
-                    broadcastDocChange(text);
-                  }
+                  await handleMdFileSelect(file);
                 }
                 e.target.value = '';
               }}
@@ -2728,6 +2816,254 @@ export default function PageEditPage() {
                 className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg text-xs transition-colors cursor-pointer"
               >
                 閉じる (Esc)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Markdownファイル読込 & カテゴリ指定モーダル */}
+      {mdUploadModal.isOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-card text-card-foreground border border-border rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden flex flex-col max-h-[90vh] animate-in fade-in-0 zoom-in-95 duration-150">
+            {/* ヘッダー */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-border">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-primary/10 text-primary">
+                  <UploadCloud className="size-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm">Markdownの読み込み & カテゴリ指定</h3>
+                  <p className="text-xs text-muted-foreground truncate max-w-xs">
+                    {mdUploadModal.fileName}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setMdUploadModal((prev) => ({ ...prev, isOpen: false }))}
+                className="p-1 rounded-lg text-muted-foreground hover:text-foreground cursor-pointer"
+              >
+                <X className="size-5" />
+              </button>
+            </div>
+
+            {/* 本文 */}
+            <div className="p-6 space-y-4 overflow-y-auto">
+              {/* タイトル更新オプション */}
+              {mdUploadModal.parsedTitle && (
+                <div className="p-3 bg-muted/40 border border-border rounded-xl">
+                  <label className="flex items-center gap-2.5 cursor-pointer select-none text-xs">
+                    <input
+                      type="checkbox"
+                      checked={mdUploadModal.updateTitle}
+                      onChange={(e) =>
+                        setMdUploadModal((prev) => ({ ...prev, updateTitle: e.target.checked }))
+                      }
+                      className="rounded border-border text-primary focus:ring-primary size-4"
+                    />
+                    <div>
+                      <span className="font-medium text-foreground">
+                        ページタイトルをファイルから更新する
+                      </span>
+                      <p className="text-muted-foreground text-[11px] mt-0.5 font-semibold">
+                        「{mdUploadModal.parsedTitle}」
+                      </p>
+                    </div>
+                  </label>
+                </div>
+              )}
+
+              {/* カテゴリ指定エリア */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-semibold flex items-center gap-1.5">
+                    <FolderTree className="size-3.5 text-primary" />
+                    <span>付与するカテゴリ</span>
+                  </span>
+                  <span className="text-[11px] text-muted-foreground">
+                    [[Category:xxx]] を自動挿入
+                  </span>
+                </div>
+
+                {/* カテゴリバッジ */}
+                <div className="flex flex-wrap items-center gap-1.5 min-h-7 p-2 rounded-xl bg-muted/30 border border-border">
+                  {mdUploadModal.categories.length === 0 && (
+                    <span className="text-[11px] text-muted-foreground">
+                      カテゴリは未指定です
+                    </span>
+                  )}
+                  {mdUploadModal.categories.map((cat) => (
+                    <span
+                      key={cat}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-primary/10 text-primary text-xs font-medium border border-primary/20"
+                    >
+                      <Tag className="size-2.5" />
+                      <span>{cat}</span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setMdUploadModal((prev) => ({
+                            ...prev,
+                            categories: prev.categories.filter((c) => c !== cat),
+                          }))
+                        }
+                        className="hover:text-rose-500 ml-0.5 cursor-pointer"
+                      >
+                        <X className="size-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+
+                {/* カテゴリ追加入力 */}
+                <div className="flex items-center gap-1.5 pt-1">
+                  <input
+                    type="text"
+                    value={mdUploadModal.catInput}
+                    onChange={(e) =>
+                      setMdUploadModal((prev) => ({ ...prev, catInput: e.target.value }))
+                    }
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        const val = mdUploadModal.catInput.trim();
+                        if (val && !mdUploadModal.categories.includes(val)) {
+                          setMdUploadModal((prev) => ({
+                            ...prev,
+                            categories: [...prev.categories, val],
+                            catInput: '',
+                          }));
+                        }
+                      }
+                    }}
+                    placeholder="新しいカテゴリ名を入力..."
+                    className="flex-1 px-2.5 py-1 text-xs rounded-lg border border-border bg-background focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const val = mdUploadModal.catInput.trim();
+                      if (val && !mdUploadModal.categories.includes(val)) {
+                        setMdUploadModal((prev) => ({
+                          ...prev,
+                          categories: [...prev.categories, val],
+                          catInput: '',
+                        }));
+                      }
+                    }}
+                    disabled={!mdUploadModal.catInput.trim()}
+                    className="px-3 py-1 bg-muted hover:bg-primary hover:text-primary-foreground text-xs rounded-lg font-medium transition-colors disabled:opacity-40 cursor-pointer"
+                  >
+                    追加
+                  </button>
+                </div>
+
+                {/* 既存サイトカテゴリの候補 */}
+                {siteCategories.length > 0 && (
+                  <div className="pt-2">
+                    <span className="text-[11px] text-muted-foreground block mb-1">
+                      サイト内の既存カテゴリから追加:
+                    </span>
+                    <div className="flex flex-wrap gap-1">
+                      {siteCategories.map((sc) => {
+                        const isAdded = mdUploadModal.categories.includes(sc.name);
+                        return (
+                          <button
+                            key={sc.name}
+                            type="button"
+                            onClick={() => {
+                              if (isAdded) {
+                                setMdUploadModal((prev) => ({
+                                  ...prev,
+                                  categories: prev.categories.filter((c) => c !== sc.name),
+                                }));
+                              } else {
+                                setMdUploadModal((prev) => ({
+                                  ...prev,
+                                  categories: [...prev.categories, sc.name],
+                                }));
+                              }
+                            }}
+                            className={`text-[11px] px-2 py-0.5 rounded-md border transition-colors cursor-pointer inline-flex items-center gap-1 ${
+                              isAdded
+                                ? 'bg-primary/15 text-primary border-primary/30 font-medium'
+                                : 'bg-muted/40 text-muted-foreground hover:text-foreground border-border'
+                            }`}
+                          >
+                            <Plus className={`size-2.5 ${isAdded ? 'rotate-45' : ''}`} />
+                            <span>{sc.name}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* 挿入モード選択 */}
+              <div className="space-y-1.5 pt-2 border-t border-border text-xs">
+                <span className="font-semibold text-foreground">挿入方法</span>
+                <div className="grid grid-cols-2 gap-2">
+                  <label
+                    className={`flex items-center gap-2 p-2.5 rounded-xl border cursor-pointer transition-colors ${
+                      mdUploadModal.insertMode === 'replace'
+                        ? 'border-primary bg-primary/5 text-primary font-medium'
+                        : 'border-border hover:bg-muted/40 text-muted-foreground'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="insertMode"
+                      value="replace"
+                      checked={mdUploadModal.insertMode === 'replace'}
+                      onChange={() =>
+                        setMdUploadModal((prev) => ({ ...prev, insertMode: 'replace' }))
+                      }
+                      className="text-primary"
+                    />
+                    <span>全体を上書き</span>
+                  </label>
+
+                  <label
+                    className={`flex items-center gap-2 p-2.5 rounded-xl border cursor-pointer transition-colors ${
+                      mdUploadModal.insertMode === 'append'
+                        ? 'border-primary bg-primary/5 text-primary font-medium'
+                        : 'border-border hover:bg-muted/40 text-muted-foreground'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="insertMode"
+                      value="append"
+                      checked={mdUploadModal.insertMode === 'append'}
+                      onChange={() =>
+                        setMdUploadModal((prev) => ({ ...prev, insertMode: 'append' }))
+                      }
+                      className="text-primary"
+                    />
+                    <span>カーソル位置に挿入</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            {/* フッター */}
+            <div className="px-6 py-3 border-t border-border bg-muted/20 flex items-center justify-end gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => setMdUploadModal((prev) => ({ ...prev, isOpen: false }))}
+                className="px-3.5 py-1.5 rounded-xl text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
+              >
+                キャンセル
+              </button>
+              <button
+                type="button"
+                onClick={handleApplyMdUpload}
+                className="inline-flex items-center gap-1.5 px-4 py-1.5 bg-primary text-primary-foreground rounded-xl text-xs font-semibold hover:bg-primary/90 transition-colors shadow-xs cursor-pointer"
+              >
+                <UploadCloud className="size-3.5" />
+                <span>エディタに反映</span>
               </button>
             </div>
           </div>
