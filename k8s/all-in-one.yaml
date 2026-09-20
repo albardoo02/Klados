@@ -1,49 +1,37 @@
 # ==============================================================================
-# Klados (アジ鯖公式Wiki) Kubernetes Deployment Manifest
-# すべてのリソースは namespace: klados にデプロイされます。
-# 適用コマンド: kubectl apply -f k8s/
+# Klados (アジ鯖公式Wiki) Kubernetes Deployment Manifest (GitOps / ArgoCD Ready)
+# 
+# 【設計方針】
+# 1. namespace のハードコードを全廃:
+#    ArgoCD の destination.namespace（または kubectl apply -n <namespace>）で
+#    任意のネームスペース（例: minecraft）へ一括デプロイ可能。
+# 2. 機密情報の分離:
+#    パスワード等の Secret はマニフェストに直接記述せず、外部管理（SealedSecrets /
+#    kubectl create secret / ArgoCD Vault Plugin 等）とし、本マニフェストでは参照のみ行います。
+# 3. StorageClass:
+#    クラスタ環境に合わせて storageClassName: nfs-client を明示。
+# 4. 安定したコンテナイメージ:
+#    MinIO は Docker Hub 制限を回避するため quay.io/minio/minio:latest を使用。
+# 5. Cloudflare Tunnel 対応:
+#    http://klados.<namespace>.svc:80 で受けるための Service (name: klados, port: 80) を定義。
 # ==============================================================================
 
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: klados
----
 # ------------------------------------------------------------------------------
-# Secret & ConfigMap (環境変数・機密情報)
+# ConfigMap (非機密のアプリケーション設定)
 # ------------------------------------------------------------------------------
-apiVersion: v1
-kind: Secret
-metadata:
-  name: klados-secrets
-  namespace: klados
-type: Opaque
-stringData:
-  # ※ 本番環境ではランダムな長い文字列に変更してください
-  JWT_SECRET: "azisaba-wiki-jwt-secret-very-secure-random-token-2026"
-  POSTGRES_PASSWORD: "azisaba-wiki-db-secure-pass"
-  MINIO_ROOT_USER: "azisaba-minio"
-  MINIO_ROOT_PASSWORD: "azisaba-minio-super-secret-password"
----
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: klados-config
-  namespace: klados
 data:
   ENVIRONMENT: "production"
   PORT: "8080"
-  DATABASE_URL: "host=klados-postgres user=klados password=azisaba-wiki-db-secure-pass dbname=klados port=5432 sslmode=disable"
   REDIS_URL: "redis://klados-redis:6379"
   MINIO_ENDPOINT: "klados-minio:9000"
-  MINIO_ACCESS_KEY: "azisaba-minio"
-  MINIO_SECRET_KEY: "azisaba-minio-super-secret-password"
   MINIO_BUCKET: "klados-media"
   MINIO_USE_SSL: "false"
-  # アジ鯖Wikiの公開ドメインに合わせて指定（例: wiki.azisaba.net）
   ALLOW_ORIGINS: "*"
   INTERNAL_API_URL: "http://klados-api:8080/v1"
-  # root管理者の自動指定（指定したメール/ユーザー名、または初回登録者が自動的にroot管理者になります）
   ROOT_EMAIL: "admin@azisaba.net"
   ROOT_USERNAME: "admin"
 ---
@@ -54,10 +42,10 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: postgres-pvc
-  namespace: klados
 spec:
   accessModes:
     - ReadWriteOnce
+  storageClassName: nfs-client
   resources:
     requests:
       storage: 10Gi
@@ -66,7 +54,6 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: klados-postgres
-  namespace: klados
 spec:
   replicas: 1
   selector:
@@ -111,7 +98,6 @@ apiVersion: v1
 kind: Service
 metadata:
   name: klados-postgres
-  namespace: klados
 spec:
   ports:
     - port: 5432
@@ -126,7 +112,6 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: klados-redis
-  namespace: klados
 spec:
   replicas: 1
   selector:
@@ -154,7 +139,6 @@ apiVersion: v1
 kind: Service
 metadata:
   name: klados-redis
-  namespace: klados
 spec:
   ports:
     - port: 6379
@@ -169,10 +153,10 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: minio-pvc
-  namespace: klados
 spec:
   accessModes:
     - ReadWriteOnce
+  storageClassName: nfs-client
   resources:
     requests:
       storage: 20Gi
@@ -181,7 +165,6 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: klados-minio
-  namespace: klados
 spec:
   replicas: 1
   selector:
@@ -232,7 +215,6 @@ apiVersion: v1
 kind: Service
 metadata:
   name: klados-minio
-  namespace: klados
 spec:
   ports:
     - name: api
@@ -251,7 +233,6 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: klados-api
-  namespace: klados
 spec:
   replicas: 2
   selector:
@@ -265,6 +246,7 @@ spec:
       containers:
         - name: api
           image: ghcr.io/albardoo02/klados-api:latest
+          imagePullPolicy: Always
           ports:
             - containerPort: 8080
           envFrom:
@@ -296,7 +278,6 @@ apiVersion: v1
 kind: Service
 metadata:
   name: klados-api
-  namespace: klados
 spec:
   ports:
     - port: 8080
@@ -311,7 +292,6 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: klados-web
-  namespace: klados
 spec:
   replicas: 2
   selector:
@@ -325,6 +305,7 @@ spec:
       containers:
         - name: web
           image: ghcr.io/albardoo02/klados-web:latest
+          imagePullPolicy: Always
           ports:
             - containerPort: 3000
           env:
@@ -356,48 +337,28 @@ spec:
               cpu: "1000m"
               memory: "1Gi"
 ---
+# Cloudflare Tunnel受信用 Service (http://klados.<namespace>.svc:80)
 apiVersion: v1
 kind: Service
 metadata:
-  name: klados-web
-  namespace: klados
+  name: klados
 spec:
   ports:
-    - port: 3000
+    - name: http
+      port: 80
       targetPort: 3000
   selector:
     app: klados-web
 ---
-# ------------------------------------------------------------------------------
-# Ingress (Cloudflare Tunnel または Ingress Controller 経由)
-# ------------------------------------------------------------------------------
-apiVersion: networking.k8s.io/v1
-kind: Ingress
+# 標準Web Service
+apiVersion: v1
+kind: Service
 metadata:
-  name: klados-ingress
-  namespace: klados
-  annotations:
-    nginx.ingress.kubernetes.io/proxy-body-size: "100m"
-    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
-    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
-    nginx.ingress.kubernetes.io/websocket-services: "klados-api"
+  name: klados-web
 spec:
-  rules:
-    - http:
-        paths:
-          # WebSocket リアルタイム編集 (API直通)
-          - path: /v1/ws
-            pathType: Prefix
-            backend:
-              service:
-                name: klados-api
-                port:
-                  number: 8080
-          # Next.js Web UI & /v1 APIプロキシ (Catch-All)
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: klados-web
-                port:
-                  number: 3000
+  ports:
+    - name: http
+      port: 3000
+      targetPort: 3000
+  selector:
+    app: klados-web
