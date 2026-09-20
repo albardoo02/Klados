@@ -1,24 +1,3 @@
-# ==============================================================================
-# Klados (アジ鯖公式Wiki) Kubernetes Deployment Manifest (GitOps / ArgoCD Ready)
-# 
-# 【設計方針】
-# 1. namespace のハードコードを全廃:
-#    ArgoCD の destination.namespace（または kubectl apply -n <namespace>）で
-#    任意のネームスペース（例: minecraft）へ一括デプロイ可能。
-# 2. 機密情報の分離:
-#    パスワード等の Secret はマニフェストに直接記述せず、外部管理（SealedSecrets /
-#    kubectl create secret / ArgoCD Vault Plugin 等）とし、本マニフェストでは参照のみ行います。
-# 3. StorageClass:
-#    クラスタ環境に合わせて storageClassName: nfs-client を明示。
-# 4. 安定したコンテナイメージ:
-#    MinIO は Docker Hub 制限を回避するため quay.io/minio/minio:latest を使用。
-# 5. Cloudflare Tunnel 対応:
-#    http://klados.<namespace>.svc:80 で受けるための Service (name: klados, port: 80) を定義。
-# ==============================================================================
-
-# ------------------------------------------------------------------------------
-# ConfigMap (非機密のアプリケーション設定)
-# ------------------------------------------------------------------------------
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -35,9 +14,6 @@ data:
   ROOT_EMAIL: "admin@azisaba.net"
   ROOT_USERNAME: "admin"
 ---
-# ------------------------------------------------------------------------------
-# PostgreSQL (データベース)
-# ------------------------------------------------------------------------------
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -105,9 +81,6 @@ spec:
   selector:
     app: klados-postgres
 ---
-# ------------------------------------------------------------------------------
-# Redis (キャッシュ & セッション)
-# ------------------------------------------------------------------------------
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -146,9 +119,6 @@ spec:
   selector:
     app: klados-redis
 ---
-# ------------------------------------------------------------------------------
-# MinIO (画像・添付メディアストレージ)
-# ------------------------------------------------------------------------------
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -226,9 +196,6 @@ spec:
   selector:
     app: klados-minio
 ---
-# ------------------------------------------------------------------------------
-# Backend API (Go / Gin / GORM)
-# ------------------------------------------------------------------------------
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -285,9 +252,6 @@ spec:
   selector:
     app: klados-api
 ---
-# ------------------------------------------------------------------------------
-# Frontend Web (Next.js / SSR / UI)
-# ------------------------------------------------------------------------------
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -337,7 +301,6 @@ spec:
               cpu: "1000m"
               memory: "1Gi"
 ---
-# Cloudflare Tunnel受信用 Service (http://klados.<namespace>.svc:80)
 apiVersion: v1
 kind: Service
 metadata:
@@ -350,7 +313,6 @@ spec:
   selector:
     app: klados-web
 ---
-# 標準Web Service
 apiVersion: v1
 kind: Service
 metadata:
