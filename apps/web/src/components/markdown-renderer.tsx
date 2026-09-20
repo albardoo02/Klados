@@ -6,7 +6,7 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeHighlight from 'rehype-highlight';
 import rehypeKatex from 'rehype-katex';
-import { Check, Copy, Image as ImageIcon } from 'lucide-react';
+import { Check, Copy, ExternalLink, Image as ImageIcon } from 'lucide-react';
 import { resolveMediaUrl } from '@/lib/media';
 
 interface MarkdownRendererProps {
@@ -157,11 +157,50 @@ function preprocessMarkdown(content: string, siteSlug?: string): string {
   // 6.5.2. ページカテゴリ付与: [[Category:カテゴリ名]] または [[Category:カテゴリ名|ソートキー]] (本文からは除去)
   result = result.replace(/\[\[(?:category|カテゴリ)\s*:\s*([^\]\n|]+)(?:\|([^\]\n]*))?\]\]\n?/gi, '');
 
-  // 7. Wikiリンク [[target]] または [[target|label]]
-  result = result.replace(/\[\[([^\]\n|]+)(?:\|([^\]\n]+))?\]\]/g, (_, rawTarget, rawLabel) => {
-    const target = (rawTarget || '').trim();
+  // 7. Wikiリンク [[target]] または [[target|label]] または [[label>target]]
+  result = result.replace(/\[\[([^\]\n]+)\]\]/g, (fullMatch, inner) => {
+    // MediaWikiカテゴリ構文 [[:Category:...]] または [[Category:...]] は別処理のためスキップ
+    if (/^:?(?:category|カテゴリ)\s*:/i.test(inner.trim())) {
+      return fullMatch;
+    }
+
+    let target = '';
+    let label = '';
+
+    if (inner.includes('>')) {
+      // SeesaaWiki / PukiWiki スタイル: [[表示名>URL/ページ]]
+      const parts = inner.split('>');
+      label = parts[0].trim();
+      target = parts.slice(1).join('>').trim();
+    } else if (inner.includes('|')) {
+      const parts = inner.split('|');
+      const p1 = parts[0].trim();
+      const p2 = parts.slice(1).join('|').trim();
+      // URLがどちらにあるかを自動判定
+      if (/^https?:\/\//i.test(p1) || /^www\./i.test(p1)) {
+        target = p1;
+        label = p2 || p1;
+      } else if (/^https?:\/\//i.test(p2) || /^www\./i.test(p2)) {
+        label = p1;
+        target = p2;
+      } else {
+        // MediaWiki標準: [[target|label]]
+        target = p1;
+        label = p2 || p1;
+      }
+    } else {
+      target = inner.trim();
+      label = target;
+    }
+
     if (!target) return '';
-    const label = (rawLabel ? rawLabel.trim() : target) || target;
+
+    // 外部リンク判定 (http://, https://, www., //)
+    const isExt = /^https?:\/\//i.test(target) || /^www\./i.test(target) || target.startsWith('//');
+    if (isExt) {
+      const finalUrl = /^www\./i.test(target) ? `https://${target}` : target;
+      return `[${label}](${finalUrl})`;
+    }
 
     // ページ内アンカー: [[#見出し]]
     if (target.startsWith('#')) {
@@ -475,12 +514,31 @@ export function MarkdownRenderer({ content, className = '', siteSlug }: Markdown
               );
             }
 
-            const isExternal = href?.startsWith('http://') || href?.startsWith('https://');
+            const isExternal =
+              Boolean(href) &&
+              (/^(?:https?:|\/\/|www\.|mailto:)/i.test(href!) ||
+                (!href!.startsWith('/') && !href!.startsWith('#') && !href!.startsWith('?')));
+
+            const formattedHref = href?.startsWith('www.') ? `https://${href}` : href;
+
+            if (isExternal) {
+              return (
+                <a
+                  href={formattedHref}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-blue-500 hover:text-blue-600 underline underline-offset-4 transition-colors font-medium inline-flex items-center gap-0.5 group/ext"
+                  {...props}
+                >
+                  <span>{children}</span>
+                  <ExternalLink className="inline-block size-3 text-slate-400 dark:text-slate-500 group-hover/ext:text-blue-500 shrink-0 ml-0.5 align-baseline" />
+                </a>
+              );
+            }
+
             return (
               <a
-                href={href}
-                target={isExternal ? '_blank' : undefined}
-                rel={isExternal ? 'noopener noreferrer' : undefined}
+                href={formattedHref}
                 className="text-blue-500 hover:text-blue-600 underline underline-offset-4 transition-colors font-medium"
                 {...props}
               >

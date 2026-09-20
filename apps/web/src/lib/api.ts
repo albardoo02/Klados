@@ -288,7 +288,7 @@ export const mediaApi = {
     form.append('file', file);
     form.append('site_id', siteId);
     return api.post('/media/upload', form, {
-      headers: { 'Content-Type': 'multipart/form-data' },
+      headers: { 'Content-Type': undefined },
     });
   },
   list: (siteId: string) => api.get(`/media?site_id=${siteId}`),

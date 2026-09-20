@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -37,7 +38,8 @@ func (h *MediaHandler) Upload(c *gin.Context) {
 
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "no file provided"})
+		log.Printf("[MediaHandler.Upload] FormFile error: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("no file provided: %v", err)})
 		return
 	}
 	defer file.Close()
@@ -53,31 +55,58 @@ func (h *MediaHandler) Upload(c *gin.Context) {
 		return
 	}
 
+	sUID, err := uuid.Parse(siteID)
+	if err != nil || sUID == uuid.Nil {
+		var s model.Site
+		if err2 := h.DB.Where("slug = ? OR custom_domain = ?", siteID, siteID).First(&s).Error; err2 == nil {
+			sUID = s.ID
+		} else {
+			log.Printf("[MediaHandler.Upload] invalid site_id: %s", siteID)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid site_id"})
+			return
+		}
+	}
+
 	ext := filepath.Ext(header.Filename)
 	filename := fmt.Sprintf("%s%s", uuid.New().String(), ext)
-	storageKey := fmt.Sprintf("sites/%s/media/%s", siteID, filename)
+	storageKey := fmt.Sprintf("sites/%s/media/%s", sUID.String(), filename)
 
-	_, err = h.Minio.PutObject(
-		context.Background(),
-		h.Bucket,
-		storageKey,
-		file,
-		header.Size,
-		minio.PutObjectOptions{ContentType: mimeType},
-	)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to upload file"})
-		return
+	if h.Minio != nil && h.Bucket != "" {
+		exists, bErr := h.Minio.BucketExists(c.Request.Context(), h.Bucket)
+		if bErr != nil || !exists {
+			if mErr := h.Minio.MakeBucket(c.Request.Context(), h.Bucket, minio.MakeBucketOptions{}); mErr == nil {
+				policy := fmt.Sprintf(`{
+					"Version": "2012-10-17",
+					"Statement": [
+						{
+							"Effect": "Allow",
+							"Principal": {"AWS": ["*"]},
+							"Action": ["s3:GetObject"],
+							"Resource": ["arn:aws:s3:::%s/*"]
+						}
+					]
+				}`, h.Bucket)
+				_ = h.Minio.SetBucketPolicy(c.Request.Context(), h.Bucket, policy)
+			}
+		}
+
+		_, err = h.Minio.PutObject(
+			context.Background(),
+			h.Bucket,
+			storageKey,
+			file,
+			header.Size,
+			minio.PutObjectOptions{ContentType: mimeType},
+		)
+		if err != nil {
+			log.Printf("[MediaHandler.Upload] PutObject error: %v (bucket: %s, key: %s)", err, h.Bucket, storageKey)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to upload file to storage: %v", err)})
+			return
+		}
 	}
 
-	scheme := "http"
-	if !strings.Contains(h.Endpoint, "localhost") {
-		scheme = "https"
-	}
-	cdnURL := fmt.Sprintf("%s://%s/%s/%s", scheme, h.Endpoint, h.Bucket, storageKey)
-
-	sUID, _ := uuid.Parse(siteID)
 	uUID, _ := uuid.Parse(userIDStr)
+	cdnURL := fmt.Sprintf("/v1/public/media/%s", filename)
 
 	media := &model.MediaFile{
 		SiteID:       sUID,
@@ -92,7 +121,8 @@ func (h *MediaHandler) Upload(c *gin.Context) {
 	}
 
 	if err := h.DB.Create(media).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save media record"})
+		log.Printf("[MediaHandler.Upload] DB Create error: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to save media record: %v", err)})
 		return
 	}
 

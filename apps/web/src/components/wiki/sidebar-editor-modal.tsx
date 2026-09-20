@@ -215,7 +215,7 @@ export function SidebarEditorModal({
     next[secIndex].links[linkIndex][field] = val;
     if (field === 'url') {
       next[secIndex].links[linkIndex].isExternal =
-        val.startsWith('http://') || val.startsWith('https://');
+        /^(?:https?:|\/\/|www\.|mailto:)/i.test(val);
     }
     setSections(next);
   };
@@ -233,7 +233,7 @@ export function SidebarEditorModal({
       target.children[childIndex][field] = val;
       if (field === 'url') {
         target.children[childIndex].isExternal =
-          val.startsWith('http://') || val.startsWith('https://');
+          /^(?:https?:|\/\/|www\.|mailto:)/i.test(val);
       }
     }
     setSections(next);

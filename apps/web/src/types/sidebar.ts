@@ -118,15 +118,48 @@ export function parseMediaWikiSidebarText(text: string): SidebarSection[] {
     let url = '';
     let title = content;
 
-    if (content.includes('|')) {
-      const parts = content.split('|');
-      url = parts[0].trim();
-      title = parts[1].trim() || parts[0].trim();
+    // 1. Markdown リンク: [タイトル](URL)
+    const mdMatch = content.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+    if (mdMatch) {
+      title = mdMatch[1].trim();
+      url = mdMatch[2].trim();
+    } else if (content.includes('>')) {
+      // 2. SeesaaWiki / PukiWiki スタイル: [[タイトル>URL]] または タイトル>URL
+      const cleanContent = content.replace(/^\[\[/, '').replace(/\]\]$/, '');
+      const parts = cleanContent.split('>');
+      title = parts[0].trim();
+      url = parts.slice(1).join('>').trim();
+    } else if (content.includes('|')) {
+      // 3. MediaWiki スタイル: [[URL|タイトル]] または [[タイトル|URL]]
+      const cleanContent = content.replace(/^\[\[/, '').replace(/\]\]$/, '');
+      const parts = cleanContent.split('|');
+      const p1 = parts[0].trim();
+      const p2 = parts.slice(1).join('|').trim();
+      if (/^(?:https?:|\/\/|www\.)/i.test(p1)) {
+        url = p1;
+        title = p2 || p1;
+      } else if (/^(?:https?:|\/\/|www\.)/i.test(p2)) {
+        title = p1;
+        url = p2;
+      } else {
+        url = p1;
+        title = p2 || p1;
+      }
     } else {
-      url = content;
+      const cleanContent = content.replace(/^\[\[/, '').replace(/\]\]$/, '').trim();
+      url = cleanContent;
+      title = cleanContent;
     }
 
-    const isExternal = url.startsWith('http://') || url.startsWith('https://');
+    if (url.startsWith('www.')) {
+      url = `https://${url}`;
+    }
+
+    const isExternal =
+      url.startsWith('http://') ||
+      url.startsWith('https://') ||
+      url.startsWith('//') ||
+      url.startsWith('mailto:');
 
     const link: SidebarLink = {
       id: `link-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,

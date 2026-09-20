@@ -519,6 +519,20 @@ export default function PageEditPage() {
           ),
       },
       {
+        id: 'link',
+        label: '外部リンク (External Link)',
+        description: '外部URLへのリンクを挿入 ([表示名](https://...))',
+        icon: ExternalLink,
+        action: (range) => wrapText('[', '](https://example.com)', 'リンクテキスト', range),
+      },
+      {
+        id: 'wikilink',
+        label: 'Wiki内部リンク (Wiki Link)',
+        description: 'サイト内別ページへのリンクを挿入 ([[ページ名]])',
+        icon: LinkIcon,
+        action: (range) => wrapText('[[', ']]', 'ページ名', range),
+      },
+      {
         id: 'code',
         label: 'コードブロック',
         description: 'シンタックスハイライト付きコードブロック',
@@ -1336,7 +1350,7 @@ export default function PageEditPage() {
 
   // 画像アップロード処理
   const handleUploadFile = async (file: File, targetPos?: number) => {
-    const siteId = page?.site_id || page?.siteId;
+    const siteId = page?.site_id || page?.siteId || site?.id;
     if (!siteId) {
       alert('サイトIDが見つかりません');
       return;
@@ -2022,7 +2036,16 @@ export default function PageEditPage() {
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => wrapText('[', '](https://example.com)', 'リンクテキスト')}
             className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer"
-            title="リンク"
+            title="外部リンク ([テキスト](URL))"
+          >
+            <ExternalLink className="size-4" />
+          </button>
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => wrapText('[[', ']]', 'ページ名')}
+            className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer"
+            title="内部Wikiリンク ([[ページ名]])"
           >
             <LinkIcon className="size-4" />
           </button>

@@ -115,8 +115,9 @@ export function WikiSidebarTree({
 
     const isExternal =
       item.isExternal ||
-      item.url.startsWith('http://') ||
-      item.url.startsWith('https://');
+      /^(?:https?:|\/\/|www\.|mailto:)/i.test(item.url);
+
+    const externalUrl = item.url.startsWith('www.') ? `https://${item.url}` : item.url;
 
     const cleanUrl = item.url.replace(/^\//, '');
     const pageHref =
@@ -157,7 +158,7 @@ export function WikiSidebarTree({
               {item.url && item.url !== '#' ? (
                 isExternal ? (
                   <a
-                    href={item.url}
+                    href={externalUrl}
                     target="_blank"
                     rel="noopener noreferrer"
                     onClick={onNavigate}
@@ -219,7 +220,7 @@ export function WikiSidebarTree({
 
             {isExternal ? (
               <a
-                href={item.url}
+                href={externalUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 onClick={onNavigate}

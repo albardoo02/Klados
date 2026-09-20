@@ -61,9 +61,16 @@ func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
 	}
 
 	// バケット作成（存在しない場合）および公開読み取りポリシーの設定
-	exists, _ := minioClient.BucketExists(context.Background(), cfg.MinioBucket)
+	exists, bErr := minioClient.BucketExists(context.Background(), cfg.MinioBucket)
+	if bErr != nil {
+		log.Printf("[MinIO] Warning: BucketExists check failed: %v", bErr)
+	}
 	if !exists {
-		_ = minioClient.MakeBucket(context.Background(), cfg.MinioBucket, minio.MakeBucketOptions{})
+		if err := minioClient.MakeBucket(context.Background(), cfg.MinioBucket, minio.MakeBucketOptions{}); err != nil {
+			log.Printf("[MinIO] Warning: MakeBucket %s failed: %v", cfg.MinioBucket, err)
+		} else {
+			log.Printf("[MinIO] Bucket %s created successfully", cfg.MinioBucket)
+		}
 	}
 	policy := fmt.Sprintf(`{
 		"Version": "2012-10-17",

@@ -39,8 +39,8 @@ func Load() *Config {
 		RedisURL:       getEnv("REDIS_URL", "redis://localhost:6379"),
 		JWTSecret:      getEnv("JWT_SECRET", "change-me-in-production"),
 		MinioEndpoint:  getEnv("MINIO_ENDPOINT", "localhost:9000"),
-		MinioAccessKey: getEnv("MINIO_ACCESS_KEY", "minioadmin"),
-		MinioSecretKey: getEnv("MINIO_SECRET_KEY", "minioadmin"),
+		MinioAccessKey: getEnvAny([]string{"MINIO_ACCESS_KEY", "MINIO_ROOT_USER"}, "minioadmin"),
+		MinioSecretKey: getEnvAny([]string{"MINIO_SECRET_KEY", "MINIO_ROOT_PASSWORD"}, "minioadmin"),
 		MinioBucket:    getEnv("MINIO_BUCKET", "klados-media"),
 		MinioUseSSL:    getEnv("MINIO_USE_SSL", "false") == "true",
 		AllowOrigins:   getEnv("ALLOW_ORIGINS", "http://localhost:3000"),
@@ -51,6 +51,15 @@ func Load() *Config {
 func getEnv(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
+	}
+	return fallback
+}
+
+func getEnvAny(keys []string, fallback string) string {
+	for _, k := range keys {
+		if v := os.Getenv(k); v != "" {
+			return v
+		}
 	}
 	return fallback
 }
