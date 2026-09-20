@@ -20,8 +20,10 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
 ENV NEXT_TELEMETRY_DISABLED=1
-ARG NEXT_PUBLIC_API_URL=http://localhost:8080/v1
+ARG NEXT_PUBLIC_API_URL=/v1
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+ARG INTERNAL_API_URL=http://klados-api:8080/v1
+ENV INTERNAL_API_URL=$INTERNAL_API_URL
 
 RUN pnpm build
 
@@ -48,4 +50,4 @@ USER nextjs
 
 EXPOSE 3000
 
-CMD ["sh", "-c", "ENTRY=$(find /app -name server.js | head -n 1); if [ -n \"$ENTRY\" ]; then DIR=$(dirname \"$ENTRY\"); mkdir -p \"$DIR/.next\"; cp -rn /app/.next/static \"$DIR/.next/\" 2>/dev/null || true; cp -rn /app/public \"$DIR/\" 2>/dev/null || true; echo \"Starting Next.js server from $DIR\"; cd \"$DIR\" && exec node server.js; else echo \"server.js not found under /app:\"; ls -laR /app; exit 1; fi"]
+CMD ["sh", "-c", "TARGET_BACKEND=$(echo \"${INTERNAL_API_URL:-http://klados-api:8080/v1}\" | sed -e 's|/v1/\\?$||'); find /app -name routes-manifest.json -exec sed -i \"s|http://127.0.0.1:8080|${TARGET_BACKEND}|g; s|http://klados-api:8080|${TARGET_BACKEND}|g\" {} +; ENTRY=$(find /app -name server.js | head -n 1); if [ -n \"$ENTRY\" ]; then DIR=$(dirname \"$ENTRY\"); mkdir -p \"$DIR/.next\"; cp -rn /app/.next/static \"$DIR/.next/\" 2>/dev/null || true; cp -rn /app/public \"$DIR/\" 2>/dev/null || true; echo \"Starting Next.js server from $DIR\"; cd \"$DIR\" && exec node server.js; else echo \"server.js not found under /app:\"; ls -laR /app; exit 1; fi"]

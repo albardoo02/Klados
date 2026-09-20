@@ -12,7 +12,7 @@ const workspaceRoot = fs.existsSync(path.resolve(__dirname, "../../pnpm-workspac
 const BACKEND_INTERNAL_URL =
   process.env.INTERNAL_API_URL?.replace(/\/v1\/?$/, '') ||
   process.env.BACKEND_INTERNAL_URL ||
-  "http://127.0.0.1:8080";
+  (process.env.NODE_ENV === "production" ? "http://klados-api:8080" : "http://127.0.0.1:8080");
 
 const nextConfig: NextConfig = {
   output: "standalone",
