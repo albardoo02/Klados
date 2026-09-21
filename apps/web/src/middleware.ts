@@ -31,7 +31,10 @@ async function refreshDynamicDomains() {
 
 export async function middleware(req: NextRequest) {
   const url = req.nextUrl;
-  const hostname = req.headers.get('host')?.split(':')[0]?.toLowerCase() || '';
+  const hostname =
+    (req.headers.get('x-forwarded-host') || req.headers.get('host'))
+      ?.split(':')[0]
+      ?.toLowerCase() || '';
 
   // 1. システム共通パス（_next, api, login, dashboard, callback, sites等）はリライトせずそのまま通す
   if (isSystemPath(url.pathname)) {

@@ -171,7 +171,7 @@ type CategoryMemberItem struct {
 func (h *CategoryHandler) ListPublic(c *gin.Context) {
 	siteSlug := c.Param("slug")
 	var site model.Site
-	if err := h.DB.Where("(slug = ? OR custom_domain = ?) AND is_public = ?", siteSlug, siteSlug, true).First(&site).Error; err != nil {
+	if err := h.DB.Where("(LOWER(slug) = LOWER(?) OR LOWER(custom_domain) = LOWER(?)) AND is_public = ?", siteSlug, siteSlug, true).First(&site).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "site not found"})
 		return
 	}
@@ -230,7 +230,7 @@ func (h *CategoryHandler) GetPublicCategory(c *gin.Context) {
 	rawName := c.Param("name")
 
 	var site model.Site
-	if err := h.DB.Where("(slug = ? OR custom_domain = ?) AND is_public = ?", siteSlug, siteSlug, true).First(&site).Error; err != nil {
+	if err := h.DB.Where("(LOWER(slug) = LOWER(?) OR LOWER(custom_domain) = LOWER(?)) AND is_public = ?", siteSlug, siteSlug, true).First(&site).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "site not found"})
 		return
 	}

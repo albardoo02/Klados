@@ -265,7 +265,7 @@ func extractTokenFromHeaderOrCookie(c *gin.Context) string {
 func (h *SiteHandler) GetBySlug(c *gin.Context) {
 	slug := c.Param("slug")
 	var site model.Site
-	if err := h.DB.Where("(slug = ? OR custom_domain = ?) AND is_public = ?", slug, slug, true).First(&site).Error; err != nil {
+	if err := h.DB.Where("(LOWER(slug) = LOWER(?) OR LOWER(custom_domain) = LOWER(?)) AND is_public = ?", slug, slug, true).First(&site).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "site not found"})
 		return
 	}

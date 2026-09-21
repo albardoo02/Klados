@@ -44,9 +44,12 @@ api.interceptors.response.use(
   (error) => {
     if (error.response?.status === 401) {
       if (typeof window !== 'undefined') {
+        localStorage.removeItem('access_token');
+        sessionStorage.removeItem('access_token');
         const path = window.location.pathname;
-        if (!path.startsWith('/sites/') && !path.startsWith('/view/')) {
-          localStorage.removeItem('access_token');
+        // 管理画面（/dashboard）にいる場合のみログイン画面へ強制リダイレクト
+        // 公開Wiki閲覧中（カスタムドメイン含む）は絶対にログイン画面へ飛ばさない
+        if (path.startsWith('/dashboard')) {
           window.location.href = '/login';
         }
       }

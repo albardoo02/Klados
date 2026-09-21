@@ -141,6 +141,9 @@ func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
 	api.GET("/media/:id", mediaH.ServeByID)
 	api.GET("/media/:id/content", mediaH.ServeByID)
 
+	// Public comments list
+	api.GET("/pages/:id/comments", commentH.List)
+
 	// 認証 (Public)
 	auth := api.Group("/auth")
 	{
