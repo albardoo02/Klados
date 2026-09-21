@@ -520,173 +520,216 @@ export default function AuthSettingsPage() {
           </button>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pt-2">
-          {/* GitHub OAuth 設定 */}
-          <div className="border border-slate-200 rounded-2xl p-5 bg-slate-50/50 space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="font-bold text-slate-800 text-sm">GitHub OAuth App</span>
-                {configData?.config.github_configured ? (
-                  <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-100/80 px-2 py-0.5 rounded-full">
-                    <CheckCircle2 className="w-3.5 h-3.5" /> 設定完了
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-700 bg-amber-100/80 px-2 py-0.5 rounded-full">
-                    <AlertTriangle className="w-3.5 h-3.5" /> 未設定
-                  </span>
-                )}
-              </div>
-              <a
-                href="https://github.com/settings/developers"
-                target="_blank"
-                rel="noreferrer"
-                className="text-[11px] text-blue-600 hover:text-blue-800 flex items-center gap-1"
-              >
-                GitHub Developer Settings <ExternalLink className="w-3 h-3" />
-              </a>
-            </div>
+        {(() => {
+          const isGithubConfigured = Boolean(configData?.github_configured || configData?.config?.github_configured);
+          const isDiscordConfigured = Boolean(configData?.discord_configured || configData?.config?.discord_configured);
+          const currentOrigin = typeof window !== 'undefined' ? window.location.origin : 'https://klados.azisaba.net';
+          
+          // mainDomains からドメイン一覧を抽出し、origin一覧を作成
+          const registeredDomains = mainDomains
+            .split(',')
+            .map((d) => d.trim().toLowerCase())
+            .filter(Boolean);
+          
+          const primaryDomain = registeredDomains[0] || (typeof window !== 'undefined' ? window.location.hostname : 'klados.azisaba.net');
+          const primaryOrigin = primaryDomain.startsWith('http') ? primaryDomain : `https://${primaryDomain}`;
 
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Authorization callback URL (登録用)
-              </label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  readOnly
-                  value={typeof window !== 'undefined' ? `${window.location.origin}/auth/callback?provider=github` : 'https://cms.azisaba.net/auth/callback?provider=github'}
-                  className="w-full text-xs font-mono bg-white border border-slate-200 rounded-lg px-3 py-2 text-slate-600 select-all"
-                />
-                <button
-                  type="button"
-                  onClick={() =>
-                    handleCopy(
-                      typeof window !== 'undefined' ? `${window.location.origin}/auth/callback?provider=github` : 'https://cms.azisaba.net/auth/callback?provider=github',
-                      'github_cb'
-                    )
-                  }
-                  className="px-3 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg text-xs font-medium transition-colors flex items-center gap-1 shrink-0"
-                >
-                  {copiedCallback === 'github_cb' ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
-                  {copiedCallback === 'github_cb' ? 'コピー済' : 'コピー'}
-                </button>
-              </div>
-              <p className="text-[11px] text-slate-500 mt-1">
-                GitHub の OAuth App 作成画面で上記 URL を「Authorization callback URL」に指定してください。
-              </p>
-            </div>
+          return (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pt-2">
+              {/* GitHub OAuth 設定 */}
+              <div className="border border-slate-200 rounded-2xl p-5 bg-slate-50/50 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-slate-800 text-sm">GitHub OAuth App</span>
+                    {isGithubConfigured ? (
+                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-100/80 px-2 py-0.5 rounded-full">
+                        <CheckCircle2 className="w-3.5 h-3.5" /> 設定完了
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-700 bg-amber-100/80 px-2 py-0.5 rounded-full">
+                        <AlertTriangle className="w-3.5 h-3.5" /> 未設定
+                      </span>
+                    )}
+                  </div>
+                  <a
+                    href="https://github.com/settings/developers"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-[11px] text-blue-600 hover:text-blue-800 flex items-center gap-1"
+                  >
+                    GitHub Developer Settings <ExternalLink className="w-3 h-3" />
+                  </a>
+                </div>
 
-            <div className="space-y-3 pt-2 border-t border-slate-200">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Client ID
-                </label>
-                <input
-                  type="text"
-                  placeholder="Iv1.xxxxxxxxx or Ov23xxxxxxxx"
-                  value={githubClientId}
-                  onChange={(e) => setGithubClientId(e.target.value)}
-                  className="w-full text-xs font-mono bg-white border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Client Secret
-                </label>
-                <input
-                  type="password"
-                  placeholder={configData?.config.github_configured ? '•••••••••••••••• (設定済み・変更時のみ入力)' : 'Client Secret を入力'}
-                  value={githubClientSecret}
-                  onChange={(e) => setGithubClientSecret(e.target.value)}
-                  className="w-full text-xs font-mono bg-white border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-            </div>
-          </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Authorization callback URL (登録用)
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      readOnly
+                      value={`${primaryOrigin}/auth/callback?provider=github`}
+                      className="w-full text-xs font-mono bg-white border border-slate-200 rounded-lg px-3 py-2 text-slate-600 select-all"
+                    />
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleCopy(
+                          `${primaryOrigin}/auth/callback?provider=github`,
+                          'github_cb'
+                        )
+                      }
+                      className="px-3 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg text-xs font-medium transition-colors flex items-center gap-1 shrink-0 cursor-pointer"
+                    >
+                      {copiedCallback === 'github_cb' ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                      {copiedCallback === 'github_cb' ? 'コピー済' : 'コピー'}
+                    </button>
+                  </div>
+                  {currentOrigin !== primaryOrigin && (
+                    <div className="mt-1 flex items-center gap-1 text-[10px] text-slate-500">
+                      <span>現在のドメイン用:</span>
+                      <code className="font-mono bg-slate-100 px-1 rounded">{`${currentOrigin}/auth/callback?provider=github`}</code>
+                      <button
+                        type="button"
+                        onClick={() => handleCopy(`${currentOrigin}/auth/callback?provider=github`, 'github_cb_curr')}
+                        className="text-blue-600 hover:underline cursor-pointer ml-1"
+                      >
+                        {copiedCallback === 'github_cb_curr' ? 'コピー済' : 'コピー'}
+                      </button>
+                    </div>
+                  )}
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    GitHub の OAuth App 作成画面で上記 URL を「Authorization callback URL」に指定してください。
+                  </p>
+                </div>
 
-          {/* Discord OAuth 設定 */}
-          <div className="border border-slate-200 rounded-2xl p-5 bg-slate-50/50 space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="font-bold text-slate-800 text-sm">Discord OAuth2</span>
-                {configData?.config.discord_configured ? (
-                  <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-100/80 px-2 py-0.5 rounded-full">
-                    <CheckCircle2 className="w-3.5 h-3.5" /> 設定完了
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-700 bg-amber-100/80 px-2 py-0.5 rounded-full">
-                    <AlertTriangle className="w-3.5 h-3.5" /> 未設定
-                  </span>
-                )}
+                <div className="space-y-3 pt-2 border-t border-slate-200">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Client ID
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Iv1.xxxxxxxxx or Ov23xxxxxxxx"
+                      value={githubClientId}
+                      onChange={(e) => setGithubClientId(e.target.value)}
+                      className="w-full text-xs font-mono bg-white border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Client Secret
+                    </label>
+                    <input
+                      type="password"
+                      placeholder={isGithubConfigured ? '•••••••••••••••• (設定済み・変更時のみ入力)' : 'Client Secret を入力'}
+                      value={githubClientSecret}
+                      onChange={(e) => setGithubClientSecret(e.target.value)}
+                      className="w-full text-xs font-mono bg-white border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                </div>
               </div>
-              <a
-                href="https://discord.com/developers/applications"
-                target="_blank"
-                rel="noreferrer"
-                className="text-[11px] text-indigo-600 hover:text-indigo-800 flex items-center gap-1"
-              >
-                Discord Developer Portal <ExternalLink className="w-3 h-3" />
-              </a>
-            </div>
 
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Redirect URI (登録用)
-              </label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  readOnly
-                  value={typeof window !== 'undefined' ? `${window.location.origin}/auth/callback?provider=discord` : 'https://cms.azisaba.net/auth/callback?provider=discord'}
-                  className="w-full text-xs font-mono bg-white border border-slate-200 rounded-lg px-3 py-2 text-slate-600 select-all"
-                />
-                <button
-                  type="button"
-                  onClick={() =>
-                    handleCopy(
-                      typeof window !== 'undefined' ? `${window.location.origin}/auth/callback?provider=discord` : 'https://cms.azisaba.net/auth/callback?provider=discord',
-                      'discord_cb'
-                    )
-                  }
-                  className="px-3 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg text-xs font-medium transition-colors flex items-center gap-1 shrink-0"
-                >
-                  {copiedCallback === 'discord_cb' ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
-                  {copiedCallback === 'discord_cb' ? 'コピー済' : 'コピー'}
-                </button>
-              </div>
-              <p className="text-[11px] text-slate-500 mt-1">
-                Discord Developer Portal の OAuth2 &gt; Redirects に上記 URL を追加してください。
-              </p>
-            </div>
+              {/* Discord OAuth 設定 */}
+              <div className="border border-slate-200 rounded-2xl p-5 bg-slate-50/50 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-slate-800 text-sm">Discord OAuth2</span>
+                    {isDiscordConfigured ? (
+                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-100/80 px-2 py-0.5 rounded-full">
+                        <CheckCircle2 className="w-3.5 h-3.5" /> 設定完了
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-700 bg-amber-100/80 px-2 py-0.5 rounded-full">
+                        <AlertTriangle className="w-3.5 h-3.5" /> 未設定
+                      </span>
+                    )}
+                  </div>
+                  <a
+                    href="https://discord.com/developers/applications"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-[11px] text-indigo-600 hover:text-indigo-800 flex items-center gap-1"
+                  >
+                    Discord Developer Portal <ExternalLink className="w-3 h-3" />
+                  </a>
+                </div>
 
-            <div className="space-y-3 pt-2 border-t border-slate-200">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Client ID (Application ID)
-                </label>
-                <input
-                  type="text"
-                  placeholder="123456789012345678"
-                  value={discordClientId}
-                  onChange={(e) => setDiscordClientId(e.target.value)}
-                  className="w-full text-xs font-mono bg-white border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Client Secret
-                </label>
-                <input
-                  type="password"
-                  placeholder={configData?.config.discord_configured ? '•••••••••••••••• (設定済み・変更時のみ入力)' : 'Client Secret を入力'}
-                  value={discordClientSecret}
-                  onChange={(e) => setDiscordClientSecret(e.target.value)}
-                  className="w-full text-xs font-mono bg-white border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Redirect URI (登録用)
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      readOnly
+                      value={`${primaryOrigin}/auth/callback?provider=discord`}
+                      className="w-full text-xs font-mono bg-white border border-slate-200 rounded-lg px-3 py-2 text-slate-600 select-all"
+                    />
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleCopy(
+                          `${primaryOrigin}/auth/callback?provider=discord`,
+                          'discord_cb'
+                        )
+                      }
+                      className="px-3 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg text-xs font-medium transition-colors flex items-center gap-1 shrink-0 cursor-pointer"
+                    >
+                      {copiedCallback === 'discord_cb' ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                      {copiedCallback === 'discord_cb' ? 'コピー済' : 'コピー'}
+                    </button>
+                  </div>
+                  {currentOrigin !== primaryOrigin && (
+                    <div className="mt-1 flex items-center gap-1 text-[10px] text-slate-500">
+                      <span>現在のドメイン用:</span>
+                      <code className="font-mono bg-slate-100 px-1 rounded">{`${currentOrigin}/auth/callback?provider=discord`}</code>
+                      <button
+                        type="button"
+                        onClick={() => handleCopy(`${currentOrigin}/auth/callback?provider=discord`, 'discord_cb_curr')}
+                        className="text-blue-600 hover:underline cursor-pointer ml-1"
+                      >
+                        {copiedCallback === 'discord_cb_curr' ? 'コピー済' : 'コピー'}
+                      </button>
+                    </div>
+                  )}
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    Discord Developer Portal の OAuth2 &gt; Redirects に上記 URL を追加してください。
+                  </p>
+                </div>
+
+                <div className="space-y-3 pt-2 border-t border-slate-200">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Client ID (Application ID)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="123456789012345678"
+                      value={discordClientId}
+                      onChange={(e) => setDiscordClientId(e.target.value)}
+                      className="w-full text-xs font-mono bg-white border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Client Secret
+                    </label>
+                    <input
+                      type="password"
+                      placeholder={isDiscordConfigured ? '•••••••••••••••• (設定済み・変更時のみ入力)' : 'Client Secret を入力'}
+                      value={discordClientSecret}
+                      onChange={(e) => setDiscordClientSecret(e.target.value)}
+                      className="w-full text-xs font-mono bg-white border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
-        </div>
+          );
+        })()}
       </div>
 
       {/* システム・メインCMSドメイン設定カード (root限定) */}
