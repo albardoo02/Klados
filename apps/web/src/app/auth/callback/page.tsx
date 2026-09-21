@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { authApi } from '@/lib/api';
 import { useAuthStore } from '@/store/auth';
-import { Loader2, AlertCircle, ArrowLeft, CheckCircle2, ShieldCheck } from 'lucide-react';
+import { Loader2, AlertCircle, ArrowLeft, CheckCircle2 } from 'lucide-react';
 
 function CallbackContent() {
   const router = useRouter();
@@ -45,7 +45,7 @@ function CallbackContent() {
     }
 
     // 実際にブラウザがリダイレクトされたパス（/auth/callback または /callback）に合わせて redirect_uri を構成
-    const currentPath = typeof window !== 'undefined' ? window.location.pathname : '/callback';
+    const currentPath = window.location.pathname || '/auth/callback';
     const redirectUri = `${window.location.origin}${currentPath}?provider=${provider}`;
 
     authApi
