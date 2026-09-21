@@ -67,8 +67,9 @@ func (h *MediaHandler) Upload(c *gin.Context) {
 		}
 	}
 
+	mediaID := uuid.New()
 	ext := filepath.Ext(header.Filename)
-	filename := fmt.Sprintf("%s%s", uuid.New().String(), ext)
+	filename := fmt.Sprintf("%s%s", mediaID.String(), ext)
 	storageKey := fmt.Sprintf("sites/%s/media/%s", sUID.String(), filename)
 
 	if h.Minio != nil && h.Bucket != "" {
@@ -106,9 +107,10 @@ func (h *MediaHandler) Upload(c *gin.Context) {
 	}
 
 	uUID, _ := uuid.Parse(userIDStr)
-	cdnURL := fmt.Sprintf("/v1/public/media/%s", filename)
+	cdnURL := fmt.Sprintf("/v1/public/media/%s", mediaID.String())
 
 	media := &model.MediaFile{
+		ID:           mediaID,
 		SiteID:       sUID,
 		UserID:       uUID,
 		Filename:     filename,
@@ -133,6 +135,12 @@ func (h *MediaHandler) List(c *gin.Context) {
 	siteID := c.Query("site_id")
 	var files []model.MediaFile
 	h.DB.Where("site_id = ?", siteID).Order("created_at desc").Find(&files)
+
+	for i := range files {
+		// 内部MinIOホスト名や旧URLを救済し、常に外部から到達可能な /v1/public/media/:id を返却
+		files[i].CDNURL = fmt.Sprintf("/v1/public/media/%s", files[i].ID.String())
+	}
+
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": files})
 }
 
@@ -199,11 +207,7 @@ func (h *MediaHandler) UploadAvatar(c *gin.Context) {
 		return
 	}
 
-	scheme := "http"
-	if !strings.Contains(h.Endpoint, "localhost") {
-		scheme = "https"
-	}
-	avatarURL := fmt.Sprintf("%s://%s/%s/%s", scheme, h.Endpoint, h.Bucket, storageKey)
+	avatarURL := fmt.Sprintf("/v1/public/media/file/%s", storageKey)
 
 	var user model.User
 	if err := h.DB.Where("id = ?", uUID).First(&user).Error; err != nil {
@@ -249,26 +253,39 @@ func (h *MediaHandler) ServeFile(c *gin.Context) {
 }
 
 func (h *MediaHandler) ServeByID(c *gin.Context) {
-	idStr := c.Param("id")
-	idStr = strings.TrimPrefix(idStr, "/")
+	idStr := strings.TrimPrefix(c.Param("id"), "/")
 	cleanID := strings.TrimSuffix(idStr, filepath.Ext(idStr))
 
-	uUID, err := uuid.Parse(cleanID)
-	if err != nil {
-		uUID, err = uuid.Parse(idStr)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid media id"})
-			return
+	var media model.MediaFile
+	var found bool
+
+	// 1. UUID での主キー検索（cleanID または idStr）
+	if uUID, err := uuid.Parse(cleanID); err == nil && uUID != uuid.Nil {
+		if err := h.DB.Where("id = ?", uUID).First(&media).Error; err == nil && media.ID != uuid.Nil {
+			found = true
+		}
+	}
+	if !found {
+		if uUID, err := uuid.Parse(idStr); err == nil && uUID != uuid.Nil {
+			if err := h.DB.Where("id = ?", uUID).First(&media).Error; err == nil && media.ID != uuid.Nil {
+				found = true
+			}
 		}
 	}
 
-	var media model.MediaFile
-	if err := h.DB.Where("id = ?", uUID).Limit(1).Find(&media).Error; err != nil || media.ID == uuid.Nil {
-		// Fallback: search by storage_key or file_name containing the cleanID
-		if err2 := h.DB.Where("storage_key LIKE ? OR file_name LIKE ?", "%"+cleanID+"%", "%"+cleanID+"%").Limit(1).Find(&media).Error; err2 != nil || media.ID == uuid.Nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "media not found"})
-			return
+	// 2. filename, original_name, storage_key での検索（旧データや拡張子付き、元ファイル名でのアクセス対応）
+	if !found {
+		if err := h.DB.Where(
+			"filename = ? OR filename = ? OR original_name = ? OR original_name = ? OR storage_key LIKE ? OR storage_key LIKE ?",
+			idStr, cleanID, idStr, cleanID, "%/"+idStr, "%/"+cleanID+"%",
+		).First(&media).Error; err == nil && media.ID != uuid.Nil {
+			found = true
 		}
+	}
+
+	if !found {
+		c.JSON(http.StatusNotFound, gin.H{"error": "media not found"})
+		return
 	}
 
 	if c.Query("format") == "json" {
@@ -276,7 +293,7 @@ func (h *MediaHandler) ServeByID(c *gin.Context) {
 		return
 	}
 
-	// Try serving from MinIO directly
+	// 3. MinIO から直接ストリーミング配信
 	if h.Minio != nil && h.Bucket != "" && media.StorageKey != "" {
 		obj, err := h.Minio.GetObject(c.Request.Context(), h.Bucket, media.StorageKey, minio.GetObjectOptions{})
 		if err == nil {
@@ -287,19 +304,20 @@ func (h *MediaHandler) ServeByID(c *gin.Context) {
 				if contentType == "" {
 					contentType = stat.ContentType
 				}
+				if contentType == "" {
+					contentType = "application/octet-stream"
+				}
 				c.Header("Cache-Control", "public, max-age=86400")
 				c.Header("Content-Disposition", "inline")
 				c.DataFromReader(http.StatusOK, stat.Size, contentType, obj, nil)
 				return
+			} else {
+				log.Printf("[MediaHandler.ServeByID] MinIO Stat error for key '%s' in bucket '%s': %v", media.StorageKey, h.Bucket, err)
 			}
+		} else {
+			log.Printf("[MediaHandler.ServeByID] MinIO GetObject error for key '%s' in bucket '%s': %v", media.StorageKey, h.Bucket, err)
 		}
 	}
 
-	// Fallback to CDNURL redirect if MinIO direct stream fails
-	if media.CDNURL != "" {
-		c.Redirect(http.StatusFound, media.CDNURL)
-		return
-	}
-
-	c.JSON(http.StatusNotFound, gin.H{"error": "media content not found"})
+	c.JSON(http.StatusNotFound, gin.H{"error": "media content not found in storage"})
 }

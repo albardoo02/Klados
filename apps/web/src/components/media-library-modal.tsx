@@ -3,6 +3,7 @@
 import React, { useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { mediaApi, MediaItem } from '@/lib/api';
+import { resolveMediaUrl } from '@/lib/media';
 import {
   X,
   Upload,
@@ -106,7 +107,7 @@ export function MediaLibraryModal({
 
   const handleCopyUrl = (id: string, url: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    const textToCopy = id ? `media:${id}` : url;
+    const textToCopy = id ? `media:${id}` : resolveMediaUrl(url, id);
     navigator.clipboard.writeText(textToCopy);
     setCopiedId(id);
     setTimeout(() => setCopiedId(null), 2000);
@@ -252,13 +253,15 @@ export function MediaLibraryModal({
               {filteredItems.map((item) => {
                 const displayName = item.original_name || item.filename;
                 const isSelectedForInsertion = Boolean(onSelectImage);
+                const primaryUrl = item.id ? `/v1/public/media/${item.id}` : resolveMediaUrl(item.cdn_url, item.id);
+                const fallbackUrl = resolveMediaUrl(item.cdn_url, item.id);
 
                 return (
                   <div
                     key={item.id}
                     onClick={() => {
                       if (onSelectImage) {
-                        const targetRef = item.id ? `media:${item.id}` : item.cdn_url;
+                        const targetRef = item.id ? `media:${item.id}` : resolveMediaUrl(item.cdn_url, item.id);
                         onSelectImage(targetRef, displayName, item);
                         onClose();
                       }
@@ -272,9 +275,15 @@ export function MediaLibraryModal({
                     {/* サムネイル画像領域 */}
                     <div className="aspect-square w-full bg-muted/40 relative overflow-hidden flex items-center justify-center">
                       <img
-                        src={item.cdn_url}
+                        src={primaryUrl}
                         alt={displayName}
                         loading="lazy"
+                        onError={(e) => {
+                          const target = e.currentTarget;
+                          if (fallbackUrl && target.src !== fallbackUrl && !target.src.endsWith(fallbackUrl)) {
+                            target.src = fallbackUrl;
+                          }
+                        }}
                         className="w-full h-full object-cover transition-transform duration-200 group-hover:scale-105"
                       />
 
