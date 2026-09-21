@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -861,7 +862,8 @@ func (h *AuthHandler) exchangeGitHubCode(ctx context.Context, code, redirectURI,
 	}
 
 	// 所属Organization一覧取得（ルーティングルール照合用）
-	orgsReq, _ := http.NewRequestWithContext(ctx, "GET", "https://api.github.com/user/orgs", nil)
+	// 1. GET /user/orgs (公開またはサードパーティ許可済みの組織一覧)
+	orgsReq, _ := http.NewRequestWithContext(ctx, "GET", "https://api.github.com/user/orgs?per_page=100", nil)
 	orgsReq.Header.Set("Authorization", "Bearer "+tokenData.AccessToken)
 	orgsReq.Header.Set("User-Agent", "Klados-CMS")
 	orgsReq.Header.Set("Accept", "application/vnd.github.v3+json")
@@ -879,6 +881,78 @@ func (h *AuthHandler) exchangeGitHubCode(ctx context.Context, code, redirectURI,
 			}
 		}
 	}
+
+	// 2. GET /user/memberships/orgs (非公開メンバーシップを含む所属組織一覧)
+	membershipsReq, _ := http.NewRequestWithContext(ctx, "GET", "https://api.github.com/user/memberships/orgs?state=active&per_page=100", nil)
+	membershipsReq.Header.Set("Authorization", "Bearer "+tokenData.AccessToken)
+	membershipsReq.Header.Set("User-Agent", "Klados-CMS")
+	membershipsReq.Header.Set("Accept", "application/vnd.github.v3+json")
+	if memResp, err := client.Do(membershipsReq); err == nil {
+		defer memResp.Body.Close()
+		var memberships []struct {
+			State        string `json:"state"`
+			Organization struct {
+				Login string `json:"login"`
+			} `json:"organization"`
+		}
+		if json.NewDecoder(memResp.Body).Decode(&memberships) == nil {
+			for _, m := range memberships {
+				if m.Organization.Login != "" {
+					alreadyExists := false
+					for _, o := range orgs {
+						if strings.EqualFold(o, m.Organization.Login) {
+							alreadyExists = true
+							break
+						}
+					}
+					if !alreadyExists {
+						orgs = append(orgs, m.Organization.Login)
+					}
+				}
+			}
+		}
+	}
+
+	// 3. ルールに登録されているGitHub Organizationについて直接メンバーシップを照合
+	// (組織のサードパーティアクセス制限等により一覧APIから隠蔽されている場合の救済)
+	if h.DB != nil {
+		var orgRules []model.AuthRoutingRule
+		h.DB.Where("enabled = ? AND rule_type = ?", true, "github_org").Find(&orgRules)
+		for _, r := range orgRules {
+			targetOrg := strings.TrimSpace(r.MatchValue)
+			if targetOrg == "" {
+				continue
+			}
+			alreadyFound := false
+			for _, o := range orgs {
+				if strings.EqualFold(o, targetOrg) {
+					alreadyFound = true
+					break
+				}
+			}
+			if alreadyFound {
+				continue
+			}
+
+			directReq, _ := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("https://api.github.com/user/memberships/orgs/%s", url.PathEscape(targetOrg)), nil)
+			directReq.Header.Set("Authorization", "Bearer "+tokenData.AccessToken)
+			directReq.Header.Set("User-Agent", "Klados-CMS")
+			directReq.Header.Set("Accept", "application/vnd.github.v3+json")
+			if dResp, err := client.Do(directReq); err == nil {
+				defer dResp.Body.Close()
+				if dResp.StatusCode == http.StatusOK {
+					var mem struct {
+						State string `json:"state"`
+					}
+					if json.NewDecoder(dResp.Body).Decode(&mem) == nil && (mem.State == "active" || mem.State == "") {
+						orgs = append(orgs, targetOrg)
+					}
+				}
+			}
+		}
+	}
+
+	log.Printf("[OAuth:GitHub] User '%s' (%s). Detected orgs from GitHub: %v", ghUser.Login, email, orgs)
 
 	return providerID, email, username, displayName, avatarURL, orgs, nil
 }
@@ -1050,8 +1124,17 @@ func (h *AuthHandler) completeOAuthLogin(
 ) {
 	authConfig := h.getOrCreateAuthConfig()
 
-	// 1. ドメインホワイトリスト制限チェック (AllowedDomains)
-	if authConfig.AllowedDomains != "" {
+	// root管理者判定（環境変数 ROOT_EMAIL / ROOT_USERNAME または既存ユーザーの IsRoot）
+	isRoot := h.determineIfRoot(email, username)
+	if !isRoot && h.DB != nil {
+		var existingUser model.User
+		if h.DB.Where("email = ? OR username = ?", email, username).First(&existingUser).Error == nil && existingUser.IsRoot {
+			isRoot = true
+		}
+	}
+
+	// 1. ドメインホワイトリスト制限チェック (AllowedDomains) - rootは免除
+	if authConfig.AllowedDomains != "" && !isRoot {
 		emailLower := strings.ToLower(strings.TrimSpace(email))
 		emailDomain := ""
 		if atIdx := strings.LastIndex(emailLower, "@"); atIdx != -1 {
@@ -1070,6 +1153,7 @@ func (h *AuthHandler) completeOAuthLogin(
 			}
 		}
 		if !domainAllowed {
+			log.Printf("[OAuth:Denied] Email domain '%s' not allowed for user '%s' (allowed: %s)", emailDomain, email, authConfig.AllowedDomains)
 			c.JSON(http.StatusForbidden, gin.H{
 				"error": fmt.Sprintf("このメールドメイン（%s）からのログインは許可されていません。", emailDomain),
 			})
@@ -1087,12 +1171,18 @@ func (h *AuthHandler) completeOAuthLogin(
 	dummyUser := &model.User{Email: email}
 	preMatches, _ := h.applyRoutingRulesContext(dummyUser, matchCtx, false)
 
-	if authConfig.RestrictToRules {
+	// root管理者は RestrictToRules によるログイン拒絶を受けない
+	if authConfig.RestrictToRules && !isRoot {
 		var activeRuleCount int64
 		h.DB.Model(&model.AuthRoutingRule{}).Where("enabled = ?", true).Count(&activeRuleCount)
 		if activeRuleCount > 0 && len(preMatches) == 0 {
+			log.Printf("[OAuth:Denied] User '%s' (%s) does not match any active routing rule. Detected orgs: %v, guilds: %v", username, email, orgs, guilds)
+			orgStr := "なし"
+			if len(orgs) > 0 {
+				orgStr = strings.Join(orgs, ", ")
+			}
 			c.JSON(http.StatusForbidden, gin.H{
-				"error": "許可された組織（GitHub/Discord）または承認済みメールドメインのユーザーのみログインできます。",
+				"error": fmt.Sprintf("許可された組織（GitHub/Discord）または承認済みメールドメインのユーザーのみログインできます。(GitHub検出組織: [%s])\nGitHub側で組織アクセス権限（Grant）が付与されているかご確認ください。", orgStr),
 			})
 			return
 		}
