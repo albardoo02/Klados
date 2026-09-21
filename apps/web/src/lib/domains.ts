@@ -89,14 +89,35 @@ export function isSystemPath(pathname: string): boolean {
 
 /**
  * 現在のホストに応じた管理画面・メインポータルのベースURLを取得
+ * 独自ドメイン（azipedia.azisaba.net等）から呼び出された場合でも、
+ * 集中型OAuthリレーのブローカーとなるメインポータルのURL（https://klados.azisaba.net等）を正確に返します。
  */
-export function getMainPortalUrl(): string {
+export function getMainPortalUrl(mainDomainsConfig?: string): string {
   if (typeof window !== 'undefined') {
     const currentHost = window.location.hostname.toLowerCase();
+    // ローカル開発環境（localhost / 127.0.0.1）または既にメインドメイン上の場合は自身のオリジンを返す
     if (isMainDomain(currentHost)) {
       return window.location.origin;
     }
   }
+
+  // 1. 引数で渡された DB 保存のメインドメイン設定 (AuthConfig.main_domains)
+  if (mainDomainsConfig) {
+    const first = mainDomainsConfig.split(',')[0].trim();
+    if (first) {
+      return first.startsWith('http') ? first : `https://${first}`;
+    }
+  }
+
+  // 2. メモリキャッシュにある動的メインドメイン
+  if (dynamicMainDomains.length > 0) {
+    const first = dynamicMainDomains[0];
+    if (first && first !== 'localhost' && first !== '127.0.0.1') {
+      return first.startsWith('http') ? first : `https://${first}`;
+    }
+  }
+
+  // 3. 環境変数 (NEXT_PUBLIC_MAIN_DOMAIN / MAIN_DOMAIN)
   const configured = process.env.NEXT_PUBLIC_MAIN_DOMAIN || process.env.MAIN_DOMAIN;
   if (configured) {
     const first = configured.split(',')[0].trim();
@@ -104,5 +125,7 @@ export function getMainPortalUrl(): string {
       return first.startsWith('http') ? first : `https://${first}`;
     }
   }
+
+  // 4. デフォルトフォールバック
   return 'https://klados.azisaba.net';
 }

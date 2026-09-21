@@ -152,6 +152,7 @@ func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
 		auth.POST("/discord", authH.DiscordLogin)
 		auth.GET("/:provider/url", authH.GetOAuthURL)
 		auth.POST("/oauth/callback", authH.OAuthCallback)
+		auth.POST("/oauth/relay-exchange", authH.RelayExchange)
 		auth.GET("/config", authH.GetAuthConfig)
 		auth.POST("/verify-email", authH.VerifyEmail)
 		auth.POST("/resend-verification", authH.ResendVerification)

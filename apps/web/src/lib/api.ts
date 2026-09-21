@@ -132,19 +132,34 @@ export const authApi = {
     api.post('/auth/github', data || {}),
   discordLogin: (data?: { email?: string; name?: string; token?: string; guild_id?: string; guild_name?: string }) =>
     api.post('/auth/discord', data || {}),
-  getOAuthUrl: (provider: string, redirectUri?: string) =>
-    api.get<{ success: boolean; data: { url: string } }>(
-      `/auth/${provider}/url${redirectUri ? `?redirect_uri=${encodeURIComponent(redirectUri)}` : ''}`
-    ),
-  oauthCallback: (data: { provider: string; code: string; redirect_uri?: string }) =>
+  getOAuthUrl: (provider: string, redirectUri?: string, state?: string) => {
+    const params = new URLSearchParams();
+    if (redirectUri) params.set('redirect_uri', redirectUri);
+    if (state) params.set('state', state);
+    const qs = params.toString();
+    return api.get<{ success: boolean; data: { url: string } }>(
+      `/auth/${provider}/url${qs ? `?${qs}` : ''}`
+    );
+  },
+  oauthCallback: (data: { provider: string; code: string; redirect_uri?: string; return_to?: string }) =>
     api.post<{
       success: boolean;
       data: {
         token: string;
         user: any;
         routing_matches?: AppliedRuleResult[];
+        relay_ticket?: string;
+        relay_target?: string;
       };
     }>('/auth/oauth/callback', data),
+  exchangeRelayTicket: (ticket: string) =>
+    api.post<{
+      success: boolean;
+      data: {
+        token: string;
+        user: any;
+      };
+    }>('/auth/oauth/relay-exchange', { ticket }),
   quickVerify: () =>
     api.post<{ success: boolean; message: string }>('/auth/quick-verify'),
   getAuthConfig: () =>

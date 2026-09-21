@@ -20,5 +20,6 @@ func Migrate(db *gorm.DB) error {
 		&model.PageCategory{},
 		&model.AuthConfig{},
 		&model.AuthRoutingRule{},
+		&model.OAuthRelayTicket{},
 	)
 }

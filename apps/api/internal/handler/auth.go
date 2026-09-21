@@ -665,6 +665,7 @@ type oauthCallbackRequest struct {
 	Provider    string `json:"provider" binding:"required"`
 	Code        string `json:"code" binding:"required"`
 	RedirectURI string `json:"redirect_uri"`
+	ReturnTo    string `json:"return_to"`
 }
 
 // POST /v1/auth/oauth/callback
@@ -744,7 +745,7 @@ func (h *AuthHandler) OAuthCallback(c *gin.Context) {
 		return
 	}
 
-	h.completeOAuthLogin(c, provider, providerID, email, username, displayName, avatarURL, orgs, guilds)
+	h.completeOAuthLogin(c, provider, providerID, email, username, displayName, avatarURL, orgs, guilds, req.ReturnTo)
 }
 
 func (h *AuthHandler) exchangeGitHubCode(ctx context.Context, code, redirectURI, clientID, clientSecret string) (
@@ -992,11 +993,60 @@ func (h *AuthHandler) exchangeDiscordCode(ctx context.Context, code, redirectURI
 	return providerID, email, username, displayName, avatarURL, guilds, nil
 }
 
+func (h *AuthHandler) isAllowedRelayDomain(targetHost string) bool {
+	targetHost = strings.ToLower(strings.TrimSpace(targetHost))
+	if targetHost == "" {
+		return false
+	}
+	if colonIdx := strings.Index(targetHost, ":"); colonIdx != -1 {
+		targetHost = targetHost[:colonIdx]
+	}
+
+	// 1. メインドメイン一覧に含まれているか
+	cfg := h.getOrCreateAuthConfig()
+	mainDomains := []string{"klados.azisaba.net", "cms.azisaba.net", "klados.app", "localhost", "127.0.0.1"}
+	if envMD := strings.TrimSpace(os.Getenv("MAIN_DOMAIN")); envMD != "" {
+		for _, d := range strings.Split(envMD, ",") {
+			d = strings.ToLower(strings.TrimSpace(d))
+			if d != "" {
+				mainDomains = append(mainDomains, d)
+			}
+		}
+	}
+	if cfg.MainDomains != "" {
+		for _, d := range strings.Split(cfg.MainDomains, ",") {
+			d = strings.ToLower(strings.TrimSpace(d))
+			if d != "" {
+				mainDomains = append(mainDomains, d)
+			}
+		}
+	}
+	for _, md := range mainDomains {
+		if targetHost == md {
+			return true
+		}
+	}
+
+	// Cloudflare Tunnel ドメインも許可
+	if strings.HasSuffix(targetHost, ".trycloudflare.com") {
+		return true
+	}
+
+	// 2. 登録済みサイトの custom_domain に一致するか
+	var count int64
+	if err := h.DB.Model(&model.Site{}).Where("LOWER(custom_domain) = ?", targetHost).Count(&count).Error; err == nil && count > 0 {
+		return true
+	}
+
+	return false
+}
+
 func (h *AuthHandler) completeOAuthLogin(
 	c *gin.Context,
 	provider, providerID, email, username, displayName, avatarURL string,
 	orgs []string,
 	guilds []DiscordGuildInfo,
+	returnTo string,
 ) {
 	authConfig := h.getOrCreateAuthConfig()
 
@@ -1132,12 +1182,93 @@ func (h *AuthHandler) completeOAuthLogin(
 		return
 	}
 
+	respData := gin.H{
+		"token":           token,
+		"user":            user,
+		"routing_matches": appliedRules,
+	}
+
+	// 6. 集中型OAuthリレー判定 (Cross-Domain Relay)
+	if returnTo = strings.TrimSpace(returnTo); returnTo != "" {
+		if parsedURL, err := url.Parse(returnTo); err == nil && parsedURL.Host != "" {
+			targetHost := strings.ToLower(parsedURL.Hostname())
+			reqHost := strings.ToLower(c.Request.Host)
+			if colonIdx := strings.Index(reqHost, ":"); colonIdx != -1 {
+				reqHost = reqHost[:colonIdx]
+			}
+
+			// リクエスト元（ブローカー）と異なるドメインへのリレーが必要な場合
+			if targetHost != reqHost && targetHost != "localhost" && targetHost != "127.0.0.1" {
+				if h.isAllowedRelayDomain(targetHost) {
+					ticket := model.OAuthRelayTicket{
+						ID:           uuid.New(),
+						UserID:       user.ID,
+						TargetDomain: targetHost,
+						Token:        token,
+						ExpiresAt:    time.Now().Add(60 * time.Second),
+					}
+					if err := h.DB.Create(&ticket).Error; err == nil {
+						relayURL := url.URL{
+							Scheme: parsedURL.Scheme,
+							Host:   parsedURL.Host,
+							Path:   "/auth/callback",
+							RawQuery: url.Values{
+								"ticket":    []string{ticket.ID.String()},
+								"return_to": []string{returnTo},
+							}.Encode(),
+						}
+						respData["relay_ticket"] = ticket.ID.String()
+						respData["relay_target"] = relayURL.String()
+					}
+				}
+			}
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    respData,
+	})
+}
+
+type relayExchangeRequest struct {
+	Ticket string `json:"ticket" binding:"required"`
+}
+
+// POST /v1/auth/oauth/relay-exchange
+func (h *AuthHandler) RelayExchange(c *gin.Context) {
+	var req relayExchangeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "リクエスト形式が不正です"})
+		return
+	}
+
+	ticketID, err := uuid.Parse(strings.TrimSpace(req.Ticket))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "無効なチケットIDです"})
+		return
+	}
+
+	var ticket model.OAuthRelayTicket
+	if err := h.DB.Where("id = ? AND expires_at > ?", ticketID, time.Now()).First(&ticket).Error; err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "リレーチケットが無効または有効期限切れ（60秒超過）です。再度ログインをお試しください。"})
+		return
+	}
+
+	// 使用済みチケットの即時破棄 (使い捨て・リプレイ攻撃防止)
+	h.DB.Delete(&ticket)
+
+	var user model.User
+	if err := h.DB.Where("id = ?", ticket.UserID).First(&user).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "ユーザーが見つかりません"})
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
-			"token":           token,
-			"user":            user,
-			"routing_matches": appliedRules,
+			"token": ticket.Token,
+			"user":  user,
 		},
 	})
 }
@@ -1212,5 +1343,5 @@ func (h *AuthHandler) handleOAuthUser(c *gin.Context, req oauthLoginRequest) {
 	if req.GuildID != "" || req.GuildName != "" {
 		guilds = []DiscordGuildInfo{{ID: req.GuildID, Name: req.GuildName}}
 	}
-	h.completeOAuthLogin(c, req.Provider, req.Email, req.Email, strings.Split(req.Email, "@")[0], req.Name, req.AvatarURL, orgs, guilds)
+	h.completeOAuthLogin(c, req.Provider, req.Email, req.Email, strings.Split(req.Email, "@")[0], req.Name, req.AvatarURL, orgs, guilds, "")
 }

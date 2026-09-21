@@ -4,6 +4,7 @@ import { useTranslations } from 'next-intl';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { authApi, AuthConfig } from '@/lib/api';
+import { getMainPortalUrl } from '@/lib/domains';
 import { useAuthStore } from '@/store/auth';
 import { Sparkles, Loader2, ArrowRight } from 'lucide-react';
 
@@ -66,8 +67,21 @@ export function SocialLogin({ mode = 'login', onError, config: initialConfig, sh
     setLoadingType(provider);
     try {
       if (provider === 'github' || provider === 'discord') {
-        const redirectUri = `${window.location.origin}/auth/callback?provider=${provider}`;
-        const res = await authApi.getOAuthUrl(provider, redirectUri);
+        const brokerOrigin = getMainPortalUrl(config?.main_domains);
+        const redirectUri = `${brokerOrigin}/auth/callback?provider=${provider}`;
+
+        // 呼び出し元の現在のページURL（独自ドメインのWikiやダッシュボード）をstateに安全にエンコード
+        const returnTo = window.location.href;
+        const statePayload = {
+          n: Math.random().toString(36).slice(2),
+          r: returnTo,
+        };
+        const state = btoa(JSON.stringify(statePayload))
+          .replace(/\+/g, '-')
+          .replace(/\//g, '_')
+          .replace(/=+$/, '');
+
+        const res = await authApi.getOAuthUrl(provider, redirectUri, state);
         const url = res.data.data.url;
         if (url) {
           window.location.href = url;

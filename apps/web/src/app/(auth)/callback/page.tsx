@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { authApi } from '@/lib/api';
 import { useAuthStore } from '@/store/auth';
-import { Loader2, AlertCircle, ArrowLeft, CheckCircle2, ShieldCheck } from 'lucide-react';
+import { Loader2, AlertCircle, ArrowLeft, CheckCircle2 } from 'lucide-react';
 
 function CallbackContent() {
   const router = useRouter();
@@ -14,7 +14,7 @@ function CallbackContent() {
 
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
   const [errorMessage, setErrorMessage] = useState<string>('');
-  const [providerName, setProviderName] = useState<string>('');
+  const [providerName, setProviderName] = useState<string>('OAuth');
 
   const executedRef = useRef(false);
 
@@ -22,12 +22,8 @@ function CallbackContent() {
     if (executedRef.current) return;
     executedRef.current = true;
 
-    const provider = searchParams.get('provider') || '';
-    const code = searchParams.get('code') || '';
+    // 1. エラーパラメータの検査
     const errorParam = searchParams.get('error_description') || searchParams.get('error') || '';
-
-    setProviderName(provider === 'github' ? 'GitHub' : provider === 'discord' ? 'Discord' : 'OAuth');
-
     if (errorParam) {
       setStatus('error');
       setErrorMessage(
@@ -38,10 +34,87 @@ function CallbackContent() {
       return;
     }
 
+    // 2. ワンタイム・リレーチケットの受け取り (別ドメインからのリレー認証)
+    const ticket = searchParams.get('ticket') || searchParams.get('relay_ticket');
+    const returnToParam = searchParams.get('return_to') || '';
+
+    if (ticket) {
+      setProviderName('Klados Relay');
+      authApi
+        .exchangeRelayTicket(ticket)
+        .then((res) => {
+          const { user, token } = res.data.data;
+          setStatus('success');
+          setAuth(user, token);
+
+          // 遷移先の解決
+          let targetPath = '/dashboard';
+          if (returnToParam) {
+            try {
+              const urlObj = new URL(returnToParam, window.location.origin);
+              if (urlObj.origin === window.location.origin) {
+                targetPath = urlObj.pathname + urlObj.search + urlObj.hash;
+                if (
+                  targetPath.startsWith('/login') ||
+                  targetPath.startsWith('/auth/callback') ||
+                  targetPath.startsWith('/callback')
+                ) {
+                  targetPath = '/dashboard';
+                }
+              }
+            } catch {
+              if (
+                returnToParam.startsWith('/') &&
+                !returnToParam.startsWith('/login') &&
+                !returnToParam.startsWith('/auth/callback') &&
+                !returnToParam.startsWith('/callback')
+              ) {
+                targetPath = returnToParam;
+              }
+            }
+          }
+
+          setTimeout(() => {
+            router.replace(targetPath);
+          }, 600);
+        })
+        .catch((err: any) => {
+          setStatus('error');
+          setErrorMessage(
+            err?.response?.data?.error ||
+            err?.message ||
+            'リレー認証チケットの検証に失敗しました。もう一度ログインをお試しください。'
+          );
+        });
+      return;
+    }
+
+    // 3. OAuthプロバイダーからの直接コールバック（GitHub / Discord等）
+    const provider = searchParams.get('provider') || '';
+    const code = searchParams.get('code') || '';
+    const stateParam = searchParams.get('state') || '';
+
+    setProviderName(provider === 'github' ? 'GitHub' : provider === 'discord' ? 'Discord' : 'OAuth');
+
     if (!code || !provider) {
       setStatus('error');
       setErrorMessage('無効なコールバックURLです。認可コード（code）またはプロバイダー情報が見つかりません。');
       return;
+    }
+
+    // stateから元のアクセス元（return_to）を復元
+    let returnTo: string | undefined = undefined;
+    if (stateParam) {
+      try {
+        let b64 = stateParam.replace(/-/g, '+').replace(/_/g, '/');
+        while (b64.length % 4) b64 += '=';
+        const parsed = JSON.parse(atob(b64));
+        if (parsed && typeof parsed === 'object') {
+          returnTo = parsed.r || parsed.return_to;
+        }
+      } catch {
+        // stateがプレーンUUID等の場合は無視
+      }
     }
 
     // 実際にブラウザがリダイレクトされたパス（/auth/callback または /callback）に合わせて redirect_uri を構成
@@ -53,14 +126,44 @@ function CallbackContent() {
         provider,
         code,
         redirect_uri: redirectUri,
+        return_to: returnTo,
       })
       .then((res) => {
-        const { user, token } = res.data.data;
+        const { user, token, relay_target } = res.data.data;
+
+        // 別ドメインへの集中型リレーが必要な場合、直ちにリレー先URLへブラウザを遷移
+        if (relay_target) {
+          window.location.replace(relay_target);
+          return;
+        }
+
+        // 同一ドメイン上でのログイン完了
         setStatus('success');
         setAuth(user, token);
-        // ダッシュボードへ自動遷移
+
+        let targetPath = '/dashboard';
+        if (returnTo) {
+          try {
+            const urlObj = new URL(returnTo, window.location.origin);
+            if (urlObj.origin === window.location.origin) {
+              targetPath = urlObj.pathname + urlObj.search + urlObj.hash;
+              if (
+                targetPath.startsWith('/login') ||
+                targetPath.startsWith('/auth/callback') ||
+                targetPath.startsWith('/callback')
+              ) {
+                targetPath = '/dashboard';
+              }
+            }
+          } catch {
+            if (returnTo.startsWith('/') && !returnTo.startsWith('/login')) {
+              targetPath = returnTo;
+            }
+          }
+        }
+
         setTimeout(() => {
-          router.push('/dashboard');
+          router.replace(targetPath);
         }, 800);
       })
       .catch((err: any) => {
