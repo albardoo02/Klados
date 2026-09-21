@@ -88,13 +88,20 @@ function preprocessMarkdown(content: string, siteSlug?: string): string {
   // 3. "- *斜体 *" -> "- *斜体*"
   result = result.replace(/^([ \t]*[-*+])([ \t]+)\*([^\n*]+)[ \t]+\*[ \t]*$/gm, '$1$2*$3*');
 
+  // 3.5. 連続する太字デリミタ (**A****B**) の間にゼロ幅スペースを補完して行全体の太字化・構文崩壊を防止
+  result = result.replace(/(\*\*[^\*\n]+?\*\*)(?=\*\*)/g, '$1\u200B');
+
   // 4. Transform ==highlight== to [text](bg:%23fef08a)
   result = result.replace(/==([^=\n]+)==/g, '[$1](bg:%23fef08a)');
 
-  // 5. Transform [text]{color:#hex} or [text]{color:red} or [text]{#hex} or [text]{bg:#hex} or combined
+  // 4.5. Transform <u>text</u> to [text](underline:true)
+  result = result.replace(/<u>([\s\S]*?)<\/u>/gi, '[$1](underline:true)');
+
+  // 5. Transform [text]{color:#hex} or [text]{color:red} or [text]{#hex} or [text]{bg:#hex} or [text]{u} or combined
   result = result.replace(/\[([^\]\n]+)\]\{([^\}\n]+)\}/g, (match, text, attrs) => {
     let color = '';
     let bg = '';
+    let isUnderline = false;
     const directHex = /^\s*#([0-9a-fA-F]{3,8})\s*$/.exec(attrs);
     if (directHex) {
       color = '#' + directHex[1];
@@ -105,8 +112,12 @@ function preprocessMarkdown(content: string, siteSlug?: string): string {
       const bgMatch = /(?:^|[\s;])bg(?:-color)?\s*:\s*([^;\}]+)/i.exec(attrs);
       if (bgMatch) bg = bgMatch[1].trim();
 
+      if (/(?:^|[\s;])(?:u|underline)(?:[\s;\}]|$)/i.test(attrs)) {
+        isUnderline = true;
+      }
+
       const singleColor = /^\s*([a-zA-Z]+)\s*$/.exec(attrs);
-      if (!color && !bg && singleColor) {
+      if (!color && !bg && singleColor && !isUnderline) {
         const c = singleColor[1].toLowerCase();
         const known = ['red', 'blue', 'green', 'yellow', 'purple', 'pink', 'orange', 'gray', 'black', 'white', 'cyan'];
         if (known.includes(c)) color = c;
@@ -116,6 +127,7 @@ function preprocessMarkdown(content: string, siteSlug?: string): string {
     const params: string[] = [];
     if (color) params.push('color:' + encodeURIComponent(color));
     if (bg) params.push('bg:' + encodeURIComponent(bg));
+    if (isUnderline) params.push('underline:true');
 
     if (params.length > 0) {
       return `[${text}](${params.join('&')})`;
@@ -424,10 +436,17 @@ export function MarkdownRenderer({ content, className = '', siteSlug }: Markdown
             );
           },
           a({ href, children, ...props }) {
-            // 文字色・背景色（ハイライト）リンク記号の検知
-            if (href && (href.startsWith('color:') || href.startsWith('bg:'))) {
+            // 文字色・背景色（ハイライト）・下線リンク記号の検知
+            if (
+              href &&
+              (href.startsWith('color:') ||
+                href.startsWith('bg:') ||
+                href.startsWith('underline:') ||
+                href.includes('underline:true'))
+            ) {
               let color: string | undefined;
               let bg: string | undefined;
+              let isUnderline = false;
 
               const parts = href.split('&');
               for (const part of parts) {
@@ -443,6 +462,12 @@ export function MarkdownRenderer({ content, className = '', siteSlug }: Markdown
                   } catch {
                     bg = part.replace(/^bg:/, '');
                   }
+                } else if (
+                  part === 'underline:true' ||
+                  part === 'u:true' ||
+                  part.startsWith('underline:')
+                ) {
+                  isUnderline = true;
                 }
               }
 
@@ -465,10 +490,18 @@ export function MarkdownRenderer({ content, className = '', siteSlug }: Markdown
                   style={{
                     color: safeColor,
                     backgroundColor: safeBg,
+                    textDecoration: isUnderline ? 'underline' : undefined,
+                    textUnderlineOffset: isUnderline ? '3px' : undefined,
                     padding: safeBg ? '0.15em 0.4em' : undefined,
                     borderRadius: safeBg ? '0.25rem' : undefined,
                   }}
-                  className={safeBg ? (safeColor ? 'inline font-medium' : 'inline font-medium text-slate-900 dark:text-slate-100') : 'inline font-medium'}
+                  className={`${
+                    safeBg
+                      ? safeColor
+                        ? 'inline font-medium'
+                        : 'inline font-medium text-slate-900 dark:text-slate-100'
+                      : 'inline font-medium'
+                  } ${isUnderline ? 'underline underline-offset-4 decoration-current' : ''}`}
                 >
                   {children}
                 </span>

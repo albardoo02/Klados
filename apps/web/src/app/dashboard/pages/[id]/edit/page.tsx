@@ -56,6 +56,7 @@ import {
   Table as TableIcon,
   Tag,
   Terminal,
+  Underline,
   UploadCloud,
   X,
 } from 'lucide-react';
@@ -388,31 +389,196 @@ export default function PageEditPage() {
       to = Math.min(lastSelectionRef.current.to, state.doc.length);
     }
 
+    // --- 1. 行頭プレフィックス装飾（見出し, リスト, 引用など after === '' の場合） ---
+    if (after === '') {
+      const line = state.doc.lineAt(from);
+      const lineText = line.text;
+
+      // すでに同じプレフィックスが付いている場合は除去（トグル解除）
+      if (lineText.startsWith(before)) {
+        dispatch({
+          changes: { from: line.from, to: line.from + before.length, insert: '' },
+          selection: { anchor: Math.max(line.from, from - before.length) },
+          scrollIntoView: true,
+        });
+        lastSelectionRef.current = {
+          from: Math.max(line.from, from - before.length),
+          to: Math.max(line.from, from - before.length),
+        };
+        view.focus();
+        return;
+      }
+
+      // 他の見出し(# , ## など)やリスト記号(- , 1. など)が付いている場合は置換
+      const prefixRegex = /^(#{1,6}\s+|[-*+]\s+|\d+\.\s+|>\s+)/;
+      const match = prefixRegex.exec(lineText);
+      if (match) {
+        dispatch({
+          changes: { from: line.from, to: line.from + match[0].length, insert: before },
+          selection: { anchor: from - match[0].length + before.length },
+          scrollIntoView: true,
+        });
+        lastSelectionRef.current = {
+          from: from - match[0].length + before.length,
+          to: from - match[0].length + before.length,
+        };
+      } else {
+        dispatch({
+          changes: { from: line.from, to: line.from, insert: before },
+          selection: { anchor: from + before.length },
+          scrollIntoView: true,
+        });
+        lastSelectionRef.current = {
+          from: from + before.length,
+          to: from + before.length,
+        };
+      }
+      view.focus();
+      return;
+    }
+
+    // --- 2. インライン装飾（before と after の両方がある場合） ---
     const hasUserSelection = from !== to && !replaceRange;
-    let selectedText = hasUserSelection ? state.sliceDoc(from, to) : defaultText;
+    let selectedText = hasUserSelection ? state.sliceDoc(from, to) : '';
 
     // リスト記号（"- ", "* ", "+ ", "1. "など）が含まれている場合、マーカーの外側に書式をかけないよう分離
     let prefix = '';
     const listMatch = /^([ \t]*[-*+]\s+|[ \t]*\d+\.\s+)/.exec(selectedText);
-    if (listMatch && after !== '') {
+    if (listMatch) {
       prefix = listMatch[1];
       selectedText = selectedText.slice(prefix.length);
+      from += prefix.length;
     }
 
-    const replacement = `${prefix}${before}${selectedText}${after}`;
+    // 2-1. 選択範囲そのものが装飾記号で囲まれている場合 (例: ユーザーが **太字** を選択中) -> トグル解除
+    const matchesEnclosing = (text: string, b: string, a: string) => {
+      if (text.length < b.length + a.length) return false;
+      if (!text.startsWith(b) || !text.endsWith(a)) return false;
+      // 斜体 '*' の場合、太字 '**' を誤って斜体解除と見なさない
+      if (b === '*' && text.startsWith('**')) return false;
+      if (a === '*' && text.endsWith('**')) return false;
+      return true;
+    };
 
-    // カーソル位置の決定：
-    // 1) ユーザーが自発的に文字列を選択していた場合: 装飾された文字列を選択状態にして確認できるようにする
-    // 2) デフォルトテキスト挿入時 (スラッシュコマンド等): 全選択にすると直後のキー入力で消滅するため、末尾にキャレットを配置
-    const newCursorPos = from + replacement.length;
-    const selection = hasUserSelection
-      ? {
-          anchor: from + prefix.length + before.length,
-          head: from + prefix.length + before.length + selectedText.length,
+    if (hasUserSelection && matchesEnclosing(selectedText, before, after)) {
+      const unwrapped = selectedText.slice(before.length, selectedText.length - after.length);
+      dispatch({
+        changes: { from, to, insert: unwrapped },
+        selection: { anchor: from, head: from + unwrapped.length },
+        scrollIntoView: true,
+      });
+      lastSelectionRef.current = { from, to: from + unwrapped.length };
+      view.focus();
+      return;
+    }
+
+    // 2-2. 選択範囲の直前・直後が装飾記号である場合 (例: 装飾直後に中身が選択されている場合) -> トグル解除
+    if (hasUserSelection) {
+      const docBefore = from >= before.length ? state.sliceDoc(from - before.length, from) : '';
+      const docAfter = to + after.length <= state.doc.length ? state.sliceDoc(to, to + after.length) : '';
+
+      let isOuterMatch = docBefore === before && docAfter === after;
+      if (isOuterMatch && before === '*') {
+        const outerBefore = from >= 2 ? state.sliceDoc(from - 2, from - 1) : '';
+        const outerAfter = to + 2 <= state.doc.length ? state.sliceDoc(to + 1, to + 2) : '';
+        if (outerBefore === '*' || outerAfter === '*') isOuterMatch = false;
+      }
+
+      if (isOuterMatch) {
+        const targetFrom = from - before.length;
+        const targetTo = to + after.length;
+        dispatch({
+          changes: { from: targetFrom, to: targetTo, insert: selectedText },
+          selection: { anchor: targetFrom, head: targetFrom + selectedText.length },
+          scrollIntoView: true,
+        });
+        lastSelectionRef.current = { from: targetFrom, to: targetFrom + selectedText.length };
+        view.focus();
+        return;
+      }
+    }
+
+    // 2-3. 選択範囲がない（キャレットのみ）場合
+    if (!hasUserSelection) {
+      const line = state.doc.lineAt(from);
+      const lineText = line.text;
+      const offsetInLine = from - line.from;
+
+      // 2-3-1. すでに該当装飾の内側にキャレットがあるか調べる (例: **太|字**) -> トグル解除
+      const bIdx = lineText.lastIndexOf(before, offsetInLine);
+      if (bIdx !== -1) {
+        const aIdx = lineText.indexOf(after, offsetInLine);
+        if (aIdx !== -1 && aIdx >= bIdx + before.length) {
+          let validMatch = true;
+          if (before === '*') {
+            if (
+              lineText[bIdx - 1] === '*' ||
+              lineText[bIdx + 1] === '*' ||
+              lineText[aIdx - 1] === '*' ||
+              lineText[aIdx + 1] === '*'
+            ) {
+              validMatch = false;
+            }
+          }
+          if (validMatch) {
+            const innerText = lineText.slice(bIdx + before.length, aIdx);
+            const targetFrom = line.from + bIdx;
+            const targetTo = line.from + aIdx + after.length;
+            dispatch({
+              changes: { from: targetFrom, to: targetTo, insert: innerText },
+              selection: { anchor: Math.max(targetFrom, from - before.length) },
+              scrollIntoView: true,
+            });
+            lastSelectionRef.current = {
+              from: Math.max(targetFrom, from - before.length),
+              to: Math.max(targetFrom, from - before.length),
+            };
+            view.focus();
+            return;
+          }
         }
-      : {
-          anchor: newCursorPos,
-        };
+      }
+
+      // 2-3-2. キャレット位置の単語を自動検出して選択装飾
+      const beforeCaret = lineText.slice(0, offsetInLine);
+      const afterCaret = lineText.slice(offsetInLine);
+      const wordBeforeMatch = /[\p{L}\p{N}_]+$/u.exec(beforeCaret);
+      const wordAfterMatch = /^[\p{L}\p{N}_]+/u.exec(afterCaret);
+
+      if (wordBeforeMatch || wordAfterMatch) {
+        const wordStart = wordBeforeMatch ? offsetInLine - wordBeforeMatch[0].length : offsetInLine;
+        const wordEnd = wordAfterMatch ? offsetInLine + wordAfterMatch[0].length : offsetInLine;
+        from = line.from + wordStart;
+        to = line.from + wordEnd;
+        selectedText = state.sliceDoc(from, to);
+      } else {
+        selectedText = defaultText;
+      }
+    }
+
+    // 2-4. 太字デリミタ連続 (例: **A****B**) による行全体太字化を防ぐためのスペース補完
+    let leadSpace = '';
+    let trailSpace = '';
+    if (before === '**') {
+      const prevTwo = from >= 2 ? state.sliceDoc(from - 2, from) : '';
+      if (prevTwo === '**') {
+        leadSpace = ' ';
+      }
+      const nextTwo = to + 2 <= state.doc.length ? state.sliceDoc(to, to + 2) : '';
+      if (nextTwo === '**') {
+        trailSpace = ' ';
+      }
+    }
+
+    const replacement = `${prefix}${leadSpace}${before}${selectedText}${after}${trailSpace}`;
+
+    // カーソル位置の決定：中身のテキストを選択状態にして確認・再トグルを可能にする
+    const contentStart = from + prefix.length + leadSpace.length + before.length;
+    const contentEnd = contentStart + selectedText.length;
+    const selection =
+      selectedText.length > 0 && selectedText !== defaultText
+        ? { anchor: contentStart, head: contentEnd }
+        : { anchor: contentStart, head: contentEnd };
 
     dispatch({
       changes: { from, to, insert: replacement },
@@ -420,8 +586,8 @@ export default function PageEditPage() {
       scrollIntoView: true,
     });
     lastSelectionRef.current = {
-      from: newCursorPos,
-      to: newCursorPos,
+      from: selection.anchor,
+      to: selection.head,
     };
     view.focus();
   };
@@ -463,6 +629,34 @@ export default function PageEditPage() {
         description: '詳細な小項目タイトル',
         icon: Heading3,
         action: (range) => insertText('### ', undefined, range),
+      },
+      {
+        id: 'bold',
+        label: '太字 (Bold)',
+        description: 'テキストを太字にする (**テキスト**)',
+        icon: Bold,
+        action: (range) => wrapText('**', '**', '太字テキスト', range),
+      },
+      {
+        id: 'italic',
+        label: '斜体 (Italic)',
+        description: 'テキストを斜体にする (*テキスト*)',
+        icon: Italic,
+        action: (range) => wrapText('*', '*', '斜体テキスト', range),
+      },
+      {
+        id: 'underline',
+        label: '下線 (Underline)',
+        description: 'テキストに下線を引く (<u>テキスト</u>)',
+        icon: Underline,
+        action: (range) => wrapText('<u>', '</u>', '下線テキスト', range),
+      },
+      {
+        id: 'strike',
+        label: '取り消し線',
+        description: 'テキストに取り消し線を引く (~~テキスト~~)',
+        icon: Strikethrough,
+        action: (range) => wrapText('~~', '~~', '打ち消しテキスト', range),
       },
       {
         id: 'highlight',
@@ -1196,10 +1390,36 @@ export default function PageEditPage() {
     ]);
   };
 
+  const getStandardKeymapExtension = () => {
+    return keymap.of([
+      {
+        key: 'Mod-b',
+        run: () => {
+          wrapText('**', '**', '太字テキスト');
+          return true;
+        },
+      },
+      {
+        key: 'Mod-i',
+        run: () => {
+          wrapText('*', '*', '斜体テキスト');
+          return true;
+        },
+      },
+      {
+        key: 'Mod-u',
+        run: () => {
+          wrapText('<u>', '</u>', '下線テキスト');
+          return true;
+        },
+      },
+    ]);
+  };
+
   const getKeybindingExtension = (mode: 'standard' | 'vim' | 'nano') => {
     if (mode === 'vim') return vim();
     if (mode === 'nano') return getNanoKeymapExtension();
-    return [];
+    return getStandardKeymapExtension();
   };
 
   // CodeMirror エディタ初期化
@@ -1803,6 +2023,15 @@ export default function PageEditPage() {
             title="斜体 (Italic)"
           >
             <Italic className="size-4" />
+          </button>
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => wrapText('<u>', '</u>', '下線テキスト')}
+            className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer"
+            title="下線 (Underline)"
+          >
+            <Underline className="size-4" />
           </button>
           <button
             type="button"
