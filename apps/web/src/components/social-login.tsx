@@ -70,11 +70,12 @@ export function SocialLogin({ mode = 'login', onError, config: initialConfig, sh
         const brokerOrigin = getMainPortalUrl(config?.main_domains);
         const redirectUri = `${brokerOrigin}/auth/callback?provider=${provider}`;
 
-        // 呼び出し元の現在のページURL（独自ドメインのWikiやダッシュボード）をstateに安全にエンコード
+        // 呼び出し元の現在のページURL（独自ドメインのWikiやダッシュボード）とプロバイダーをstateに安全にエンコード
         const returnTo = window.location.href;
         const statePayload = {
           n: Math.random().toString(36).slice(2),
           r: returnTo,
+          p: provider,
         };
         const state = btoa(JSON.stringify(statePayload))
           .replace(/\+/g, '-')

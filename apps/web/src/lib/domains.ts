@@ -4,8 +4,8 @@
 
 // 既知のメインCMSドメイン（フォールバック用）
 const DEFAULT_MAIN_DOMAINS = [
-  'klados.azisaba.net',
   'cms.azisaba.net',
+  'klados.azisaba.net',
   'klados.app',
   'localhost',
   '127.0.0.1',
@@ -90,7 +90,7 @@ export function isSystemPath(pathname: string): boolean {
 /**
  * 現在のホストに応じた管理画面・メインポータルのベースURLを取得
  * 独自ドメイン（azipedia.azisaba.net等）から呼び出された場合でも、
- * 集中型OAuthリレーのブローカーとなるメインポータルのURL（https://klados.azisaba.net等）を正確に返します。
+ * 集中型OAuthリレーのブローカーとなるメインポータルのURL（https://cms.azisaba.net等）を正確に返します。
  */
 export function getMainPortalUrl(mainDomainsConfig?: string): string {
   if (typeof window !== 'undefined') {
@@ -99,33 +99,51 @@ export function getMainPortalUrl(mainDomainsConfig?: string): string {
     if (isMainDomain(currentHost)) {
       return window.location.origin;
     }
+
+    // もし現在のホストが *.azisaba.net などの場合、同じ親ドメインを持つメインドメイン（cms.azisaba.net 等）を優先
+    const allMains = getMainDomains();
+    const parts = currentHost.split('.');
+    if (parts.length >= 2) {
+      const parentDomain = parts.slice(-2).join('.');
+      const matched = allMains.find(
+        (d) => d.endsWith(parentDomain) && (d.startsWith('cms.') || d.startsWith('klados.'))
+      );
+      if (matched) {
+        // cms. を最優先
+        const cmsMatch = allMains.find((d) => d.toLowerCase().startsWith('cms.') && d.endsWith(parentDomain));
+        const chosen = cmsMatch || matched;
+        return chosen.startsWith('http') ? chosen : `https://${chosen}`;
+      }
+    }
   }
 
   // 1. 引数で渡された DB 保存のメインドメイン設定 (AuthConfig.main_domains)
   if (mainDomainsConfig) {
-    const first = mainDomainsConfig.split(',')[0].trim();
-    if (first) {
-      return first.startsWith('http') ? first : `https://${first}`;
+    const domains = mainDomainsConfig.split(',').map((s) => s.trim()).filter(Boolean);
+    const cmsFirst = domains.find((d) => d.toLowerCase().startsWith('cms.')) || domains[0];
+    if (cmsFirst) {
+      return cmsFirst.startsWith('http') ? cmsFirst : `https://${cmsFirst}`;
     }
   }
 
   // 2. メモリキャッシュにある動的メインドメイン
   if (dynamicMainDomains.length > 0) {
-    const first = dynamicMainDomains[0];
-    if (first && first !== 'localhost' && first !== '127.0.0.1') {
-      return first.startsWith('http') ? first : `https://${first}`;
+    const cmsFirst = dynamicMainDomains.find((d) => d.toLowerCase().startsWith('cms.')) || dynamicMainDomains[0];
+    if (cmsFirst && cmsFirst !== 'localhost' && cmsFirst !== '127.0.0.1') {
+      return cmsFirst.startsWith('http') ? cmsFirst : `https://${cmsFirst}`;
     }
   }
 
   // 3. 環境変数 (NEXT_PUBLIC_MAIN_DOMAIN / MAIN_DOMAIN)
   const configured = process.env.NEXT_PUBLIC_MAIN_DOMAIN || process.env.MAIN_DOMAIN;
   if (configured) {
-    const first = configured.split(',')[0].trim();
-    if (first) {
-      return first.startsWith('http') ? first : `https://${first}`;
+    const domains = configured.split(',').map((s) => s.trim()).filter(Boolean);
+    const cmsFirst = domains.find((d) => d.toLowerCase().startsWith('cms.')) || domains[0];
+    if (cmsFirst) {
+      return cmsFirst.startsWith('http') ? cmsFirst : `https://${cmsFirst}`;
     }
   }
 
   // 4. デフォルトフォールバック
-  return 'https://klados.azisaba.net';
+  return 'https://cms.azisaba.net';
 }

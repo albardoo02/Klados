@@ -90,19 +90,11 @@ function CallbackContent() {
     }
 
     // 3. OAuthプロバイダーからの直接コールバック（GitHub / Discord等）
-    const provider = searchParams.get('provider') || '';
+    let provider = searchParams.get('provider') || '';
     const code = searchParams.get('code') || '';
     const stateParam = searchParams.get('state') || '';
 
-    setProviderName(provider === 'github' ? 'GitHub' : provider === 'discord' ? 'Discord' : 'OAuth');
-
-    if (!code || !provider) {
-      setStatus('error');
-      setErrorMessage('無効なコールバックURLです。認可コード（code）またはプロバイダー情報が見つかりません。');
-      return;
-    }
-
-    // stateから元のアクセス元（return_to）を復元
+    // stateからプロバイダーおよび元のアクセス元（return_to）を復元
     let returnTo: string | undefined = undefined;
     if (stateParam) {
       try {
@@ -111,10 +103,21 @@ function CallbackContent() {
         const parsed = JSON.parse(atob(b64));
         if (parsed && typeof parsed === 'object') {
           returnTo = parsed.r || parsed.return_to;
+          if (!provider && (parsed.p || parsed.provider)) {
+            provider = parsed.p || parsed.provider;
+          }
         }
       } catch {
         // stateがプレーンUUID等の場合は無視
       }
+    }
+
+    setProviderName(provider === 'github' ? 'GitHub' : provider === 'discord' ? 'Discord' : 'OAuth');
+
+    if (!code || !provider) {
+      setStatus('error');
+      setErrorMessage('無効なコールバックURLです。認可コード（code）またはプロバイダー情報が見つかりません。');
+      return;
     }
 
     // 実際にブラウザがリダイレクトされたパス（/auth/callback または /callback）に合わせて redirect_uri を構成
