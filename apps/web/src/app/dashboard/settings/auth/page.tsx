@@ -11,6 +11,7 @@ import {
 } from '@/lib/api';
 import Link from 'next/link';
 import { useAuthStore } from '@/store/auth';
+import { setDynamicMainDomains } from '@/lib/domains';
 import {
   ShieldCheck,
   Plus,
@@ -32,6 +33,7 @@ import {
   Lock,
   Copy,
   KeyRound,
+  Globe,
 } from 'lucide-react';
 
 interface SiteItem {
@@ -78,6 +80,7 @@ export default function AuthSettingsPage() {
   const [githubClientSecret, setGithubClientSecret] = useState<string>('');
   const [discordClientId, setDiscordClientId] = useState<string>('');
   const [discordClientSecret, setDiscordClientSecret] = useState<string>('');
+  const [mainDomains, setMainDomains] = useState<string>('klados.azisaba.net, cms.azisaba.net');
   const [copiedCallback, setCopiedCallback] = useState<string | null>(null);
   const [configSuccessMsg, setConfigSuccessMsg] = useState<string | null>(null);
 
@@ -98,6 +101,7 @@ export default function AuthSettingsPage() {
         setRestrictToRules(configData.config.restrict_to_rules || false);
         setGithubClientId(configData.config.github_client_id || '');
         setDiscordClientId(configData.config.discord_client_id || '');
+        setMainDomains(configData.config.main_domains || 'klados.azisaba.net, cms.azisaba.net');
       }
     }
   }, [configData, requireEmail]);
@@ -113,6 +117,7 @@ export default function AuthSettingsPage() {
     mutationFn: (data: Partial<AuthConfig>) => authApi.updateAuthConfig(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['auth-config'] });
+      setDynamicMainDomains(mainDomains);
       setConfigSuccessMsg('認証・システム設定を正常に保存しました！');
       setTimeout(() => setConfigSuccessMsg(null), 3500);
     },
@@ -135,6 +140,7 @@ export default function AuthSettingsPage() {
       github_client_secret: githubClientSecret || undefined,
       discord_client_id: discordClientId,
       discord_client_secret: discordClientSecret || undefined,
+      main_domains: mainDomains,
     });
   };
 
@@ -678,6 +684,91 @@ export default function AuthSettingsPage() {
                   className="w-full text-xs font-mono bg-white border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* システム・メインCMSドメイン設定カード (root限定) */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-6">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+              <Globe className="w-5 h-5 text-blue-600" />
+              システム・メインCMSドメイン設定
+              <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-700 bg-amber-100/80 px-2 py-0.5 rounded-full">
+                <Crown className="w-3.5 h-3.5 text-amber-500" /> root限定
+              </span>
+            </h2>
+            <p className="text-xs text-slate-500 mt-1">
+              CMSの管理画面（/dashboard）、ログイン（/login）、共通ポータルとして動作するドメインを指定します。複数ある場合はカンマ（,）で区切って入力してください。ここに登録されたドメインは外部Wikiとしてリライトされず、常にシステム本体として正しく動作します。
+            </p>
+          </div>
+          <button
+            onClick={handleSaveConfig}
+            disabled={updateConfigMutation.isPending}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl shadow-sm transition-colors disabled:opacity-50"
+          >
+            {updateConfigMutation.isPending ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Check className="w-4 h-4" />
+            )}
+            ドメイン設定を保存
+          </button>
+        </div>
+
+        <div className="border border-slate-200 rounded-2xl p-5 bg-slate-50/50 space-y-4">
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">
+              メインドメイン一覧（カンマ区切り）
+            </label>
+            <input
+              type="text"
+              placeholder="klados.azisaba.net, cms.azisaba.net, localhost"
+              value={mainDomains}
+              onChange={(e) => setMainDomains(e.target.value)}
+              className="w-full text-xs font-mono bg-white border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <p className="text-[11px] text-slate-500 mt-1.5">
+              💡 例: <code className="bg-white px-1 py-0.5 rounded border border-slate-200 font-mono text-slate-700">klados.azisaba.net, cms.azisaba.net</code> のように設定すると、どちらのドメインからアクセスしても管理画面やWikiが正しく表示されます。
+            </p>
+          </div>
+
+          {/* 登録中のドメインのチップ表示 */}
+          <div className="pt-2 border-t border-slate-200/80">
+            <span className="text-[11px] font-semibold text-slate-600 block mb-2">
+              現在認識されているメインドメイン:
+            </span>
+            <div className="flex flex-wrap gap-2">
+              {mainDomains
+                .split(',')
+                .map((d) => d.trim().toLowerCase())
+                .filter(Boolean)
+                .map((d) => {
+                  const isCurrent = typeof window !== 'undefined' && window.location.hostname.toLowerCase() === d;
+                  return (
+                    <span
+                      key={d}
+                      className={`inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg border font-mono ${
+                        isCurrent
+                          ? 'bg-blue-50 text-blue-700 border-blue-200 font-semibold'
+                          : 'bg-white text-slate-700 border-slate-200'
+                      }`}
+                    >
+                      <Globe className="w-3 h-3 text-slate-400" />
+                      {d}
+                      {isCurrent && (
+                        <span className="text-[10px] bg-blue-600 text-white px-1.5 py-0.2 rounded-full ml-1">
+                          現在のアクセス
+                        </span>
+                      )}
+                    </span>
+                  );
+                })}
+              {mainDomains.trim() === '' && (
+                <span className="text-xs text-slate-400 italic">未入力（デフォルト: klados.azisaba.net, cms.azisaba.net）</span>
+              )}
             </div>
           </div>
         </div>

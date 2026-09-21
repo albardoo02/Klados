@@ -43,6 +43,7 @@ import { WikiSidebarTree } from '@/components/wiki/wiki-sidebar-tree';
 import { SidebarSection, generateDefaultSidebar } from '@/types/sidebar';
 import { useAuthStore } from '@/store/auth';
 import { getSitePrefix, getSitePageHref, isCustomDomainHost } from '@/lib/site-url';
+import { getMainPortalUrl } from '@/lib/domains';
 
 interface PublicPage {
   id: string;
@@ -793,7 +794,7 @@ export default function SitePageClient() {
               <p className="font-semibold text-slate-700 dark:text-slate-300">💡 サイトと紐付ける手順:</p>
               <ol className="list-decimal list-inside space-y-1.5 text-slate-600 dark:text-slate-400">
                 <li>
-                  <a href="https://cms.azisaba.net" className="text-blue-600 dark:text-blue-400 underline font-medium">CMS管理画面</a> にログイン
+                  <a href={getMainPortalUrl()} className="text-blue-600 dark:text-blue-400 underline font-medium">CMS管理画面</a> にログイン
                 </li>
                 <li>対象サイトの「サイト設定」を開く</li>
                 <li>「カスタムドメイン」欄に <code className="bg-white dark:bg-slate-900 px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-700 font-mono text-blue-600 dark:text-blue-400">{siteSlug}</code> を入力して保存</li>
@@ -801,7 +802,7 @@ export default function SitePageClient() {
             </div>
           )}
           <a
-            href="https://cms.azisaba.net"
+            href={getMainPortalUrl()}
             className="inline-flex items-center justify-center w-full py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-medium text-sm transition-colors shadow-sm cursor-pointer"
           >
             CMS管理画面へ移動

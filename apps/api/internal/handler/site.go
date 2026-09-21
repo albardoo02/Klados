@@ -422,11 +422,15 @@ func (h *SiteHandler) VerifyDomain(c *gin.Context) {
 	cleanCNAME := strings.ToLower(strings.TrimSuffix(cname, "."))
 	cnameTarget := strings.ToLower(strings.TrimSpace(os.Getenv("CNAME_TARGET")))
 	if cnameTarget == "" {
-		cnameTarget = "cms.azisaba.net"
+		if md := strings.TrimSpace(os.Getenv("MAIN_DOMAIN")); md != "" {
+			cnameTarget = strings.Split(md, ",")[0]
+		} else {
+			cnameTarget = "klados.azisaba.net"
+		}
 	}
 	isVerified := cleanCNAME == "cname.klados.app" || cleanCNAME == "klados.app" ||
-		cleanCNAME == cnameTarget || strings.HasSuffix(cleanCNAME, ".azisaba.net") ||
-		strings.HasSuffix(cleanCNAME, ".cfargotunnel.com")
+		cleanCNAME == cnameTarget || cleanCNAME == "cms.azisaba.net" || cleanCNAME == "klados.azisaba.net" ||
+		strings.HasSuffix(cleanCNAME, ".azisaba.net") || strings.HasSuffix(cleanCNAME, ".cfargotunnel.com")
 
 	var message string
 	if isVerified {

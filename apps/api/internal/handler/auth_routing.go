@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -111,6 +112,7 @@ type updateAuthConfigRequest struct {
 	GithubClientSecret       *string `json:"github_client_secret"`
 	DiscordClientID          *string `json:"discord_client_id"`
 	DiscordClientSecret      *string `json:"discord_client_secret"`
+	MainDomains              *string `json:"main_domains"`
 }
 
 // PUT /v1/auth/config (要root認証・認証設定の更新)
@@ -171,6 +173,9 @@ func (h *AuthHandler) UpdateAuthConfig(c *gin.Context) {
 	if req.DiscordClientSecret != nil && strings.TrimSpace(*req.DiscordClientSecret) != "" {
 		cfg.DiscordClientSecret = strings.TrimSpace(*req.DiscordClientSecret)
 	}
+	if req.MainDomains != nil {
+		cfg.MainDomains = strings.TrimSpace(*req.MainDomains)
+	}
 	cfg.UpdatedAt = time.Now()
 
 	if err := h.DB.Save(cfg).Error; err != nil {
@@ -180,8 +185,54 @@ func (h *AuthHandler) UpdateAuthConfig(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"message": "認証設定を更新しました",
+		"message": "認証・システム設定を更新しました",
 		"data":    cfg,
+	})
+}
+
+// GET /v1/system/domains (公開・登録済みメインドメイン一覧の取得)
+func (h *AuthHandler) GetSystemDomains(c *gin.Context) {
+	cfg := h.getOrCreateAuthConfig()
+	domainsSet := make(map[string]bool)
+
+	// デフォルトドメイン
+	domainsSet["klados.azisaba.net"] = true
+	domainsSet["cms.azisaba.net"] = true
+	domainsSet["klados.app"] = true
+	domainsSet["localhost"] = true
+	domainsSet["127.0.0.1"] = true
+
+	// 環境変数 MAIN_DOMAIN
+	if envMD := strings.TrimSpace(os.Getenv("MAIN_DOMAIN")); envMD != "" {
+		for _, d := range strings.Split(envMD, ",") {
+			d = strings.ToLower(strings.TrimSpace(d))
+			if d != "" {
+				domainsSet[d] = true
+			}
+		}
+	}
+
+	// DB保存の MainDomains
+	if cfg.MainDomains != "" {
+		for _, d := range strings.Split(cfg.MainDomains, ",") {
+			d = strings.ToLower(strings.TrimSpace(d))
+			if d != "" {
+				domainsSet[d] = true
+			}
+		}
+	}
+
+	result := make([]string, 0, len(domainsSet))
+	for d := range domainsSet {
+		result = append(result, d)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"domains":      result,
+			"main_domains": cfg.MainDomains,
+		},
 	})
 }
 

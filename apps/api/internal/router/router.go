@@ -157,6 +157,12 @@ func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
 		auth.POST("/resend-verification", authH.ResendVerification)
 	}
 
+	// システム設定 (Public)
+	system := api.Group("/system")
+	{
+		system.GET("/domains", authH.GetSystemDomains)
+	}
+
 	// 認証必須
 	protected := api.Group("")
 	protected.Use(middleware.Auth(cfg.JWTSecret, db))

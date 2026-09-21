@@ -1,17 +1,16 @@
+import { isMainDomain } from './domains';
+
 /**
  * 独自ドメインおよびCMSドメイン配下でのURL生成ヘルパー
  */
 
 export function isCustomDomainHost(siteSlug?: string): boolean {
   if (typeof window !== 'undefined') {
-    const host = window.location.hostname.toLowerCase();
-    return (
-      !['cms.azisaba.net', 'localhost', '127.0.0.1'].includes(host) &&
-      !host.endsWith('.trycloudflare.com')
-    );
+    const host = window.location.hostname;
+    return !isMainDomain(host);
   }
-  // SSRフォールバック: siteSlug にドメイン名形式（ドットを含む）が渡された場合
-  if (siteSlug && siteSlug.includes('.')) {
+  // SSRフォールバック: siteSlug にドメイン名形式（ドットを含む）が渡された場合で、かつメインドメインでない場合
+  if (siteSlug && siteSlug.includes('.') && !isMainDomain(siteSlug)) {
     return true;
   }
   return false;

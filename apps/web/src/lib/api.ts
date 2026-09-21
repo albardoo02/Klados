@@ -75,6 +75,7 @@ export interface AuthConfig {
   discord_client_id?: string;
   discord_client_secret?: string;
   discord_configured?: boolean;
+  main_domains?: string;
   updated_at: string;
 }
 
@@ -178,6 +179,18 @@ export const authApi = {
       headers: { 'Content-Type': 'multipart/form-data' },
     });
   },
+};
+
+// --- System ---
+export const systemApi = {
+  getDomains: () =>
+    api.get<{
+      success: boolean;
+      data: {
+        domains: string[];
+        main_domains: string;
+      };
+    }>('/system/domains'),
 };
 
 // --- Sites ---

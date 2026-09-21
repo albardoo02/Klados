@@ -11,6 +11,7 @@ data:
   MINIO_USE_SSL: "false"
   ALLOW_ORIGINS: "*"
   INTERNAL_API_URL: "http://klados-api:8080/v1"
+  MAIN_DOMAIN: "klados.azisaba.net,cms.azisaba.net"
   ROOT_EMAIL: "admin@azisaba.net"
   ROOT_USERNAME: "admin"
 ---
@@ -289,6 +290,12 @@ spec:
               value: "http://klados-api:8080/v1"
             - name: NEXT_PUBLIC_API_URL
               value: "/v1"
+            - name: MAIN_DOMAIN
+              value: "klados.azisaba.net,cms.azisaba.net"
+            - name: NEXT_PUBLIC_MAIN_DOMAIN
+              value: "klados.azisaba.net,cms.azisaba.net"
+            - name: NODE_TLS_REJECT_UNAUTHORIZED
+              value: "0"
           readinessProbe:
             httpGet:
               path: /login
