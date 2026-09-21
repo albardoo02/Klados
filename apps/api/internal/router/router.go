@@ -213,7 +213,6 @@ func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
 		protected.GET("/pages/:id/versions", pageH.GetVersions)
 		protected.POST("/pages/:id/revert/:ver", pageH.Revert)
 		protected.POST("/pages/:id/restore", pageH.Restore)
-		protected.GET("/pages/:id/comments", commentH.List)
 		protected.POST("/pages/:id/comments", commentH.Create)
 
 		// Comments
