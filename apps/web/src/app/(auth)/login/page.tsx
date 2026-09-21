@@ -7,7 +7,7 @@ import { useTranslations } from 'next-intl';
 import { authApi, AuthConfig } from '@/lib/api';
 import { useAuthStore } from '@/store/auth';
 import { SocialLogin } from '@/components/social-login';
-import { Eye, EyeOff, ShieldCheck } from 'lucide-react';
+import { Eye, EyeOff, ShieldCheck, AlertTriangle, Lock } from 'lucide-react';
 
 export default function LoginPage() {
   const t = useTranslations();
@@ -19,14 +19,44 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [authConfig, setAuthConfig] = useState<AuthConfig | null>(null);
+  const [authMeta, setAuthMeta] = useState<{
+    github_configured?: boolean;
+    discord_configured?: boolean;
+  } | null>(null);
+  const [showAdminEmailForm, setShowAdminEmailForm] = useState(false);
 
   useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('admin') === '1' || params.get('emergency') === '1' || params.get('root') === '1') {
+        setShowAdminEmailForm(true);
+      }
+    }
+
     authApi.getAuthConfig()
-      .then((res) => setAuthConfig(res.data.data.config))
-      .catch(() => setAuthConfig(null));
+      .then((res) => {
+        setAuthConfig(res.data.data.config);
+        setAuthMeta({
+          github_configured: res.data.data.github_configured,
+          discord_configured: res.data.data.discord_configured,
+        });
+      })
+      .catch(() => {
+        setAuthConfig(null);
+        setAuthMeta(null);
+      });
   }, []);
 
-  const enableEmail = authConfig ? (authConfig.enable_email_login ?? true) : true;
+  // 有効かつ設定済みのOAuthが存在するか判定
+  const hasActiveOauth = Boolean(
+    (authConfig?.enable_github_login && authMeta?.github_configured) ||
+    (authConfig?.enable_discord_login && authMeta?.discord_configured) ||
+    authConfig?.enable_google_login
+  );
+
+  // もしOAuthがすべて未設定・利用不可の場合、管理者ロックアウトを防ぐため自動的にメールログインを開放
+  const isEmergencyUnlocked = Boolean(authConfig && !hasActiveOauth);
+  const enableEmail = (authConfig ? (authConfig.enable_email_login ?? true) : true) || isEmergencyUnlocked;
   const allowEmailRegister = authConfig ? (authConfig.allow_email_registration ?? true) : true;
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -77,16 +107,29 @@ export default function LoginPage() {
           </div>
         )}
 
+        {/* 緊急ロックアウト解除バナー */}
+        {isEmergencyUnlocked && (
+          <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-2xl p-4 mb-5 text-xs flex items-start gap-2.5 animate-in fade-in">
+            <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              <p className="font-bold text-amber-950">OAuth未設定による緊急脱出モード発動中</p>
+              <p className="text-[11px] text-amber-800 leading-relaxed">
+                GitHub / Discord の OAuth 接続情報が未設定です。管理者締め出しを防ぐ安全装置により、メールログインが一時開放されています。管理者アカウントでログインして設定を完了してください。
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* ソーシャルログイン */}
         <SocialLogin
           mode="login"
           config={authConfig}
-          showDivider={enableEmail}
+          showDivider={enableEmail || showAdminEmailForm}
           onError={(msg) => setError(msg)}
         />
 
-        {/* メール・パスワードフォーム (有効時のみ表示) */}
-        {enableEmail ? (
+        {/* メール・パスワードフォーム (有効時または管理者手動展開時に表示) */}
+        {(enableEmail || showAdminEmailForm) ? (
           <form
             method="post"
             action="#"
@@ -94,6 +137,21 @@ export default function LoginPage() {
             onSubmit={handleSubmit}
             className="space-y-4"
           >
+            {showAdminEmailForm && !enableEmail && (
+              <div className="flex items-center justify-between pb-1 border-b border-slate-100">
+                <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                  <Lock className="w-3.5 h-3.5 text-blue-600" />
+                  管理者(root)ログイン
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowAdminEmailForm(false)}
+                  className="text-[11px] text-slate-400 hover:text-slate-600 cursor-pointer"
+                >
+                  閉じる
+                </button>
+              </div>
+            )}
             <div>
               <label htmlFor="email" className="block text-sm font-medium mb-1 text-slate-700">
                 {t('auth.email')}
@@ -174,9 +232,21 @@ export default function LoginPage() {
             </button>
           </form>
         ) : (
-          <div className="p-3 bg-slate-100 rounded-xl text-center text-xs text-slate-500 flex items-center justify-center gap-1.5 mt-2">
-            <ShieldCheck className="w-4 h-4 text-emerald-600" />
-            <span>関係者アカウント（Discord / GitHub）でログインしてください</span>
+          <div className="space-y-3 mt-3">
+            <div className="p-3 bg-slate-100 rounded-xl text-center text-xs text-slate-500 flex items-center justify-center gap-1.5">
+              <ShieldCheck className="w-4 h-4 text-emerald-600" />
+              <span>関係者アカウント（Discord / GitHub）でログインしてください</span>
+            </div>
+            <div className="text-center pt-1">
+              <button
+                type="button"
+                onClick={() => setShowAdminEmailForm(true)}
+                className="text-xs text-slate-400 hover:text-slate-700 transition-colors inline-flex items-center gap-1 cursor-pointer"
+              >
+                <Lock className="w-3.5 h-3.5" />
+                管理者(root)としてメールでログイン
+              </button>
+            </div>
           </div>
         )}
 
