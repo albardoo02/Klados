@@ -13,6 +13,7 @@ import { MarkdownRenderer } from '@/components/markdown-renderer';
 import { DiffViewer } from '@/components/diff-viewer';
 import { MediaLibraryModal } from '@/components/media-library-modal';
 import { CommentsDrawer } from '@/components/comments-drawer';
+import { InternalLinkModal } from '@/components/wiki/internal-link-modal';
 import { useAuthStore } from '@/store/auth';
 import { formatMediaRef } from '@/lib/media';
 import { parseMarkdownFrontmatter, appendCategoriesToMarkdown } from '@/lib/markdown-import';
@@ -111,9 +112,31 @@ export default function PageEditPage() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [mediaLibraryOpen, setMediaLibraryOpen] = useState(false);
   const [commentsOpen, setCommentsOpen] = useState(false);
+  const [internalLinkModalOpen, setInternalLinkModalOpen] = useState(false);
+  const [linkInitialText, setLinkInitialText] = useState('');
   const [selectedVersion, setSelectedVersion] = useState<PageVersion | null>(null);
   const [isReverting, setIsReverting] = useState(false);
   const [revertSuccessMsg, setRevertSuccessMsg] = useState<string | null>(null);
+
+  const handleOpenLinkModal = () => {
+    let selText = '';
+    if (viewRef.current) {
+      const { from, to } = viewRef.current.state.selection.main;
+      if (from !== to) {
+        selText = viewRef.current.state.sliceDoc(from, to);
+      } else if (
+        lastSelectionRef.current &&
+        lastSelectionRef.current.from !== lastSelectionRef.current.to
+      ) {
+        selText = viewRef.current.state.sliceDoc(
+          lastSelectionRef.current.from,
+          lastSelectionRef.current.to
+        );
+      }
+    }
+    setLinkInitialText(selText);
+    setInternalLinkModalOpen(true);
+  };
 
   // Markdownファイル読み込み & カテゴリ指定モーダル ステート
   const [mdUploadModal, setMdUploadModal] = useState<{
@@ -722,9 +745,18 @@ export default function PageEditPage() {
       {
         id: 'wikilink',
         label: 'Wiki内部リンク (Wiki Link)',
-        description: 'サイト内別ページへのリンクを挿入 ([[ページ名]])',
+        description: 'サイト内別ページを一覧から検索して挿入 ([[ページ名]])',
         icon: LinkIcon,
-        action: (range) => wrapText('[[', ']]', 'ページ名', range),
+        action: (range) => {
+          if (range && viewRef.current) {
+            viewRef.current.dispatch({
+              changes: { from: range.from, to: range.to, insert: '' },
+              selection: { anchor: range.from },
+            });
+            lastSelectionRef.current = { from: range.from, to: range.from };
+          }
+          handleOpenLinkModal();
+        },
       },
       {
         id: 'code',
@@ -1733,8 +1765,9 @@ export default function PageEditPage() {
         </div>
       )}
 
-      {/* ツールバー */}
-      <header className="flex items-center justify-between px-4 py-2.5 border-b border-border bg-card/80 backdrop-blur-sm z-10 gap-3">
+      {/* 固定上部メニューバー (スクロールしても消失しない) */}
+      <div className="sticky top-0 z-30 shrink-0 bg-background/95 backdrop-blur-sm shadow-xs">
+        <header className="flex items-center justify-between px-4 py-2.5 border-b border-border bg-card/80 backdrop-blur-sm gap-3">
         <div className="flex items-center gap-3 min-w-0 shrink">
           <button
             onClick={() => router.back()}
@@ -1991,7 +2024,7 @@ export default function PageEditPage() {
 
       {/* Markdown 書式ツールバー */}
       {(tab === 'edit' || tab === 'split') && (
-        <div className="relative z-20 flex items-center gap-1 px-4 py-1.5 border-b border-border bg-muted/20 text-xs overflow-visible">
+        <div className="relative z-20 flex items-center gap-1 px-4 py-1.5 border-b border-border bg-muted/20 text-xs overflow-x-auto overflow-y-visible">
           {/* スラッシュコマンド トリガーヒント */}
           <button
             type="button"
@@ -2275,10 +2308,12 @@ export default function PageEditPage() {
           </button>
           <button
             type="button"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => wrapText('[[', ']]', 'ページ名')}
+            onMouseDown={(e) => {
+              e.preventDefault();
+              handleOpenLinkModal();
+            }}
             className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer"
-            title="内部Wikiリンク ([[ページ名]])"
+            title="サイト内ページの内部リンクを検索して挿入 ([[ページ名]])"
           >
             <LinkIcon className="size-4" />
           </button>
@@ -2372,6 +2407,7 @@ export default function PageEditPage() {
           </button>
         </div>
       )}
+      </div>
 
       {/* エディタ & プレビュー本体 */}
       <div className="flex-1 flex overflow-hidden relative" onKeyDown={handleEditorKeyDown}>
@@ -2817,6 +2853,16 @@ export default function PageEditPage() {
           name: currentUser.name,
           avatar: currentUser.avatar,
         }}
+      />
+
+      {/* 内部リンク挿入モーダル */}
+      <InternalLinkModal
+        isOpen={internalLinkModalOpen}
+        onClose={() => setInternalLinkModalOpen(false)}
+        siteId={page?.site_id}
+        currentPageId={id}
+        initialSelectedText={linkInitialText}
+        onInsertLink={(syntax) => insertText(syntax)}
       />
 
       {/* バージョン履歴 & 差分表示モーダル */}
