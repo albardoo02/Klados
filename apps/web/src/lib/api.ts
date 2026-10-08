@@ -32,6 +32,17 @@ api.interceptors.request.use((config) => {
   if (typeof window !== 'undefined') {
     let token = localStorage.getItem('access_token') ?? sessionStorage.getItem('access_token');
     if (!token) {
+      try {
+        const stored = localStorage.getItem('klados-auth');
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (parsed?.state?.token) {
+            token = parsed.state.token;
+          }
+        }
+      } catch {}
+    }
+    if (!token) {
       const match = document.cookie.match(/(?:^|;\s*)access_token=([^;]*)/);
       token = match ? decodeURIComponent(match[1]) : null;
       if (token) {

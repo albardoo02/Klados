@@ -49,9 +49,9 @@ import { SpecialCategoriesView } from '@/components/wiki/special-categories-view
 import { extractCategoriesFromMarkdown } from '@/components/markdown-renderer';
 import { WikiSidebarTree } from '@/components/wiki/wiki-sidebar-tree';
 import { SidebarSection, generateDefaultSidebar } from '@/types/sidebar';
-import { useAuthStore } from '@/store/auth';
+import { useAuthStore, syncAuthFromCookies } from '@/store/auth';
 import { getSitePrefix, getSitePageHref, isCustomDomainHost } from '@/lib/site-url';
-import { getMainPortalUrl } from '@/lib/domains';
+import { getMainPortalUrl, isMainDomain } from '@/lib/domains';
 import { resolveMediaUrl } from '@/lib/media';
 
 interface PublicPage {
@@ -543,10 +543,50 @@ export default function SitePageClient() {
   const [isClientMounted, setIsClientMounted] = useState(false);
   useEffect(() => {
     setIsClientMounted(true);
-  }, []);
+    if (!user || !token) {
+      syncAuthFromCookies();
+    }
+  }, [user, token]);
 
   // ゲスト（非ログイン）判定: クライアントマウント前またはトークン/ユーザー不在時はゲスト
   const isGuest = !isClientMounted || !token || !user;
+
+  // サブドメインや独自ドメイン上での閲覧時、管理画面・アカウント設定へのリンクはメインCMSポータルへ
+  const isCrossHost = isClientMounted && typeof window !== 'undefined' && !isMainDomain(window.location.hostname);
+  const getDashboardHref = (path: string) => {
+    if (isCrossHost) {
+      return `${getMainPortalUrl()}${path}`;
+    }
+    return path;
+  };
+
+  const PortalLink = ({
+    href,
+    className,
+    style,
+    children,
+    onClick,
+  }: {
+    href: string;
+    className?: string;
+    style?: React.CSSProperties;
+    children: React.ReactNode;
+    onClick?: () => void;
+  }) => {
+    const fullHref = getDashboardHref(href);
+    if (isCrossHost) {
+      return (
+        <a href={fullHref} onClick={onClick} className={className} style={style}>
+          {children}
+        </a>
+      );
+    }
+    return (
+      <Link href={fullHref} onClick={onClick} className={className} style={style}>
+        {children}
+      </Link>
+    );
+  };
 
   // 1. PV記録 (Analytics Tracking)
   useEffect(() => {
@@ -1025,7 +1065,7 @@ export default function SitePageClient() {
             {/* ログイン／ダッシュボードへのリンク (ゲスト時とログイン時で最適化) */}
             {isGuest ? (
               <div className="hidden sm:flex items-center gap-2">
-                <Link
+                <PortalLink
                   href="/login"
                   className={`inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-xl border transition-colors ${
                     isDark
@@ -1035,14 +1075,14 @@ export default function SitePageClient() {
                 >
                   <LogIn className="size-3.5 text-slate-400" />
                   <span>ログイン</span>
-                </Link>
-                <Link
+                </PortalLink>
+                <PortalLink
                   href="/register"
                   className="inline-flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-xl text-white shadow-2xs hover:opacity-90 transition-opacity"
                   style={{ backgroundColor: brandPrimaryColor }}
                 >
                   <span>新規登録</span>
-                </Link>
+                </PortalLink>
               </div>
             ) : (
               <div className="flex items-center gap-2">
@@ -1115,34 +1155,34 @@ export default function SitePageClient() {
                       </div>
 
                       <div className="py-1">
-                        <Link
+                        <PortalLink
                           href="/dashboard/settings/profile"
                           onClick={() => setUserMenuOpen(false)}
                           className="flex items-center gap-2.5 px-4 py-2 text-xs hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
                         >
                           <User className="size-3.5 text-slate-400" />
                           <span className="font-medium">アカウント設定</span>
-                        </Link>
+                        </PortalLink>
 
                         {canEdit && site.id && site.id !== 'demo-site' && (
-                          <Link
+                          <PortalLink
                             href={`/dashboard/sites/${site.id}`}
                             onClick={() => setUserMenuOpen(false)}
                             className="flex items-center gap-2.5 px-4 py-2 text-xs hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
                           >
                             <FolderKanban className="size-3.5 text-slate-400" />
                             <span>サイト管理</span>
-                          </Link>
+                          </PortalLink>
                         )}
 
-                        <Link
+                        <PortalLink
                           href="/dashboard"
                           onClick={() => setUserMenuOpen(false)}
                           className="flex items-center gap-2.5 px-4 py-2 text-xs hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
                         >
                           <Settings className="size-3.5 text-slate-400" />
                           <span>ダッシュボード</span>
-                        </Link>
+                        </PortalLink>
                       </div>
 
                       <div className="border-t border-slate-100 dark:border-slate-800 pt-1">
@@ -1334,15 +1374,15 @@ export default function SitePageClient() {
                   </div>
                   {isGuest ? (
                     <div className="space-y-1.5 pt-1">
-                      <Link
+                      <PortalLink
                         href="/login"
                         onClick={() => setMobileMenuOpen(false)}
                         className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium border border-border text-foreground hover:bg-muted transition-colors"
                       >
                         <LogIn className="size-4 text-primary" />
                         <span>ログイン</span>
-                      </Link>
-                      <Link
+                      </PortalLink>
+                      <PortalLink
                         href="/register"
                         onClick={() => setMobileMenuOpen(false)}
                         className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium text-white shadow-xs transition-opacity hover:opacity-90"
@@ -1350,7 +1390,7 @@ export default function SitePageClient() {
                       >
                         <UserPlus className="size-4" />
                         <span>新規アカウント登録</span>
-                      </Link>
+                      </PortalLink>
                     </div>
                   ) : (
                     <div className="space-y-2">
@@ -1371,7 +1411,7 @@ export default function SitePageClient() {
                           <ChevronRight className="size-4 opacity-75" />
                         </button>
                       )}
-                      <Link
+                      <PortalLink
                         href="/dashboard/settings/profile"
                         onClick={() => setMobileMenuOpen(false)}
                         className="flex items-center justify-between px-3 py-2 rounded-xl text-sm font-medium border border-border text-foreground hover:bg-muted transition-colors"
@@ -1381,8 +1421,8 @@ export default function SitePageClient() {
                           <span>アカウント設定</span>
                         </div>
                         <ChevronRight className="size-4 text-muted-foreground" />
-                      </Link>
-                      <Link
+                      </PortalLink>
+                      <PortalLink
                         href={canEdit && site.id && site.id !== 'demo-site' ? `/dashboard/sites/${site.id}` : '/dashboard'}
                         onClick={() => setMobileMenuOpen(false)}
                         className="flex items-center justify-between px-3 py-2 rounded-xl text-sm font-medium border border-border text-foreground hover:bg-muted transition-colors"
@@ -1392,7 +1432,21 @@ export default function SitePageClient() {
                           <span>{canEdit ? 'サイト管理' : 'ダッシュボード'}</span>
                         </div>
                         <ChevronRight className="size-4 text-muted-foreground" />
-                      </Link>
+                      </PortalLink>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMobileMenuOpen(false);
+                          clearAuth();
+                          window.location.reload();
+                        }}
+                        className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-sm font-medium border border-red-200 dark:border-red-900/40 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors cursor-pointer"
+                      >
+                        <div className="flex items-center gap-2">
+                          <LogOut className="size-4" />
+                          <span>ログアウト</span>
+                        </div>
+                      </button>
                     </div>
                   )}
                 </div>

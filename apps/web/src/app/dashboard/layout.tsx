@@ -3,7 +3,7 @@
 import { useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
-import { useAuthStore } from '@/store/auth';
+import { useAuthStore, syncAuthFromCookies } from '@/store/auth';
 import { useEffect, useState, useRef } from 'react';
 import { CommandPalette } from '@/components/command-palette';
 import { LocaleSwitcher } from '@/components/locale-switcher';
@@ -26,7 +26,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const t = useTranslations();
   const router = useRouter();
   const pathname = usePathname();
-  const { user, clearAuth, updateUser } = useAuthStore();
+  const { user, token, clearAuth, updateUser } = useAuthStore();
+  const [authReady, setAuthReady] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
@@ -62,8 +63,22 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   };
 
   useEffect(() => {
-    if (!user) router.push('/login');
-  }, [user, router]);
+    // 1. ストアにユーザー情報とトークンが既に存在する場合
+    if (user && token) {
+      setAuthReady(true);
+      return;
+    }
+
+    // 2. Cookie / Storage からの復元を試行
+    const recovered = syncAuthFromCookies();
+    if (recovered.user && recovered.token) {
+      setAuthReady(true);
+      return;
+    }
+
+    // 3. ストレージ・Cookieの全探索後も未認証の場合のみログイン画面へリダイレクト
+    router.push('/login');
+  }, [user, token, router]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -80,7 +95,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     router.push('/login');
   };
 
-  if (!user) return null;
+  if (!authReady || !user) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="size-8 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">

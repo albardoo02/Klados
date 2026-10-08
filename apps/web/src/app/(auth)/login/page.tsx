@@ -12,7 +12,7 @@ import { Eye, EyeOff, ShieldCheck, AlertTriangle, Lock } from 'lucide-react';
 export default function LoginPage() {
   const t = useTranslations();
   const router = useRouter();
-  const setAuth = useAuthStore((s) => s.setAuth);
+  const { user, token, setAuth } = useAuthStore();
   const [form, setForm] = useState({ email: '', password: '' });
   const [rememberMe, setRememberMe] = useState(false);
   const [error, setError] = useState('');
@@ -24,6 +24,20 @@ export default function LoginPage() {
     discord_configured?: boolean;
   } | null>(null);
   const [showAdminEmailForm, setShowAdminEmailForm] = useState(false);
+
+  useEffect(() => {
+    if (user && token) {
+      if (typeof window !== 'undefined') {
+        const params = new URLSearchParams(window.location.search);
+        const returnTo = params.get('return_to');
+        if (returnTo && returnTo.startsWith('/') && !returnTo.startsWith('/login')) {
+          router.replace(returnTo);
+          return;
+        }
+      }
+      router.replace('/dashboard');
+    }
+  }, [user, token, router]);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
