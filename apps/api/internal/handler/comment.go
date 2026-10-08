@@ -43,14 +43,13 @@ func (h *CommentHandler) List(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": comments})
 }
 
-// Create comment for a page as authenticated user
+// Create comment for a page (authenticated or guest)
 func (h *CommentHandler) Create(c *gin.Context) {
 	pageID := c.Param("id")
 	userIDStr := c.GetString("user_id")
-	userUID, err := uuid.Parse(userIDStr)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
-		return
+	var userUID *uuid.UUID
+	if uid, err := uuid.Parse(userIDStr); err == nil && uid != uuid.Nil {
+		userUID = &uid
 	}
 
 	var page model.Page
@@ -67,21 +66,25 @@ func (h *CommentHandler) Create(c *gin.Context) {
 
 	authorName := strings.TrimSpace(req.AuthorName)
 	if authorName == "" {
-		var user model.User
-		if err := h.DB.Where("id = ?", userUID).First(&user).Error; err == nil {
-			if user.DisplayName != "" {
-				authorName = user.DisplayName
+		if userUID != nil {
+			var user model.User
+			if err := h.DB.Where("id = ?", *userUID).First(&user).Error; err == nil {
+				if user.DisplayName != "" {
+					authorName = user.DisplayName
+				} else {
+					authorName = user.Username
+				}
 			} else {
-				authorName = user.Username
+				authorName = "認証ユーザー"
 			}
 		} else {
-			authorName = "Authenticated User"
+			authorName = "ゲスト"
 		}
 	}
 
 	comment := &model.Comment{
 		PageID:     page.ID,
-		UserID:     &userUID,
+		UserID:     userUID,
 		AuthorName: authorName,
 		Content:    strings.TrimSpace(req.Content),
 	}

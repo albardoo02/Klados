@@ -44,6 +44,7 @@ import { SidebarSection, generateDefaultSidebar } from '@/types/sidebar';
 import { useAuthStore } from '@/store/auth';
 import { getSitePrefix, getSitePageHref, isCustomDomainHost } from '@/lib/site-url';
 import { getMainPortalUrl } from '@/lib/domains';
+import { resolveMediaUrl } from '@/lib/media';
 
 interface PublicPage {
   id: string;
@@ -756,8 +757,8 @@ export default function SitePageClient() {
     site.description ||
     `${site.title} の公開Markdownコンテンツ`;
   const ogTitle = site.settings?.ogp_title || pageTitle;
-  const ogImage = site.settings?.ogp_image || '';
-  const favicon = site.settings?.favicon || '/favicon.ico';
+  const ogImage = resolveMediaUrl(site.settings?.ogp_image) || '';
+  const favicon = resolveMediaUrl(site.settings?.favicon) || '/favicon.ico';
 
   useEffect(() => {
     if (typeof document !== 'undefined') {

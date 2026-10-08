@@ -5,6 +5,7 @@ import { sitesApi, pagesApi, downloadSiteZip, SiteSettingsData } from '@/lib/api
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useState, useEffect } from 'react';
+import { resolveMediaUrl } from '@/lib/media';
 import { MediaLibraryModal } from '@/components/media-library-modal';
 import {
   ArrowLeft,
@@ -907,7 +908,7 @@ export default function SiteSettingsPage() {
                 <div className="aspect-[1.91/1] w-full bg-muted/40 relative flex items-center justify-center overflow-hidden">
                   {form.settings?.ogp_image ? (
                     <img
-                      src={form.settings.ogp_image}
+                      src={resolveMediaUrl(form.settings.ogp_image)}
                       alt="OGP Preview"
                       className="w-full h-full object-cover"
                     />

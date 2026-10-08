@@ -142,8 +142,9 @@ func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
 	api.GET("/media/:id/content", mediaH.ServeByID)
 	api.GET("/media/file/*key", mediaH.ServeFile)
 
-	// Public comments list
+	// Public comments list & creation (with optional auth)
 	api.GET("/pages/:id/comments", commentH.List)
+	api.POST("/pages/:id/comments", middleware.OptionalAuth(cfg.JWTSecret, db), commentH.Create)
 
 	// 認証 (Public)
 	auth := api.Group("/auth")
@@ -218,6 +219,10 @@ func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
 
 		// Comments
 		protected.DELETE("/comments/:id", commentH.Delete)
+		protected.DELETE("/pages/:id/comments/:commentId", func(c *gin.Context) {
+			c.Params = gin.Params{{Key: "id", Value: c.Param("commentId")}}
+			commentH.Delete(c)
+		})
 
 		// API Keys
 		protected.GET("/api-keys", apiKeyH.List)

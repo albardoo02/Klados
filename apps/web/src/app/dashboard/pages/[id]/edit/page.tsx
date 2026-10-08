@@ -1713,11 +1713,15 @@ export default function PageEditPage() {
     ? viewRef.current.state.doc.toString()
     : page?.content || '';
 
-  const publicUrl = site?.slug
+  const publicUrl = site?.custom_domain
     ? page?.slug === 'index' || page?.slug === 'home' || !page?.slug
-      ? `/sites/${site.slug}`
-      : `/sites/${site.slug}/${page.slug}`
-    : null;
+      ? `https://${site.custom_domain}`
+      : `https://${site.custom_domain}/${page.slug}`
+    : site?.slug
+      ? page?.slug === 'index' || page?.slug === 'home' || !page?.slug
+        ? `/sites/${site.slug}`
+        : `/sites/${site.slug}/${page.slug}`
+      : null;
 
   return (
     <div className="h-screen flex flex-col bg-background text-foreground">
@@ -1730,24 +1734,24 @@ export default function PageEditPage() {
       )}
 
       {/* ツールバー */}
-      <header className="flex items-center justify-between px-4 py-2.5 border-b border-border bg-card/80 backdrop-blur-sm z-10">
-        <div className="flex items-center gap-3">
+      <header className="flex items-center justify-between px-4 py-2.5 border-b border-border bg-card/80 backdrop-blur-sm z-10 gap-3">
+        <div className="flex items-center gap-3 min-w-0 shrink">
           <button
             onClick={() => router.back()}
-            className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors cursor-pointer px-2 py-1 rounded hover:bg-muted"
+            className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors cursor-pointer px-2 py-1 rounded hover:bg-muted shrink-0"
           >
             <ArrowLeft className="size-4" />
             <span className="hidden sm:inline">戻る</span>
           </button>
-          <div className="h-4 w-px bg-border hidden sm:block" />
-          <div className="flex flex-col">
-            <span className="font-semibold text-sm leading-tight">
+          <div className="h-4 w-px bg-border hidden sm:block shrink-0" />
+          <div className="flex flex-col min-w-0">
+            <span className="font-semibold text-sm leading-tight truncate max-w-[180px] sm:max-w-[260px] md:max-w-[340px]">
               {page?.title ?? '読み込み中...'}
             </span>
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              {site && <span>{site.title}</span>}
-              {page?.slug && <span>/{page.slug}</span>}
-              <span className="inline-flex items-center gap-1">
+            <div className="flex items-center gap-2 text-xs text-muted-foreground truncate">
+              {site && <span className="truncate">{site.title}</span>}
+              {page?.slug && <span className="shrink-0">/{page.slug}</span>}
+              <span className="inline-flex items-center gap-1 shrink-0">
                 {saved ? (
                   <>
                     <Check className="size-3 text-emerald-500" />
@@ -1762,9 +1766,9 @@ export default function PageEditPage() {
         </div>
 
         {/* コラボレーター アバター表示 & ツール群 */}
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           {/* コラボレーター アバター一覧 */}
-          <div className="flex items-center gap-1.5 pl-2">
+          <div className="flex items-center gap-1.5 pl-1 shrink-0">
             <div className="flex -space-x-2 overflow-hidden items-center">
               {collaborators.map((c) => {
                 const initial = c.name.charAt(0).toUpperCase() || 'U';
@@ -1772,7 +1776,7 @@ export default function PageEditPage() {
                   <div
                     key={c.id}
                     title={`${c.name} (編集中)`}
-                    className={`size-7 rounded-full flex items-center justify-center text-[10px] font-bold border-2 ring-1 ring-background shadow-xs transition-transform hover:scale-110 cursor-default ${c.color}`}
+                    className={`size-7 rounded-full flex items-center justify-center text-[10px] font-bold border-2 ring-1 ring-background shadow-xs transition-transform hover:scale-110 cursor-default shrink-0 ${c.color}`}
                   >
                     {initial}
                   </div>
@@ -1780,21 +1784,21 @@ export default function PageEditPage() {
               })}
             </div>
             {collaborators.length > 1 && (
-              <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-800">
+              <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-800 whitespace-nowrap shrink-0">
                 <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
                 <span className="hidden md:inline">{collaborators.length}人が編集</span>
               </span>
             )}
           </div>
 
-          <div className="h-4 w-px bg-border hidden sm:block" />
+          <div className="h-4 w-px bg-border hidden sm:block shrink-0" />
 
           {/* キーバインド切り替え (通常 / Vim / nano) */}
-          <div className="flex border border-border rounded-lg overflow-hidden text-xs bg-muted/20 p-0.5">
+          <div className="flex border border-border rounded-lg overflow-hidden text-xs bg-muted/20 p-0.5 whitespace-nowrap shrink-0">
             <button
               type="button"
               onClick={() => handleToggleKeybinding('standard')}
-              className={`px-2 py-1 rounded transition-colors cursor-pointer text-[11px] font-medium ${
+              className={`px-2 py-1 rounded transition-colors cursor-pointer text-[11px] font-medium whitespace-nowrap shrink-0 ${
                 keybinding === 'standard'
                   ? 'bg-background shadow-xs text-foreground'
                   : 'text-muted-foreground hover:text-foreground'
@@ -1806,27 +1810,27 @@ export default function PageEditPage() {
             <button
               type="button"
               onClick={() => handleToggleKeybinding('vim')}
-              className={`px-2 py-1 rounded transition-colors cursor-pointer text-[11px] font-medium flex items-center gap-1 ${
+              className={`px-2 py-1 rounded transition-colors cursor-pointer text-[11px] font-medium flex items-center gap-1 whitespace-nowrap shrink-0 ${
                 keybinding === 'vim'
                   ? 'bg-primary text-primary-foreground shadow-xs font-bold'
                   : 'text-muted-foreground hover:text-foreground'
               }`}
               title="Vim キーバインド (Normal, Insert, Visualモード対応)"
             >
-              <Terminal className="size-3" />
+              <Terminal className="size-3 shrink-0" />
               <span>Vim</span>
             </button>
             <button
               type="button"
               onClick={() => handleToggleKeybinding('nano')}
-              className={`px-2 py-1 rounded transition-colors cursor-pointer text-[11px] font-medium flex items-center gap-1 ${
+              className={`px-2 py-1 rounded transition-colors cursor-pointer text-[11px] font-medium flex items-center gap-1 whitespace-nowrap shrink-0 ${
                 keybinding === 'nano'
                   ? 'bg-emerald-600 text-white shadow-xs font-bold'
                   : 'text-muted-foreground hover:text-foreground'
               }`}
               title="GNU nano キーバインド (^O: 保存, ^K: 切り取り, ^U: 貼り付け, ^W: 検索, ^X: 終了)"
             >
-              <Terminal className="size-3" />
+              <Terminal className="size-3 shrink-0" />
               <span>nano</span>
             </button>
           </div>
@@ -1835,10 +1839,10 @@ export default function PageEditPage() {
           <button
             type="button"
             onClick={() => setCommentsOpen(true)}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground border border-border hover:bg-muted rounded-lg transition-colors cursor-pointer relative"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground border border-border hover:bg-muted rounded-lg transition-colors cursor-pointer relative whitespace-nowrap shrink-0"
             title="コメント & フィードバックを開く"
           >
-            <MessageSquare className="size-3.5" />
+            <MessageSquare className="size-3.5 shrink-0" />
             <span className="hidden md:inline">コメント</span>
             {commentList.length > 0 && (
               <span className="size-4 rounded-full bg-primary text-primary-foreground text-[10px] font-bold flex items-center justify-center -mr-1">
@@ -1854,10 +1858,10 @@ export default function PageEditPage() {
               setSelectedVersion(null);
               setHistoryOpen(true);
             }}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground border border-border hover:bg-muted rounded-lg transition-colors cursor-pointer"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground border border-border hover:bg-muted rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0"
             title="変更履歴と差分を表示"
           >
-            <HistoryIcon className="size-3.5" />
+            <HistoryIcon className="size-3.5 shrink-0" />
             <span className="hidden md:inline">履歴</span>
           </button>
 
@@ -1865,19 +1869,19 @@ export default function PageEditPage() {
           <button
             type="button"
             onClick={() => setMediaLibraryOpen(true)}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground border border-border hover:bg-muted rounded-lg transition-colors cursor-pointer"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground border border-border hover:bg-muted rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0"
             title="サイトのメディア一覧を開く"
           >
-            <Images className="size-3.5" />
+            <Images className="size-3.5 shrink-0" />
             <span className="hidden md:inline">メディア</span>
           </button>
 
           {/* MDファイル読み込みボタン */}
           <label
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground border border-border hover:bg-muted rounded-lg transition-colors cursor-pointer"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground border border-border hover:bg-muted rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0"
             title="手元の .md ファイルを読み込んでエディタに反映 (カテゴリ指定可能)"
           >
-            <UploadCloud className="size-3.5" />
+            <UploadCloud className="size-3.5 shrink-0" />
             <span className="hidden md:inline">MD読込</span>
             <input
               type="file"
@@ -1899,50 +1903,50 @@ export default function PageEditPage() {
               href={publicUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground border border-border hover:bg-muted rounded-lg transition-colors"
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground border border-border hover:bg-muted rounded-lg transition-colors whitespace-nowrap shrink-0"
               title="公開ページを別タブで確認"
             >
-              <ExternalLink className="size-3.5" />
+              <ExternalLink className="size-3.5 shrink-0" />
               <span className="hidden lg:inline">公開サイト</span>
             </Link>
           )}
 
           {/* ビュー切り替えタブ */}
-          <div className="flex border border-border rounded-lg overflow-hidden text-xs bg-muted/30 p-0.5">
+          <div className="flex border border-border rounded-lg overflow-hidden text-xs bg-muted/30 p-0.5 whitespace-nowrap shrink-0">
             <button
               onClick={() => setTab('edit')}
-              className={`flex items-center gap-1 px-3 py-1 rounded-md transition-all cursor-pointer ${
+              className={`flex items-center gap-1 px-3 py-1 rounded-md transition-all cursor-pointer whitespace-nowrap shrink-0 ${
                 tab === 'edit'
                   ? 'bg-background shadow-xs text-foreground font-medium'
                   : 'text-muted-foreground hover:text-foreground'
               }`}
               title="編集のみ"
             >
-              <FileEdit className="size-3.5" />
+              <FileEdit className="size-3.5 shrink-0" />
               <span className="hidden sm:inline">編集</span>
             </button>
             <button
               onClick={() => setTab('split')}
-              className={`flex items-center gap-1 px-3 py-1 rounded-md transition-all cursor-pointer ${
+              className={`flex items-center gap-1 px-3 py-1 rounded-md transition-all cursor-pointer whitespace-nowrap shrink-0 ${
                 tab === 'split'
                   ? 'bg-background shadow-xs text-foreground font-medium'
                   : 'text-muted-foreground hover:text-foreground'
               }`}
               title="分割プレビュー"
             >
-              <Columns className="size-3.5" />
+              <Columns className="size-3.5 shrink-0" />
               <span className="hidden sm:inline">分割</span>
             </button>
             <button
               onClick={() => setTab('preview')}
-              className={`flex items-center gap-1 px-3 py-1 rounded-md transition-all cursor-pointer ${
+              className={`flex items-center gap-1 px-3 py-1 rounded-md transition-all cursor-pointer whitespace-nowrap shrink-0 ${
                 tab === 'preview'
                   ? 'bg-background shadow-xs text-foreground font-medium'
                   : 'text-muted-foreground hover:text-foreground'
               }`}
               title="プレビューのみ"
             >
-              <Eye className="size-3.5" />
+              <Eye className="size-3.5 shrink-0" />
               <span className="hidden sm:inline">プレビュー</span>
             </button>
           </div>
@@ -1950,12 +1954,12 @@ export default function PageEditPage() {
           <button
             onClick={handleManualSave}
             disabled={saved || updateMutation.isPending}
-            className="flex items-center gap-1 px-3 py-1.5 text-xs bg-secondary hover:bg-secondary/80 text-secondary-foreground rounded-lg disabled:opacity-40 transition-colors font-medium cursor-pointer"
+            className="flex items-center gap-1 px-3 py-1.5 text-xs bg-secondary hover:bg-secondary/80 text-secondary-foreground rounded-lg disabled:opacity-40 transition-colors font-medium cursor-pointer whitespace-nowrap shrink-0"
           >
             {updateMutation.isPending ? (
-              <Loader2 className="size-3.5 animate-spin" />
+              <Loader2 className="size-3.5 animate-spin shrink-0" />
             ) : (
-              <Save className="size-3.5" />
+              <Save className="size-3.5 shrink-0" />
             )}
             <span>保存</span>
           </button>
@@ -1965,17 +1969,17 @@ export default function PageEditPage() {
               publishMutation.mutate(page?.status === 'published' ? 'draft' : 'published')
             }
             disabled={publishMutation.isPending}
-            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors cursor-pointer ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
               page?.status === 'published'
                 ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
                 : 'bg-primary hover:bg-primary/90 text-primary-foreground'
             }`}
           >
             {publishMutation.isPending ? (
-              <Loader2 className="size-3.5 animate-spin" />
+              <Loader2 className="size-3.5 animate-spin shrink-0" />
             ) : page?.status === 'published' ? (
               <>
-                <Check className="size-3.5" />
+                <Check className="size-3.5 shrink-0" />
                 <span>公開中</span>
               </>
             ) : (

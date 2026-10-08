@@ -65,6 +65,29 @@ func Auth(jwtSecret string, dbs ...*gorm.DB) gin.HandlerFunc {
 	}
 }
 
+func OptionalAuth(jwtSecret string, dbs ...*gorm.DB) gin.HandlerFunc {
+	var db *gorm.DB
+	if len(dbs) > 0 {
+		db = dbs[0]
+	}
+
+	return func(c *gin.Context) {
+		token := extractToken(c)
+		if token != "" {
+			claims := jwt.MapClaims{}
+			t, err := jwt.ParseWithClaims(token, claims, func(t *jwt.Token) (interface{}, error) {
+				return []byte(jwtSecret), nil
+			})
+			if err == nil && t.Valid {
+				c.Set("user_id", claims["sub"])
+			} else if authenticateAPIKey(c, db, token) {
+				// authenticated via API key
+			}
+		}
+		c.Next()
+	}
+}
+
 func authenticateAPIKey(c *gin.Context, db *gorm.DB, token string) bool {
 	if db == nil || strings.TrimSpace(token) == "" {
 		return false
