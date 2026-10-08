@@ -1,8 +1,9 @@
 'use client';
 
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { useAuthStore } from '@/store/auth';
 import { NextIntlClientProvider } from 'next-intl';
 import { LocaleProvider, useLocale } from '@/store/locale';
 import { defaultTimeZone, type Locale } from '@/i18n/config';
@@ -39,6 +40,26 @@ function IntlWrapper({ children }: { children: React.ReactNode }) {
   );
 }
 
+/**
+ * ログインユーザーが切り替わった（ログアウト／別ユーザーでログイン）際に
+ * React Query のキャッシュを破棄し、前ユーザーのデータ（サイト一覧など）が
+ * staleTime の間使い回されるのを防ぐ。
+ */
+function AuthCacheSync() {
+  const queryClient = useQueryClient();
+  const userId = useAuthStore((s) => s.user?.id ?? null);
+  const prevUserId = useRef<string | null | undefined>(undefined);
+
+  useEffect(() => {
+    if (prevUserId.current !== undefined && prevUserId.current !== userId) {
+      queryClient.clear();
+    }
+    prevUserId.current = userId;
+  }, [userId, queryClient]);
+
+  return null;
+}
+
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(
     () =>
@@ -54,6 +75,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
   return (
     <QueryClientProvider client={queryClient}>
+      <AuthCacheSync />
       <LocaleProvider>
         <IntlWrapper>
           {children}

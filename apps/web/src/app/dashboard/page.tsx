@@ -27,8 +27,10 @@ export default function DashboardPage() {
   const isRoot = user?.is_root ?? false;
 
   const { data, isLoading } = useQuery({
-    queryKey: ['sites'],
+    // ユーザーごとにキャッシュを分離（別ユーザーでログインし直した際に前ユーザーの一覧を表示しない）
+    queryKey: ['sites', user?.id],
     queryFn: () => sitesApi.list().then((r) => r.data.data as Site[]),
+    enabled: !!user,
   });
 
   // 認証設定の取得（サイト作成ポリシー参照用）
