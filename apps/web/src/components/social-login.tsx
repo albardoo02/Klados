@@ -52,7 +52,12 @@ export function SocialLogin({ mode = 'login', onError, config: initialConfig, sh
       setAuth(res.data.data.user, res.data.data.token);
       router.push('/dashboard');
     } catch (err: any) {
-      const msg = err?.response?.data?.error || t('demo_error');
+      const msg =
+        err?.response?.data?.error ||
+        err?.response?.data?.message ||
+        (err?.response?.status ? `APIエラー (HTTP ${err.response.status})` : '') ||
+        (err?.message ? `接続エラー (${err.message})` : '') ||
+        t('demo_error');
       onError?.(msg);
       setLoadingType(null);
     }
@@ -110,7 +115,12 @@ export function SocialLogin({ mode = 'login', onError, config: initialConfig, sh
       setAuth(res.data.data.user, res.data.data.token);
       router.push('/dashboard');
     } catch (err: any) {
-      const msg = err?.response?.data?.error || t('oauth_error');
+      const msg =
+        err?.response?.data?.error ||
+        err?.response?.data?.message ||
+        (err?.response?.status ? `APIエラー (HTTP ${err.response.status})` : '') ||
+        (err?.message ? `接続エラー (${err.message})` : '') ||
+        t('oauth_error');
       onError?.(msg);
       setLoadingType(null);
     }

@@ -83,8 +83,20 @@ export default function LoginPage() {
 
       router.push('/dashboard');
     } catch (err: unknown) {
-      const e = err as { response?: { data?: { error?: string } } };
-      setError(e.response?.data?.error ?? t('auth.login.error_default'));
+      const e = err as {
+        message?: string;
+        response?: {
+          status?: number;
+          data?: { error?: string; message?: string } | string;
+        };
+      };
+      const apiError =
+        typeof e.response?.data === 'object'
+          ? (e.response.data.error || e.response.data.message)
+          : undefined;
+      const statusText = e.response?.status ? ` (HTTP ${e.response.status})` : '';
+      const netMsg = !e.response ? ` (${e.message || 'API通信不可'})` : '';
+      setError(apiError || `${t('auth.login.error_default')}${statusText}${netMsg}`);
     } finally {
       setLoading(false);
     }
