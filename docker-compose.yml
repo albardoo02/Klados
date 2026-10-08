@@ -30,8 +30,11 @@ services:
       retries: 5
 
   minio:
-    image: quay.io/minio/minio:latest
-    pull_policy: if_not_present
+    build:
+      context: ./docker/minio
+      dockerfile: Dockerfile
+    image: klados-minio:latest
+    pull_policy: never
     container_name: klados-minio
     command: server /data --console-address ":9001"
     environment:
