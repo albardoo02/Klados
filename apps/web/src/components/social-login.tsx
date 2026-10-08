@@ -68,7 +68,7 @@ export function SocialLogin({ mode = 'login', onError, config: initialConfig, sh
     try {
       if (provider === 'github' || provider === 'discord') {
         const brokerOrigin = getMainPortalUrl(config?.main_domains);
-        const redirectUri = `${brokerOrigin}/auth/callback?provider=${provider}`;
+        const redirectUri = `${brokerOrigin}/auth/callback`;
 
         // 呼び出し元の現在のページURL（独自ドメインのWikiやダッシュボード）とプロバイダーをstateに安全にエンコード
         const returnTo = window.location.href;

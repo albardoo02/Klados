@@ -88,6 +88,7 @@ services:
     environment:
       PORT: "3000"
       NEXT_PUBLIC_API_URL: http://localhost:8080/v1
+      INTERNAL_API_URL: http://api:8080/v1
     depends_on:
       - api
     profiles:

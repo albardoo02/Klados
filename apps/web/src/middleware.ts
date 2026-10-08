@@ -13,7 +13,7 @@ async function refreshDynamicDomains() {
   lastDomainsFetch = now;
 
   try {
-    const apiUrl = process.env.INTERNAL_API_URL || 'http://klados-api:8080/v1';
+    const apiUrl = process.env.INTERNAL_API_URL || 'http://api:8080/v1';
     const res = await fetch(`${apiUrl}/system/domains`, {
       next: { revalidate: 60 },
       signal: AbortSignal.timeout(1500),

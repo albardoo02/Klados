@@ -122,7 +122,8 @@ function CallbackContent() {
 
     // 実際にブラウザがリダイレクトされたパス（/auth/callback または /callback）に合わせて redirect_uri を構成
     const currentPath = typeof window !== 'undefined' ? window.location.pathname : '/auth/callback';
-    const redirectUri = `${window.location.origin}${currentPath}?provider=${provider}`;
+    const hasProviderInQuery = typeof window !== 'undefined' && window.location.search.includes('provider=');
+    const redirectUri = `${window.location.origin}${currentPath}${hasProviderInQuery ? `?provider=${provider}` : ''}`;
 
     authApi
       .oauthCallback({
