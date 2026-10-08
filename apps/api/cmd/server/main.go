@@ -20,6 +20,8 @@ func main() {
 		log.Fatalf("failed to run migrations: %v", err)
 	}
 
+	database.InitRootUser(db)
+
 	r := router.New(cfg, db)
 
 	log.Printf("Server starting on port %s", cfg.Port)

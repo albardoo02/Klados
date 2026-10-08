@@ -53,7 +53,7 @@ type registerRequest struct {
 }
 
 type loginRequest struct {
-	Email      string `json:"email" binding:"required,email"`
+	Email      string `json:"email" binding:"required"`
 	Password   string `json:"password" binding:"required"`
 	RememberMe bool   `json:"remember_me"`
 }
@@ -273,23 +273,26 @@ func (h *AuthHandler) ResendVerification(c *gin.Context) {
 func (h *AuthHandler) Login(c *gin.Context) {
 	var req loginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "メールアドレス/ユーザー名とパスワードを入力してください"})
 		return
 	}
 
+	input := strings.TrimSpace(req.Email)
+	inputLower := strings.ToLower(input)
+
 	var user model.User
-	if err := h.DB.Where("email = ?", req.Email).First(&user).Error; err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
+	if err := h.DB.Where("LOWER(email) = ? OR LOWER(username) = ?", inputLower, inputLower).First(&user).Error; err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "メールアドレス/ユーザー名、またはパスワードが正しくありません"})
 		return
 	}
 
 	if user.Password == nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "please use OAuth login"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "このアカウントはパスワード未設定です。OAuth（Discord/GitHub）でログインしてください。"})
 		return
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(*user.Password), []byte(req.Password)); err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "メールアドレス/ユーザー名、またはパスワードが正しくありません"})
 		return
 	}
 

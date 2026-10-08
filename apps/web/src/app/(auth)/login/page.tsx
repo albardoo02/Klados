@@ -154,18 +154,18 @@ export default function LoginPage() {
             )}
             <div>
               <label htmlFor="email" className="block text-sm font-medium mb-1 text-slate-700">
-                {t('auth.email')}
+                {t('auth.email_or_username')}
               </label>
               <input
                 id="email"
                 name="username"
-                type="email"
+                type="text"
                 required
                 autoComplete="username"
                 value={form.email}
                 onChange={(e) => setForm({ ...form, email: e.target.value })}
                 className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors"
-                placeholder="name@example.com"
+                placeholder="name@example.com / username"
               />
             </div>
 

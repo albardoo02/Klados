@@ -23,6 +23,7 @@
   },
   "auth": {
     "email": "メールアドレス",
+    "email_or_username": "メールアドレス または ユーザー名",
     "password": "パスワード",
     "username": "ユーザー名",
     "display_name": "表示名",

@@ -53,27 +53,6 @@ export async function middleware(req: NextRequest) {
 
   // 2. メインCMSドメイン (klados.app, www.klados.app, localhost 等)
   if (hostInfo.type === 'main') {
-    // 外部公開URLでは /sites/サイト名 ではなく <slug>.klados.app を標準とする
-    // localhost, 127.0.0.1, trycloudflare 以外の実稼働メインドメインで /sites/ が叩かれた場合、
-    // サブドメインURLへ 308 (Permanent Redirect)
-    if (
-      url.pathname.startsWith('/sites/') &&
-      hostname !== 'localhost' &&
-      hostname !== '127.0.0.1' &&
-      !hostname.endsWith('.trycloudflare.com')
-    ) {
-      const parts = url.pathname.split('/').filter(Boolean); // ['sites', 'slug', ...]
-      if (parts.length >= 2) {
-        const slug = parts[1];
-        const rest = parts.slice(2).join('/');
-        const rootDomain = hostname.replace(/^www\./, '');
-        // slug 自体にドットが含まれる場合（カスタムドメインでのアクセス名）は対象ドメインへ
-        const targetHost = slug.includes('.') ? slug : `${slug}.${rootDomain}`;
-        const targetUrl = `${url.protocol}//${targetHost}${rest ? `/${rest}` : ''}${url.search}`;
-        return NextResponse.redirect(new URL(targetUrl), 308);
-      }
-    }
-
     return NextResponse.next();
   }
 

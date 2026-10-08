@@ -23,6 +23,7 @@
   },
   "auth": {
     "email": "Email address",
+    "email_or_username": "Email or Username",
     "password": "Password",
     "username": "Username",
     "display_name": "Display name",
