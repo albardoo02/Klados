@@ -29,6 +29,10 @@ async function refreshDynamicDomains() {
   }
 }
 
+function isExactOrSubpath(pathname: string, target: string): boolean {
+  return pathname === target || pathname.startsWith(`${target}/`);
+}
+
 export async function middleware(req: NextRequest) {
   const url = req.nextUrl;
   const hostname =
@@ -39,9 +43,9 @@ export async function middleware(req: NextRequest) {
   // 1. システム内部・静的アセットパスは常にそのまま通す
   if (
     url.pathname.startsWith('/_next') ||
-    url.pathname.startsWith('/api') ||
-    url.pathname.startsWith('/v1') ||
-    url.pathname === '/favicon.ico'
+    url.pathname === '/favicon.ico' ||
+    isExactOrSubpath(url.pathname, '/api') ||
+    isExactOrSubpath(url.pathname, '/v1')
   ) {
     return NextResponse.next();
   }
@@ -69,9 +73,9 @@ export async function middleware(req: NextRequest) {
 
     // (b) 管理画面・認証ページへアクセスされた場合はメインCMSポータルへリダイレクト
     if (
-      url.pathname.startsWith('/dashboard') ||
-      url.pathname.startsWith('/login') ||
-      url.pathname.startsWith('/register')
+      isExactOrSubpath(url.pathname, '/dashboard') ||
+      isExactOrSubpath(url.pathname, '/login') ||
+      isExactOrSubpath(url.pathname, '/register')
     ) {
       const portalUrl = `${url.protocol}//${hostInfo.rootDomain}${url.pathname}${url.search}`;
       return NextResponse.redirect(new URL(portalUrl));
@@ -96,9 +100,9 @@ export async function middleware(req: NextRequest) {
 
     // (b) 管理画面アクセスはメインCMSへリダイレクト
     if (
-      url.pathname.startsWith('/dashboard') ||
-      url.pathname.startsWith('/login') ||
-      url.pathname.startsWith('/register')
+      isExactOrSubpath(url.pathname, '/dashboard') ||
+      isExactOrSubpath(url.pathname, '/login') ||
+      isExactOrSubpath(url.pathname, '/register')
     ) {
       const mainPortal = getMainPortalUrl();
       return NextResponse.redirect(new URL(`${mainPortal}${url.pathname}${url.search}`));
