@@ -2,14 +2,21 @@
 
 import { useLocale } from '@/store/locale';
 import type { Locale } from '@/i18n/config';
+import { useRouter } from 'next/navigation';
 
 export function LocaleSwitcher() {
   const { locale, setLocale } = useLocale();
+  const router = useRouter();
 
   const options: { value: Locale; label: string; flag: string }[] = [
     { value: 'ja', label: 'JP', flag: '🇯🇵' },
     { value: 'en', label: 'EN', flag: '🇺🇸' },
   ];
+
+  const handleSwitch = (newLocale: Locale) => {
+    setLocale(newLocale);
+    router.refresh();
+  };
 
   return (
     <div className="flex items-center gap-0.5 bg-slate-100 dark:bg-slate-800 rounded-xl p-0.5">
@@ -17,7 +24,7 @@ export function LocaleSwitcher() {
         <button
           key={opt.value}
           type="button"
-          onClick={() => setLocale(opt.value)}
+          onClick={() => handleSwitch(opt.value)}
           className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium transition-all ${
             locale === opt.value
               ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-xs'

@@ -26,6 +26,8 @@ import {
 } from 'lucide-react';
 import { SidebarEditorModal } from '@/components/wiki/sidebar-editor-modal';
 import { ImportMarkdownModal } from '@/components/import-markdown-modal';
+import { useTranslations } from 'next-intl';
+import { getSitePublicUrl } from '@/lib/site-url';
 
 interface Page {
   id: string;
@@ -38,6 +40,7 @@ interface Page {
 }
 
 export default function SiteDetailPage() {
+  const tNav = useTranslations('site_nav');
   const { id } = useParams<{ id: string }>();
   const queryClient = useQueryClient();
 
@@ -239,15 +242,15 @@ export default function SiteDetailPage() {
             </button>
 
             {site?.slug && (
-              <Link
-                href={`/sites/${site.slug}`}
+              <a
+                href={getSitePublicUrl(site)}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-xl transition-colors shadow-2xs"
               >
-                <span>公開サイトを開く</span>
+                <span>{tNav('view_site')}</span>
                 <ExternalLink className="size-3.5" />
-              </Link>
+              </a>
             )}
           </div>
         </div>
@@ -264,7 +267,7 @@ export default function SiteDetailPage() {
             }`}
           >
             <FileText className="size-4" />
-            <span>ページ一覧 ({activePages.length})</span>
+            <span>{tNav('pages')} ({activePages.length})</span>
           </button>
 
           {/* ゴミ箱 (Trash) タブ */}
@@ -278,7 +281,7 @@ export default function SiteDetailPage() {
             }`}
           >
             <Trash2 className="size-4" />
-            <span>ゴミ箱 (Trash)</span>
+            <span>{tNav('trash')}</span>
             {trashedItems.length > 0 && (
               <span className="text-[11px] px-1.5 py-0.2 rounded-full bg-rose-100 text-rose-700 font-bold">
                 {trashedItems.length}
@@ -292,28 +295,28 @@ export default function SiteDetailPage() {
             className="flex items-center gap-2 px-4 py-2.5 text-slate-600 hover:text-slate-900 transition-colors border-b-2 border-transparent cursor-pointer"
           >
             <Images className="size-4" />
-            <span>メディア一覧</span>
+            <span>{tNav('media')}</span>
           </button>
           <Link
             href={`/dashboard/sites/${id}/analytics`}
             className="flex items-center gap-2 px-4 py-2.5 text-slate-600 hover:text-slate-900 transition-colors border-b-2 border-transparent"
           >
             <BarChart3 className="size-4" />
-            <span>アクセス解析</span>
+            <span>{tNav('analytics')}</span>
           </Link>
           <Link
             href={`/dashboard/sites/${id}/members`}
             className="flex items-center gap-2 px-4 py-2.5 text-slate-600 hover:text-slate-900 transition-colors border-b-2 border-transparent"
           >
             <Users className="size-4" />
-            <span>メンバー管理</span>
+            <span>{tNav('members')}</span>
           </Link>
           <Link
             href={`/dashboard/sites/${id}/settings`}
             className="flex items-center gap-2 px-4 py-2.5 text-slate-600 hover:text-slate-900 transition-colors border-b-2 border-transparent"
           >
             <Settings className="size-4" />
-            <span>設定</span>
+            <span>{tNav('settings')}</span>
           </Link>
         </div>
       </div>

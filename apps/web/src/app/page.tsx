@@ -22,6 +22,7 @@ import {
   BarChart3,
   MessageSquare,
 } from 'lucide-react';
+import { LocaleSwitcher } from '@/components/locale-switcher';
 
 export default async function HomePage() {
   const t = await getTranslations();
@@ -61,6 +62,7 @@ export default async function HomePage() {
           </div>
 
           <div className="flex items-center gap-3">
+            <LocaleSwitcher />
             <Link
               href="/login"
               className="px-4 py-2 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted rounded-xl transition-colors"

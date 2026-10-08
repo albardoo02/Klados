@@ -28,6 +28,7 @@ import {
   User,
   Info,
 } from 'lucide-react';
+import { useTranslations } from 'next-intl';
 
 const PERMISSION_DEFINITIONS = [
   {
@@ -63,6 +64,7 @@ const PERMISSION_DEFINITIONS = [
 ] as const;
 
 export default function SiteMembersPage() {
+  const tNav = useTranslations('site_nav');
   const { id } = useParams<{ id: string }>();
   const queryClient = useQueryClient();
   const { user: currentUser } = useAuthStore();
@@ -279,7 +281,7 @@ export default function SiteMembersPage() {
           className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 transition-colors mb-3"
         >
           <ArrowLeft className="size-3.5" />
-          <span>サイト管理に戻る</span>
+          <span>{tNav('back_to_sites')}</span>
         </Link>
 
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -287,14 +289,14 @@ export default function SiteMembersPage() {
             <div className="flex items-center gap-3">
               <h1 className="text-2xl font-bold flex items-center gap-2 text-slate-900 dark:text-white">
                 <Users className="size-6 text-blue-600 dark:text-blue-400" />
-                <span>メンバー管理</span>
+                <span>{tNav('members')}</span>
               </h1>
               <span className="text-xs px-2.5 py-0.5 rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/60 dark:text-blue-300 font-bold">
-                {members.length} 名
+                {members.length}
               </span>
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-              {site?.title} の共同編集者、管理者、閲覧メンバーの招待および権限設定
+              {site?.title}
             </p>
           </div>
 
@@ -320,28 +322,28 @@ export default function SiteMembersPage() {
             className="flex items-center gap-2 px-4 py-2.5 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors border-b-2 border-transparent shrink-0"
           >
             <FileText className="size-4" />
-            <span>ページ一覧</span>
+            <span>{tNav('pages')}</span>
           </Link>
           <Link
             href={`/dashboard/sites/${id}/analytics`}
             className="flex items-center gap-2 px-4 py-2.5 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors border-b-2 border-transparent shrink-0"
           >
             <BarChart3 className="size-4" />
-            <span>アクセス解析</span>
+            <span>{tNav('analytics')}</span>
           </Link>
           <button
             type="button"
             className="flex items-center gap-2 px-4 py-2.5 font-semibold text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400 shrink-0"
           >
             <Users className="size-4" />
-            <span>メンバー管理 ({members.length})</span>
+            <span>{tNav('members')} ({members.length})</span>
           </button>
           <Link
             href={`/dashboard/sites/${id}/settings`}
             className="flex items-center gap-2 px-4 py-2.5 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors border-b-2 border-transparent shrink-0"
           >
             <Settings className="size-4" />
-            <span>設定</span>
+            <span>{tNav('settings')}</span>
           </Link>
         </div>
       </div>

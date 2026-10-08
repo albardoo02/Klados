@@ -36,6 +36,7 @@ import {
 } from 'lucide-react';
 import { SidebarEditorModal } from '@/components/wiki/sidebar-editor-modal';
 import { SidebarSection } from '@/types/sidebar';
+import { useTranslations } from 'next-intl';
 
 interface SiteDetails {
   id: string;
@@ -116,6 +117,7 @@ const PRESET_COLORS = [
 ];
 
 export default function SiteSettingsPage() {
+  const tNav = useTranslations('site_nav');
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -313,16 +315,16 @@ export default function SiteSettingsPage() {
           className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors mb-3"
         >
           <ArrowLeft className="size-3.5" />
-          <span>サイト管理に戻る</span>
+          <span>{tNav('back_to_sites')}</span>
         </Link>
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold flex items-center gap-2">
               <Settings className="size-6 text-primary" />
-              <span>サイト設定</span>
+              <span>{tNav('settings')}</span>
             </h1>
             <p className="text-xs text-muted-foreground mt-1">
-              {site?.title} ({site?.slug}.klados.app) のデザイン、ドメイン、カスタムCSS、SEO設定
+              {site?.title} ({site?.slug}.klados.app)
             </p>
           </div>
 
@@ -366,28 +368,28 @@ export default function SiteSettingsPage() {
             className="flex items-center gap-2 px-4 py-2.5 text-muted-foreground hover:text-foreground transition-colors border-b-2 border-transparent"
           >
             <FileText className="size-4" />
-            <span>ページ一覧</span>
+            <span>{tNav('pages')}</span>
           </Link>
           <Link
             href={`/dashboard/sites/${id}/analytics`}
             className="flex items-center gap-2 px-4 py-2.5 text-muted-foreground hover:text-foreground transition-colors border-b-2 border-transparent"
           >
             <BarChart3 className="size-4" />
-            <span>アクセス解析</span>
+            <span>{tNav('analytics')}</span>
           </Link>
           <Link
             href={`/dashboard/sites/${id}/members`}
             className="flex items-center gap-2 px-4 py-2.5 text-muted-foreground hover:text-foreground transition-colors border-b-2 border-transparent"
           >
             <Users className="size-4" />
-            <span>メンバー管理</span>
+            <span>{tNav('members')}</span>
           </Link>
           <button
             type="button"
             className="flex items-center gap-2 px-4 py-2.5 font-semibold text-primary border-b-2 border-primary"
           >
             <Settings className="size-4" />
-            <span>設定</span>
+            <span>{tNav('settings')}</span>
           </button>
         </div>
       </div>

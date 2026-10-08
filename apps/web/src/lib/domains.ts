@@ -64,6 +64,69 @@ export function isMainDomain(hostname: string): boolean {
 }
 
 /**
+ * 予約されたシステムサブドメイン（メインCMSポータルとして扱うサブドメイン）
+ */
+export const RESERVED_SUBDOMAINS = [
+  'www',
+  'api',
+  'auth',
+  'admin',
+  'app',
+  'status',
+  'mail',
+  'cms',
+];
+
+export type HostType =
+  | { type: 'main' }
+  | { type: 'subdomain'; slug: string; rootDomain: string }
+  | { type: 'custom_domain'; domain: string };
+
+/**
+ * リクエストホスト名を解析し、メインポータル、Kladosサブドメイン、外部独自ドメインを判定
+ */
+export function parseHost(hostname: string): HostType {
+  if (!hostname) return { type: 'main' };
+  const cleanHost = hostname.split(':')[0].toLowerCase();
+
+  // ローカル開発環境のIPやlocalhost
+  if (cleanHost === 'localhost' || cleanHost === '127.0.0.1') {
+    return { type: 'main' };
+  }
+
+  // Cloudflare Tunnel の一時URL (.trycloudflare.com)
+  if (cleanHost.endsWith('.trycloudflare.com')) {
+    return { type: 'main' };
+  }
+
+  const mainDomains = getMainDomains();
+
+  // 1. 完全一致するメインドメイン
+  if (mainDomains.includes(cleanHost)) {
+    return { type: 'main' };
+  }
+
+  // 2. メインドメインのサブドメイン (例: developer.klados.app, my-wiki.cms.azisaba.net)
+  for (const main of mainDomains) {
+    if (main === 'localhost' || main === '127.0.0.1') continue;
+    if (cleanHost.endsWith(`.${main}`)) {
+      const sub = cleanHost.slice(0, -(main.length + 1));
+      if (!sub) continue;
+
+      // 予約済みサブドメイン (www.klados.app 等) はメインCMS扱い
+      if (RESERVED_SUBDOMAINS.includes(sub)) {
+        return { type: 'main' };
+      }
+
+      return { type: 'subdomain', slug: sub, rootDomain: main };
+    }
+  }
+
+  // 3. 第三者の独自ドメイン (例: example.com, wiki.othercompany.co.jp)
+  return { type: 'custom_domain', domain: cleanHost };
+}
+
+/**
  * 管理機能や認証など、どんなドメインであってもWikiリライトしてはならないシステム共通パス
  */
 export const SYSTEM_PATH_PREFIXES = [

@@ -24,6 +24,7 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
       const saved = localStorage.getItem(STORAGE_KEY) as Locale;
       if (saved === 'en' || saved === 'ja') {
         setLocaleState(saved);
+        document.cookie = `NEXT_LOCALE=${saved}; path=/; max-age=31536000; SameSite=Lax`;
       }
     }
   }, []);
@@ -31,6 +32,7 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
   const setLocale = (l: Locale) => {
     if (typeof window !== 'undefined') {
       localStorage.setItem(STORAGE_KEY, l);
+      document.cookie = `NEXT_LOCALE=${l}; path=/; max-age=31536000; SameSite=Lax`;
     }
     setLocaleState(l);
   };

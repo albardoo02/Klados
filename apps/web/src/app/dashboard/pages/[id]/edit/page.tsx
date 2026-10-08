@@ -17,6 +17,7 @@ import { InternalLinkModal } from '@/components/wiki/internal-link-modal';
 import { useAuthStore } from '@/store/auth';
 import { formatMediaRef } from '@/lib/media';
 import { parseMarkdownFrontmatter, appendCategoriesToMarkdown } from '@/lib/markdown-import';
+import { getSitePublicUrl } from '@/lib/site-url';
 import Link from 'next/link';
 import {
   ArrowLeft,
@@ -1745,15 +1746,11 @@ export default function PageEditPage() {
     ? viewRef.current.state.doc.toString()
     : page?.content || '';
 
-  const publicUrl = site?.custom_domain
+  const publicUrl = site?.slug
     ? page?.slug === 'index' || page?.slug === 'home' || !page?.slug
-      ? `https://${site.custom_domain}`
-      : `https://${site.custom_domain}/${page.slug}`
-    : site?.slug
-      ? page?.slug === 'index' || page?.slug === 'home' || !page?.slug
-        ? `/sites/${site.slug}`
-        : `/sites/${site.slug}/${page.slug}`
-      : null;
+      ? getSitePublicUrl(site)
+      : `${getSitePublicUrl(site)}/${page.slug}`
+    : null;
 
   return (
     <div className="h-screen flex flex-col bg-background text-foreground">

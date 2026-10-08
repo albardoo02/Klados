@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { isMainDomain, isSystemPath, setDynamicMainDomains } from './lib/domains';
+import { parseHost, getMainPortalUrl, setDynamicMainDomains } from './lib/domains';
 
 let lastDomainsFetch = 0;
 const DOMAINS_CACHE_TTL = 60 * 1000; // 60秒キャッシュ
@@ -36,34 +36,102 @@ export async function middleware(req: NextRequest) {
       ?.split(':')[0]
       ?.toLowerCase() || '';
 
-  // 1. システム共通パス（_next, api, login, dashboard, callback, sites等）はリライトせずそのまま通す
-  if (isSystemPath(url.pathname)) {
+  // 1. システム内部・静的アセットパスは常にそのまま通す
+  if (
+    url.pathname.startsWith('/_next') ||
+    url.pathname.startsWith('/api') ||
+    url.pathname.startsWith('/v1') ||
+    url.pathname === '/favicon.ico'
+  ) {
     return NextResponse.next();
   }
 
-  // 2. メインCMSドメイン（klados.azisaba.net, cms.azisaba.net等）の場合はリライトしない
-  if (isMainDomain(hostname)) {
-    return NextResponse.next();
-  }
-
-  // 3. 未知のドメインの場合、DBに保存された動的メインドメイン設定をフェッチして再チェック
+  // 動的メインドメインの定期同期
   await refreshDynamicDomains();
-  if (isMainDomain(hostname)) {
+
+  const hostInfo = parseHost(hostname);
+
+  // 2. メインCMSドメイン (klados.app, www.klados.app, localhost 等)
+  if (hostInfo.type === 'main') {
+    // 外部公開URLでは /sites/サイト名 ではなく <slug>.klados.app を標準とする
+    // localhost, 127.0.0.1, trycloudflare 以外の実稼働メインドメインで /sites/ が叩かれた場合、
+    // サブドメインURLへ 308 (Permanent Redirect)
+    if (
+      url.pathname.startsWith('/sites/') &&
+      hostname !== 'localhost' &&
+      hostname !== '127.0.0.1' &&
+      !hostname.endsWith('.trycloudflare.com')
+    ) {
+      const parts = url.pathname.split('/').filter(Boolean); // ['sites', 'slug', ...]
+      if (parts.length >= 2) {
+        const slug = parts[1];
+        const rest = parts.slice(2).join('/');
+        const rootDomain = hostname.replace(/^www\./, '');
+        // slug 自体にドットが含まれる場合（カスタムドメインでのアクセス名）は対象ドメインへ
+        const targetHost = slug.includes('.') ? slug : `${slug}.${rootDomain}`;
+        const targetUrl = `${url.protocol}//${targetHost}${rest ? `/${rest}` : ''}${url.search}`;
+        return NextResponse.redirect(new URL(targetUrl), 308);
+      }
+    }
+
     return NextResponse.next();
   }
 
-  // 4. 独自ドメイン（Custom Domain: 例 wiki.azisaba.net 等）からのアクセス:
-  // (a) もしブラウザが直接 /sites/hostname を開こうとした場合はクリーンなURL（/ など）へ 307 リダイレクト
-  if (url.pathname.startsWith(`/sites/${hostname}`)) {
-    const cleanPath = url.pathname.slice(`/sites/${hostname}`.length) || '/';
-    url.pathname = cleanPath;
-    return NextResponse.redirect(url);
+  // 3. Klados サブドメイン (例: developer.klados.app)
+  if (hostInfo.type === 'subdomain') {
+    const slug = hostInfo.slug;
+
+    // (a) もしブラウザから直接 /sites/slug を開こうとした場合はクリーンなURLへ 307 リダイレクト
+    if (url.pathname === `/sites/${slug}` || url.pathname.startsWith(`/sites/${slug}/`)) {
+      const cleanPath = url.pathname.slice(`/sites/${slug}`.length) || '/';
+      url.pathname = cleanPath;
+      return NextResponse.redirect(url, 307);
+    }
+
+    // (b) 管理画面・認証ページへアクセスされた場合はメインCMSポータルへリダイレクト
+    if (
+      url.pathname.startsWith('/dashboard') ||
+      url.pathname.startsWith('/login') ||
+      url.pathname.startsWith('/register')
+    ) {
+      const portalUrl = `${url.protocol}//${hostInfo.rootDomain}${url.pathname}${url.search}`;
+      return NextResponse.redirect(new URL(portalUrl));
+    }
+
+    // (c) 内部で /sites/:slug に動的リライト！
+    const targetPath = url.pathname === '/' ? `/sites/${slug}` : `/sites/${slug}${url.pathname}`;
+    url.pathname = targetPath;
+    return NextResponse.rewrite(url);
   }
 
-  // (b) 独自ドメインのアクセスを内部で /sites/${hostname} に動的リライト！
-  const targetPath = url.pathname === '/' ? `/sites/${hostname}` : `/sites/${hostname}${url.pathname}`;
-  url.pathname = targetPath;
-  return NextResponse.rewrite(url);
+  // 4. 第三者独自ドメイン (例: example.com, wiki.company.org)
+  if (hostInfo.type === 'custom_domain') {
+    const domain = hostInfo.domain;
+
+    // (a) 直接 /sites/domain が開かれた場合はクリーンURLへ
+    if (url.pathname === `/sites/${domain}` || url.pathname.startsWith(`/sites/${domain}/`)) {
+      const cleanPath = url.pathname.slice(`/sites/${domain}`.length) || '/';
+      url.pathname = cleanPath;
+      return NextResponse.redirect(url, 307);
+    }
+
+    // (b) 管理画面アクセスはメインCMSへリダイレクト
+    if (
+      url.pathname.startsWith('/dashboard') ||
+      url.pathname.startsWith('/login') ||
+      url.pathname.startsWith('/register')
+    ) {
+      const mainPortal = getMainPortalUrl();
+      return NextResponse.redirect(new URL(`${mainPortal}${url.pathname}${url.search}`));
+    }
+
+    // (c) 内部で /sites/:domain に動的リライト（Go APIが custom_domain 列で検索）
+    const targetPath = url.pathname === '/' ? `/sites/${domain}` : `/sites/${domain}${url.pathname}`;
+    url.pathname = targetPath;
+    return NextResponse.rewrite(url);
+  }
+
+  return NextResponse.next();
 }
 
 export const config = {

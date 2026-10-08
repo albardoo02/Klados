@@ -1,7 +1,9 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
+import { useTranslations } from 'next-intl';
 import { sitesApi, pagesApi, analyticsApi, AnalyticsData } from '@/lib/api';
+import { getSitePublicUrl } from '@/lib/site-url';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { useState, useMemo } from 'react';
@@ -15,8 +17,6 @@ import {
   ArrowUpRight,
   ArrowDownRight,
   ExternalLink,
-  Calendar,
-  Layers,
   FileText,
   Settings,
   Smartphone,
@@ -24,7 +24,6 @@ import {
   Tablet,
   Globe2,
   RefreshCw,
-  Loader2,
 } from 'lucide-react';
 
 interface PageItem {
@@ -35,6 +34,8 @@ interface PageItem {
 }
 
 export default function SiteAnalyticsPage() {
+  const t = useTranslations('analytics');
+  const tNav = useTranslations('site_nav');
   const { id } = useParams<{ id: string }>();
   const [range, setRange] = useState<'7d' | '30d'>('7d');
   const [hoveredBarIndex, setHoveredBarIndex] = useState<number | null>(null);
@@ -58,9 +59,9 @@ export default function SiteAnalyticsPage() {
         .catch(() => null),
   });
 
-  // バックエンド未実装時でも、サイトの実際のページ構成に基づくリアルな統計データを自動生成
+  // APIの実データをそのまま利用（ゼロの場合は真実のゼロおよび空状態を表示）
   const analytics: AnalyticsData = useMemo(() => {
-    if (apiAnalytics && apiAnalytics.total_pv > 0) {
+    if (apiAnalytics) {
       return apiAnalytics;
     }
 
@@ -71,64 +72,23 @@ export default function SiteAnalyticsPage() {
     const daily_stats = Array.from({ length: dayCount }).map((_, i) => {
       const d = new Date(now);
       d.setDate(d.getDate() - (dayCount - 1 - i));
-      const dateStr = d.toLocaleDateString('ja-JP', { month: 'numeric', day: 'numeric' });
-      // 擬似的な変動
-      const basePv = is7d ? 180 : 150;
-      const wave = Math.sin(i * 0.8) * 40 + (i % 3 === 0 ? 35 : 0);
-      const pv = Math.max(20, Math.round(basePv + wave + Math.random() * 20));
-      const uv = Math.round(pv * (0.45 + Math.random() * 0.15));
-      return { date: dateStr, pv, uv };
-    });
-
-    const total_pv = daily_stats.reduce((sum, item) => sum + item.pv, 0);
-    const unique_visitors = Math.round(total_pv * 0.52);
-
-    // サイトの実際のページ一覧を割り当て
-    const sitePages = pages && pages.length > 0
-      ? pages
-      : [
-          { id: '1', slug: 'index', title: site?.title ? `${site.title} トップ` : 'ホーム', status: 'published' },
-          { id: '2', slug: 'guide', title: 'スタートガイド', status: 'published' },
-          { id: '3', slug: 'docs', title: 'ドキュメント一覧', status: 'published' },
-        ];
-
-    const weights = [0.45, 0.28, 0.15, 0.08, 0.04];
-    const top_pages = sitePages.slice(0, 5).map((p, idx) => {
-      const weight = weights[idx] ?? (0.05 / Math.max(1, sitePages.length - 4));
-      const pagePv = Math.round(total_pv * weight);
-      const pageUv = Math.round(pagePv * 0.6);
-      return {
-        slug: p.slug,
-        title: p.title,
-        pv: pagePv,
-        uv: pageUv,
-        percentage: Math.round(weight * 100),
-      };
+      const dateStr = `${d.getMonth() + 1}/${d.getDate()}`;
+      return { date: dateStr, pv: 0, uv: 0 };
     });
 
     return {
-      total_pv,
-      unique_visitors,
-      pv_change_percentage: is7d ? 18.4 : 24.6,
-      uv_change_percentage: is7d ? 12.2 : 19.8,
-      avg_duration_seconds: 165,
-      bounce_rate: 34.2,
+      total_pv: 0,
+      unique_visitors: 0,
+      pv_change_percentage: 0,
+      uv_change_percentage: 0,
+      avg_duration_seconds: 0,
+      bounce_rate: 0,
       daily_stats,
-      top_pages,
-      referrers: [
-        { source: 'Google 検索 (Organic)', pv: Math.round(total_pv * 0.44), percentage: 44 },
-        { source: '直接アクセス (Direct / ブックマーク)', pv: Math.round(total_pv * 0.26), percentage: 26 },
-        { source: 'GitHub', pv: Math.round(total_pv * 0.16), percentage: 16 },
-        { source: 'Twitter / X', pv: Math.round(total_pv * 0.09), percentage: 9 },
-        { source: 'その他 / リファラー', pv: Math.round(total_pv * 0.05), percentage: 5 },
-      ],
-      devices: [
-        { device: 'デスクトップ PC', percentage: 66 },
-        { device: 'モバイル (スマートフォン)', percentage: 29 },
-        { device: 'タブレット', percentage: 5 },
-      ],
+      top_pages: [],
+      referrers: [],
+      devices: [],
     };
-  }, [apiAnalytics, range, pages, site]);
+  }, [apiAnalytics, range]);
 
   const maxDailyPv = useMemo(() => {
     return Math.max(...analytics.daily_stats.map((d) => d.pv), 1);
@@ -143,16 +103,17 @@ export default function SiteAnalyticsPage() {
           className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors mb-3"
         >
           <ArrowLeft className="size-3.5" />
-          <span>サイト管理に戻る</span>
+          <span>{tNav('back_to_sites')}</span>
         </Link>
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold flex items-center gap-2">
               <BarChart3 className="size-6 text-primary" />
-              <span>アクセス解析 (Analytics)</span>
+              <span>{t('title')}</span>
             </h1>
             <p className="text-xs text-muted-foreground mt-1">
-              {site?.title} のページビュー、来訪者数、流入元トレンド
+              {site?.title ? `${site.title} - ` : ''}
+              {t('subtitle')}
             </p>
           </div>
 
@@ -168,7 +129,7 @@ export default function SiteAnalyticsPage() {
                     : 'text-muted-foreground hover:text-foreground'
                 }`}
               >
-                過去7日間
+                {t('range_7d')}
               </button>
               <button
                 type="button"
@@ -179,7 +140,7 @@ export default function SiteAnalyticsPage() {
                     : 'text-muted-foreground hover:text-foreground'
                 }`}
               >
-                過去30日間
+                {t('range_30d')}
               </button>
             </div>
 
@@ -188,7 +149,7 @@ export default function SiteAnalyticsPage() {
               onClick={() => refetch()}
               disabled={isFetching}
               className="p-2 rounded-xl border border-border bg-background hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-              title="データを更新"
+              title={t('refresh')}
             >
               <RefreshCw className={`size-4 ${isFetching ? 'animate-spin' : ''}`} />
             </button>
@@ -202,28 +163,28 @@ export default function SiteAnalyticsPage() {
             className="flex items-center gap-2 px-4 py-2.5 text-muted-foreground hover:text-foreground transition-colors border-b-2 border-transparent"
           >
             <FileText className="size-4" />
-            <span>ページ一覧</span>
+            <span>{tNav('pages')}</span>
           </Link>
           <button
             type="button"
             className="flex items-center gap-2 px-4 py-2.5 font-semibold text-primary border-b-2 border-primary"
           >
             <BarChart3 className="size-4" />
-            <span>アクセス解析</span>
+            <span>{tNav('analytics')}</span>
           </button>
           <Link
             href={`/dashboard/sites/${id}/members`}
             className="flex items-center gap-2 px-4 py-2.5 text-muted-foreground hover:text-foreground transition-colors border-b-2 border-transparent"
           >
             <Users className="size-4" />
-            <span>メンバー管理</span>
+            <span>{tNav('members')}</span>
           </Link>
           <Link
             href={`/dashboard/sites/${id}/settings`}
             className="flex items-center gap-2 px-4 py-2.5 text-muted-foreground hover:text-foreground transition-colors border-b-2 border-transparent"
           >
             <Settings className="size-4" />
-            <span>設定</span>
+            <span>{tNav('settings')}</span>
           </Link>
         </div>
       </div>
@@ -233,7 +194,7 @@ export default function SiteAnalyticsPage() {
         {/* 1. 総PV */}
         <div className="bg-card border border-border rounded-2xl p-5 shadow-xs relative overflow-hidden">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-muted-foreground">総ページビュー (PV)</span>
+            <span className="text-xs font-semibold text-muted-foreground">{t('total_pv')}</span>
             <div className="size-8 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center">
               <Eye className="size-4" />
             </div>
@@ -244,17 +205,28 @@ export default function SiteAnalyticsPage() {
             </span>
             <span className="text-xs text-muted-foreground font-medium">PV</span>
           </div>
-          <div className="mt-2 flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400 font-semibold">
-            <ArrowUpRight className="size-3.5" />
-            <span>+{analytics.pv_change_percentage}%</span>
-            <span className="text-[11px] text-muted-foreground font-normal ml-1">前期間比</span>
+          <div className="mt-2 flex items-center gap-1 text-xs">
+            {analytics.pv_change_percentage > 0 ? (
+              <span className="flex items-center gap-0.5 text-emerald-600 dark:text-emerald-400 font-semibold">
+                <ArrowUpRight className="size-3.5" />
+                +{analytics.pv_change_percentage}%
+              </span>
+            ) : analytics.pv_change_percentage < 0 ? (
+              <span className="flex items-center gap-0.5 text-rose-600 dark:text-rose-400 font-semibold">
+                <ArrowDownRight className="size-3.5" />
+                {analytics.pv_change_percentage}%
+              </span>
+            ) : (
+              <span className="text-muted-foreground font-normal">±0%</span>
+            )}
+            <span className="text-[11px] text-muted-foreground font-normal ml-1">{t('prev_period')}</span>
           </div>
         </div>
 
         {/* 2. ユニークビジター */}
         <div className="bg-card border border-border rounded-2xl p-5 shadow-xs relative overflow-hidden">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-muted-foreground">ユニークビジター (UU)</span>
+            <span className="text-xs font-semibold text-muted-foreground">{t('unique_visitors')}</span>
             <div className="size-8 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
               <Users className="size-4" />
             </div>
@@ -263,40 +235,48 @@ export default function SiteAnalyticsPage() {
             <span className="text-3xl font-extrabold tracking-tight">
               {analytics.unique_visitors.toLocaleString()}
             </span>
-            <span className="text-xs text-muted-foreground font-medium">人</span>
+            <span className="text-xs text-muted-foreground font-medium">UU</span>
           </div>
-          <div className="mt-2 flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400 font-semibold">
-            <ArrowUpRight className="size-3.5" />
-            <span>+{analytics.uv_change_percentage}%</span>
-            <span className="text-[11px] text-muted-foreground font-normal ml-1">前期間比</span>
+          <div className="mt-2 flex items-center gap-1 text-xs">
+            {analytics.uv_change_percentage > 0 ? (
+              <span className="flex items-center gap-0.5 text-emerald-600 dark:text-emerald-400 font-semibold">
+                <ArrowUpRight className="size-3.5" />
+                +{analytics.uv_change_percentage}%
+              </span>
+            ) : analytics.uv_change_percentage < 0 ? (
+              <span className="flex items-center gap-0.5 text-rose-600 dark:text-rose-400 font-semibold">
+                <ArrowDownRight className="size-3.5" />
+                {analytics.uv_change_percentage}%
+              </span>
+            ) : (
+              <span className="text-muted-foreground font-normal">±0%</span>
+            )}
+            <span className="text-[11px] text-muted-foreground font-normal ml-1">{t('prev_period')}</span>
           </div>
         </div>
 
         {/* 3. 平均滞在時間 */}
         <div className="bg-card border border-border rounded-2xl p-5 shadow-xs relative overflow-hidden">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-muted-foreground">平均滞在時間</span>
+            <span className="text-xs font-semibold text-muted-foreground">{t('avg_duration')}</span>
             <div className="size-8 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
               <Clock className="size-4" />
             </div>
           </div>
           <div className="mt-3 flex items-baseline gap-2">
             <span className="text-3xl font-extrabold tracking-tight">
-              {Math.floor(analytics.avg_duration_seconds / 60)}分
-              {analytics.avg_duration_seconds % 60}秒
+              {Math.floor(analytics.avg_duration_seconds / 60)}m {analytics.avg_duration_seconds % 60}s
             </span>
           </div>
-          <div className="mt-2 flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400 font-semibold">
-            <ArrowUpRight className="size-3.5" />
-            <span>+14秒</span>
-            <span className="text-[11px] text-muted-foreground font-normal ml-1">前期間比</span>
+          <div className="mt-2 text-xs text-muted-foreground">
+            {analytics.total_pv > 0 ? t('subtitle') : t('no_data')}
           </div>
         </div>
 
         {/* 4. 直帰率 */}
         <div className="bg-card border border-border rounded-2xl p-5 shadow-xs relative overflow-hidden">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-muted-foreground">直帰率</span>
+            <span className="text-xs font-semibold text-muted-foreground">{t('bounce_rate')}</span>
             <div className="size-8 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center">
               <TrendingUp className="size-4" />
             </div>
@@ -306,10 +286,8 @@ export default function SiteAnalyticsPage() {
               {analytics.bounce_rate}%
             </span>
           </div>
-          <div className="mt-2 flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400 font-semibold">
-            <ArrowDownRight className="size-3.5" />
-            <span>-2.8%</span>
-            <span className="text-[11px] text-muted-foreground font-normal ml-1">改善</span>
+          <div className="mt-2 text-xs text-muted-foreground">
+            {analytics.total_pv > 0 ? t('subtitle') : t('no_data')}
           </div>
         </div>
       </div>
@@ -318,19 +296,19 @@ export default function SiteAnalyticsPage() {
       <div className="bg-card border border-border rounded-2xl p-6 shadow-xs mb-6 space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-border">
           <div>
-            <h2 className="text-base font-bold">日次アクセス推移</h2>
+            <h2 className="text-base font-bold">{t('daily_traffic')}</h2>
             <p className="text-xs text-muted-foreground">
-              日ごとのページビュー数 (PV) とユニーク訪問者数 (UU)
+              {t('daily_traffic_desc')}
             </p>
           </div>
           <div className="flex items-center gap-4 text-xs font-medium">
             <span className="flex items-center gap-1.5">
               <span className="size-3 rounded bg-blue-500" />
-              <span>ページビュー (PV)</span>
+              <span>{t('pv_legend')}</span>
             </span>
             <span className="flex items-center gap-1.5">
               <span className="size-3 rounded bg-blue-300 dark:bg-blue-800" />
-              <span>ユニークビジター (UU)</span>
+              <span>{t('uv_legend')}</span>
             </span>
           </div>
         </div>
@@ -351,8 +329,8 @@ export default function SiteAnalyticsPage() {
           {/* 各日のバー */}
           <div className="flex-1 h-[calc(100%-1.5rem)] flex items-end gap-1.5 sm:gap-2.5 z-10">
             {analytics.daily_stats.map((day, idx) => {
-              const pvHeight = Math.max(6, Math.round((day.pv / maxDailyPv) * 100));
-              const uvHeight = Math.max(4, Math.round((day.uv / maxDailyPv) * 100));
+              const pvHeight = maxDailyPv > 0 && day.pv > 0 ? Math.max(4, Math.round((day.pv / maxDailyPv) * 100)) : 0;
+              const uvHeight = maxDailyPv > 0 && day.uv > 0 ? Math.max(3, Math.round((day.uv / maxDailyPv) * 100)) : 0;
               const isHovered = hoveredBarIndex === idx;
 
               return (
@@ -378,7 +356,7 @@ export default function SiteAnalyticsPage() {
                   <div className="w-full max-w-[28px] flex items-end justify-center gap-0.5 sm:gap-1 h-full">
                     {/* PV バー */}
                     <div
-                      style={{ height: `${pvHeight}%` }}
+                      style={{ height: `${pvHeight}%`, minHeight: day.pv > 0 ? '4px' : '0' }}
                       className={`w-full rounded-t-md transition-all duration-300 ${
                         isHovered
                           ? 'bg-blue-600 shadow-sm'
@@ -387,7 +365,7 @@ export default function SiteAnalyticsPage() {
                     />
                     {/* UV バー */}
                     <div
-                      style={{ height: `${uvHeight}%` }}
+                      style={{ height: `${uvHeight}%`, minHeight: day.uv > 0 ? '3px' : '0' }}
                       className={`w-full rounded-t-md transition-all duration-300 ${
                         isHovered
                           ? 'bg-blue-400 dark:bg-blue-700 shadow-sm'
@@ -413,75 +391,81 @@ export default function SiteAnalyticsPage() {
         <div className="lg:col-span-2 bg-card border border-border rounded-2xl p-6 shadow-xs space-y-4">
           <div className="flex items-center justify-between pb-3 border-b border-border">
             <div>
-              <h2 className="text-base font-bold">アクセス上位ページ</h2>
+              <h2 className="text-base font-bold">{t('top_pages')}</h2>
               <p className="text-xs text-muted-foreground">
-                指定期間中に最も多く閲覧されたページランキング
+                {t('top_pages_desc')}
               </p>
             </div>
             <span className="text-xs font-semibold px-2.5 py-1 rounded-lg bg-muted text-muted-foreground">
-              上位 {analytics.top_pages.length} ページ
+              {analytics.top_pages.length} pages
             </span>
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead>
-                <tr className="border-b border-border text-muted-foreground">
-                  <th className="pb-2.5 font-semibold w-8">#</th>
-                  <th className="pb-2.5 font-semibold">ページタイトル / スラグ</th>
-                  <th className="pb-2.5 font-semibold text-right">PV数</th>
-                  <th className="pb-2.5 font-semibold text-right">構成比</th>
-                  <th className="pb-2.5 font-semibold text-right w-16">リンク</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border/40">
-                {analytics.top_pages.map((p, idx) => (
-                  <tr key={p.slug} className="hover:bg-muted/20 transition-colors group">
-                    <td className="py-3 font-mono font-bold text-muted-foreground">
-                      {idx + 1}
-                    </td>
-                    <td className="py-3 pr-4">
-                      <div className="font-semibold text-foreground group-hover:text-primary transition-colors">
-                        {p.title}
-                      </div>
-                      <div className="text-[11px] text-muted-foreground font-mono mt-0.5">
-                        /{p.slug}
-                      </div>
-                    </td>
-                    <td className="py-3 text-right font-mono font-bold text-foreground">
-                      {p.pv.toLocaleString()}
-                    </td>
-                    <td className="py-3 text-right pr-2">
-                      <div className="flex items-center justify-end gap-2">
-                        <div className="w-16 h-1.5 bg-muted rounded-full overflow-hidden">
-                          <div
-                            style={{ width: `${p.percentage}%` }}
-                            className="h-full bg-blue-500 rounded-full"
-                          />
-                        </div>
-                        <span className="w-8 font-mono text-[11px] text-muted-foreground">
-                          {p.percentage}%
-                        </span>
-                      </div>
-                    </td>
-                    <td className="py-3 text-right">
-                      {site?.slug && (
-                        <Link
-                          href={`/sites/${site.slug}/${p.slug === 'index' ? '' : p.slug}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors inline-block"
-                          title="公開ページを表示"
-                        >
-                          <ExternalLink className="size-3.5" />
-                        </Link>
-                      )}
-                    </td>
+          {analytics.top_pages.length === 0 ? (
+            <div className="py-12 text-center text-xs text-muted-foreground">
+              {t('no_page_data')}
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead>
+                  <tr className="border-b border-border text-muted-foreground">
+                    <th className="pb-2.5 font-semibold w-8">{t('col_rank')}</th>
+                    <th className="pb-2.5 font-semibold">{t('col_page')}</th>
+                    <th className="pb-2.5 font-semibold text-right">{t('col_pv')}</th>
+                    <th className="pb-2.5 font-semibold text-right">{t('col_ratio')}</th>
+                    <th className="pb-2.5 font-semibold text-right w-16">{t('col_link')}</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody className="divide-y divide-border/40">
+                  {analytics.top_pages.map((p, idx) => (
+                    <tr key={p.slug} className="hover:bg-muted/20 transition-colors group">
+                      <td className="py-3 font-mono font-bold text-muted-foreground">
+                        {idx + 1}
+                      </td>
+                      <td className="py-3 pr-4">
+                        <div className="font-semibold text-foreground group-hover:text-primary transition-colors">
+                          {p.title}
+                        </div>
+                        <div className="text-[11px] text-muted-foreground font-mono mt-0.5">
+                          /{p.slug}
+                        </div>
+                      </td>
+                      <td className="py-3 text-right font-mono font-bold text-foreground">
+                        {p.pv.toLocaleString()}
+                      </td>
+                      <td className="py-3 text-right pr-2">
+                        <div className="flex items-center justify-end gap-2">
+                          <div className="w-16 h-1.5 bg-muted rounded-full overflow-hidden">
+                            <div
+                              style={{ width: `${p.percentage}%` }}
+                              className="h-full bg-blue-500 rounded-full"
+                            />
+                          </div>
+                          <span className="w-8 font-mono text-[11px] text-muted-foreground">
+                            {p.percentage}%
+                          </span>
+                        </div>
+                      </td>
+                      <td className="py-3 text-right">
+                        {site && (
+                          <a
+                            href={`${getSitePublicUrl(site)}/${p.slug === 'index' ? '' : p.slug}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors inline-block"
+                            title={t('open_public_page')}
+                          >
+                            <ExternalLink className="size-3.5" />
+                          </a>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
 
         {/* 流入元 & デバイス構成 */}
@@ -490,57 +474,69 @@ export default function SiteAnalyticsPage() {
           <div className="bg-card border border-border rounded-2xl p-6 shadow-xs space-y-4">
             <div className="pb-3 border-b border-border flex items-center gap-2">
               <Globe2 className="size-4 text-primary" />
-              <h2 className="text-base font-bold">主な流入元 (Referrers)</h2>
+              <h2 className="text-base font-bold">{t('referrers')}</h2>
             </div>
-            <div className="space-y-3">
-              {analytics.referrers.map((ref) => (
-                <div key={ref.source} className="space-y-1">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="font-medium text-foreground">{ref.source}</span>
-                    <span className="font-mono text-muted-foreground">{ref.percentage}%</span>
+            {analytics.referrers.length === 0 ? (
+              <div className="py-8 text-center text-xs text-muted-foreground">
+                {t('no_referrer_data')}
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {analytics.referrers.map((ref) => (
+                  <div key={ref.source} className="space-y-1">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-medium text-foreground">{ref.source}</span>
+                      <span className="font-mono text-muted-foreground">{ref.percentage}%</span>
+                    </div>
+                    <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                      <div
+                        style={{ width: `${ref.percentage}%` }}
+                        className="h-full bg-indigo-500 rounded-full"
+                      />
+                    </div>
                   </div>
-                  <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-                    <div
-                      style={{ width: `${ref.percentage}%` }}
-                      className="h-full bg-indigo-500 rounded-full"
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* デバイス比率 */}
           <div className="bg-card border border-border rounded-2xl p-6 shadow-xs space-y-4">
             <div className="pb-3 border-b border-border flex items-center gap-2">
               <Monitor className="size-4 text-primary" />
-              <h2 className="text-base font-bold">利用デバイス比率</h2>
+              <h2 className="text-base font-bold">{t('devices')}</h2>
             </div>
-            <div className="space-y-3">
-              {analytics.devices.map((dev) => (
-                <div key={dev.device} className="space-y-1">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="font-medium text-foreground flex items-center gap-1.5">
-                      {dev.device.includes('デスクトップ') ? (
-                        <Monitor className="size-3 text-muted-foreground" />
-                      ) : dev.device.includes('モバイル') ? (
-                        <Smartphone className="size-3 text-muted-foreground" />
-                      ) : (
-                        <Tablet className="size-3 text-muted-foreground" />
-                      )}
-                      <span>{dev.device}</span>
-                    </span>
-                    <span className="font-mono text-muted-foreground">{dev.percentage}%</span>
+            {analytics.devices.length === 0 ? (
+              <div className="py-8 text-center text-xs text-muted-foreground">
+                {t('no_device_data')}
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {analytics.devices.map((dev) => (
+                  <div key={dev.device} className="space-y-1">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-medium text-foreground flex items-center gap-1.5">
+                        {dev.device.includes('デスクトップ') || dev.device.includes('Desktop') ? (
+                          <Monitor className="size-3 text-muted-foreground" />
+                        ) : dev.device.includes('モバイル') || dev.device.includes('Mobile') ? (
+                          <Smartphone className="size-3 text-muted-foreground" />
+                        ) : (
+                          <Tablet className="size-3 text-muted-foreground" />
+                        )}
+                        <span>{dev.device}</span>
+                      </span>
+                      <span className="font-mono text-muted-foreground">{dev.percentage}%</span>
+                    </div>
+                    <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                      <div
+                        style={{ width: `${dev.percentage}%` }}
+                        className="h-full bg-emerald-500 rounded-full"
+                      />
+                    </div>
                   </div>
-                  <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-                    <div
-                      style={{ width: `${dev.percentage}%` }}
-                      className="h-full bg-emerald-500 rounded-full"
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>
