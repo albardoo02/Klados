@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type DragEvent } from 'react';
 import {
   X,
   Plus,
@@ -17,6 +17,7 @@ import {
   ExternalLink,
   Code,
   ListOrdered,
+  GripVertical,
 } from 'lucide-react';
 import {
   SidebarSection,
@@ -26,6 +27,48 @@ import {
   generateDefaultSidebar,
 } from '@/types/sidebar';
 import { sitesApi } from '@/lib/api';
+
+// ドラッグ中の要素
+type DragState =
+  | { type: 'section'; secIdx: number }
+  | { type: 'item'; secIdx: number; linkIdx: number; childIdx?: number; isFolder: boolean };
+
+// ドロップ先（挿入位置）
+// - section: セクション一覧の index の位置に挿入
+// - item: secIdx のセクション内、parentIdx 指定時はそのフォルダの子リスト内の index の位置に挿入
+type DropTarget =
+  | { type: 'section'; index: number }
+  | { type: 'item'; secIdx: number; parentIdx?: number; index: number };
+
+function DropLine({ className = '' }: { className?: string }) {
+  return (
+    <div
+      className={`pointer-events-none absolute left-0 right-0 m-0 h-0.5 rounded-full bg-blue-500 shadow-[0_0_0_2px_rgba(59,130,246,0.25)] z-10 ${className}`}
+    />
+  );
+}
+
+function DragHandle({
+  onDragStart,
+  onDragEnd,
+  size = 'size-4',
+}: {
+  onDragStart: (e: DragEvent<HTMLSpanElement>) => void;
+  onDragEnd: () => void;
+  size?: string;
+}) {
+  return (
+    <span
+      draggable
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+      className="shrink-0 p-0.5 rounded text-slate-300 dark:text-slate-600 hover:text-slate-500 dark:hover:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-grab active:cursor-grabbing"
+      title="ドラッグして並び替え"
+    >
+      <GripVertical className={size} />
+    </span>
+  );
+}
 
 interface SidebarEditorModalProps {
   isOpen: boolean;
@@ -54,6 +97,8 @@ export function SidebarEditorModal({
   const [wikitext, setWikitext] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [drag, setDrag] = useState<DragState | null>(null);
+  const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
 
   // 初期値セット
   useEffect(() => {
@@ -121,6 +166,149 @@ export function SidebarEditorModal({
     next[targetIdx] = temp;
     setSections(next);
   };
+
+  // ===== ドラッグ＆ドロップ並び替え =====
+  const resetDrag = () => {
+    setDrag(null);
+    setDropTarget(null);
+  };
+
+  const updateDropTarget = (t: DropTarget | null) => {
+    setDropTarget((prev) => (JSON.stringify(prev) === JSON.stringify(t) ? prev : t));
+  };
+
+  const startDrag = (e: DragEvent<HTMLElement>, state: DragState) => {
+    e.stopPropagation();
+    e.dataTransfer.effectAllowed = 'move';
+    // Firefox ではデータをセットしないとドラッグが開始されない
+    e.dataTransfer.setData('text/plain', '');
+    // ドラッグ画像として行全体を表示
+    const row = (e.currentTarget as HTMLElement).closest('[data-dnd-row]');
+    if (row instanceof HTMLElement) {
+      e.dataTransfer.setDragImage(row, 16, 16);
+    }
+    setDrag(state);
+  };
+
+  // カーソルが要素（または指定した基準要素）の上半分にあるか
+  const isUpperHalf = (e: DragEvent<HTMLElement>, base?: Element | null) => {
+    const rect = (base ?? e.currentTarget).getBoundingClientRect();
+    if (e.clientY > rect.bottom) return false;
+    return e.clientY < rect.top + rect.height / 2;
+  };
+
+  const acceptDrop = (e: DragEvent<HTMLElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'move';
+  };
+
+  // セクションカード上: セクションの並び替え / リンクをセクション末尾へ
+  const handleSectionDragOver = (e: DragEvent<HTMLElement>, secIdx: number) => {
+    if (!drag) return;
+    acceptDrop(e);
+    if (drag.type === 'section') {
+      updateDropTarget({ type: 'section', index: isUpperHalf(e) ? secIdx : secIdx + 1 });
+    } else {
+      updateDropTarget({ type: 'item', secIdx, index: sections[secIdx].links.length });
+    }
+  };
+
+  // セクション直下のリンク/フォルダ上
+  const handleLinkDragOver = (e: DragEvent<HTMLElement>, secIdx: number, linkIdx: number) => {
+    if (drag?.type !== 'item') return;
+    acceptDrop(e);
+    // フォルダの場合は子リストを除いたヘッダー行を基準に判定する
+    const header = e.currentTarget.querySelector('[data-dnd-header]');
+    updateDropTarget({
+      type: 'item',
+      secIdx,
+      index: isUpperHalf(e, header) ? linkIdx : linkIdx + 1,
+    });
+  };
+
+  // フォルダの子リスト領域（フォルダはフォルダ内に入れない）
+  const canDropIntoFolder = drag?.type === 'item' && !drag.isFolder;
+
+  const handleChildListDragOver = (e: DragEvent<HTMLElement>, secIdx: number, linkIdx: number) => {
+    if (!canDropIntoFolder) return;
+    acceptDrop(e);
+    updateDropTarget({
+      type: 'item',
+      secIdx,
+      parentIdx: linkIdx,
+      index: sections[secIdx].links[linkIdx].children?.length ?? 0,
+    });
+  };
+
+  const handleChildDragOver = (
+    e: DragEvent<HTMLElement>,
+    secIdx: number,
+    linkIdx: number,
+    childIdx: number
+  ) => {
+    if (!canDropIntoFolder) return;
+    acceptDrop(e);
+    updateDropTarget({
+      type: 'item',
+      secIdx,
+      parentIdx: linkIdx,
+      index: isUpperHalf(e) ? childIdx : childIdx + 1,
+    });
+  };
+
+  const moveSectionTo = (from: number, toIndex: number) => {
+    const next = [...sections];
+    const [moved] = next.splice(from, 1);
+    next.splice(from < toIndex ? toIndex - 1 : toIndex, 0, moved);
+    setSections(next);
+  };
+
+  const moveItemTo = (
+    from: { secIdx: number; linkIdx: number; childIdx?: number },
+    to: { secIdx: number; parentIdx?: number; index: number }
+  ) => {
+    const next: SidebarSection[] = JSON.parse(JSON.stringify(sections));
+    const getList = (secIdx: number, parentIdx?: number): SidebarLink[] => {
+      if (parentIdx === undefined) return next[secIdx].links;
+      const parent = next[secIdx].links[parentIdx];
+      if (!parent.children) parent.children = [];
+      return parent.children;
+    };
+    const srcList = getList(from.secIdx, from.childIdx === undefined ? undefined : from.linkIdx);
+    const srcIndex = from.childIdx ?? from.linkIdx;
+    // 削除前に移動先リストの参照を取得しておく（インデックスのずれを防ぐ）
+    const dstList = getList(to.secIdx, to.parentIdx);
+    const dstIndex = srcList === dstList && srcIndex < to.index ? to.index - 1 : to.index;
+    const [moved] = srcList.splice(srcIndex, 1);
+    if (!moved) return;
+    dstList.splice(dstIndex, 0, moved);
+    setSections(next);
+  };
+
+  const handleDrop = (e: DragEvent<HTMLElement>) => {
+    e.preventDefault();
+    if (drag && dropTarget) {
+      if (drag.type === 'section' && dropTarget.type === 'section') {
+        moveSectionTo(drag.secIdx, dropTarget.index);
+      } else if (drag.type === 'item' && dropTarget.type === 'item') {
+        moveItemTo(drag, dropTarget);
+      }
+    }
+    resetDrag();
+  };
+
+  const isItemDrop = (secIdx: number, parentIdx: number | undefined, index: number) =>
+    dropTarget?.type === 'item' &&
+    dropTarget.secIdx === secIdx &&
+    dropTarget.parentIdx === parentIdx &&
+    dropTarget.index === index;
+
+  const isDraggingItem = (secIdx: number, linkIdx: number, childIdx?: number) =>
+    drag?.type === 'item' &&
+    drag.secIdx === secIdx &&
+    drag.linkIdx === linkIdx &&
+    drag.childIdx === childIdx;
 
   // リンク操作
   const handleAddLink = (secIndex: number) => {
@@ -374,7 +562,12 @@ export function SidebarEditorModal({
         </div>
 
         {/* メインエリア */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+        <div
+          className="flex-1 overflow-y-auto p-6 space-y-6"
+          onDragOver={() => {
+            if (dropTarget) setDropTarget(null);
+          }}
+        >
           {mode === 'gui' ? (
             <>
               {/* オプション: MediaWikiツールセクション */}
@@ -399,15 +592,39 @@ export function SidebarEditorModal({
               </div>
 
               {/* セクション一覧 */}
-              <div className="space-y-4">
+              <div
+                className="space-y-4"
+                onDragOver={(e) => {
+                  // セクション間の隙間では直前のドロップ位置を維持する
+                  if (drag) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                  }
+                }}
+                onDrop={handleDrop}
+              >
                 {sections.map((sec, secIdx) => (
                   <div
                     key={sec.id || secIdx}
-                    className="border border-slate-200 dark:border-slate-800 rounded-2xl p-4 bg-white dark:bg-slate-900 shadow-2xs space-y-3"
+                    data-dnd-row
+                    onDragOver={(e) => handleSectionDragOver(e, secIdx)}
+                    className={`relative border border-slate-200 dark:border-slate-800 rounded-2xl p-4 bg-white dark:bg-slate-900 shadow-2xs space-y-3 transition-opacity ${
+                      drag?.type === 'section' && drag.secIdx === secIdx ? 'opacity-40' : ''
+                    }`}
                   >
+                    {dropTarget?.type === 'section' && dropTarget.index === secIdx && (
+                      <DropLine className="-top-[9px]" />
+                    )}
+                    {dropTarget?.type === 'section' &&
+                      dropTarget.index === sections.length &&
+                      secIdx === sections.length - 1 && <DropLine className="-bottom-[9px]" />}
                     {/* セクションヘッダー */}
                     <div className="flex items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
                       <div className="flex items-center gap-2 flex-1">
+                        <DragHandle
+                          onDragStart={(e) => startDrag(e, { type: 'section', secIdx })}
+                          onDragEnd={resetDrag}
+                        />
                         <span className="text-xs font-mono font-bold text-slate-400">
                           #{secIdx + 1}
                         </span>
@@ -454,21 +671,45 @@ export function SidebarEditorModal({
                     </div>
 
                     {/* リンク & フォルダ一覧 */}
-                    <div className="space-y-2.5 pl-1">
+                    <div className="space-y-2.5 pl-1" onDrop={handleDrop}>
                       {sec.links.map((link, linkIdx) => {
                         const isFolder = link.children !== undefined;
+                        const isDragging = isDraggingItem(secIdx, linkIdx);
 
                         return (
                           <div
                             key={link.id || linkIdx}
-                            className={`rounded-xl border transition-colors ${
+                            data-dnd-row
+                            onDragOver={(e) => handleLinkDragOver(e, secIdx, linkIdx)}
+                            className={`relative rounded-xl border transition-all ${
+                              isDragging ? 'opacity-40' : ''
+                            } ${
                               isFolder
                                 ? 'bg-slate-50/90 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700/80 p-2.5 space-y-2'
                                 : 'border-transparent hover:border-slate-200 dark:hover:border-slate-800 p-1.5'
                             }`}
                           >
+                            {isItemDrop(secIdx, undefined, linkIdx) && (
+                              <DropLine className="-top-1" />
+                            )}
+                            {isItemDrop(secIdx, undefined, sec.links.length) &&
+                              linkIdx === sec.links.length - 1 && (
+                                <DropLine className="-bottom-1" />
+                              )}
+
                             {/* アイテムヘッダー行 */}
-                            <div className="flex items-center gap-2 text-xs">
+                            <div data-dnd-header className="flex items-center gap-2 text-xs">
+                              <DragHandle
+                                onDragStart={(e) =>
+                                  startDrag(e, {
+                                    type: 'item',
+                                    secIdx,
+                                    linkIdx,
+                                    isFolder,
+                                  })
+                                }
+                                onDragEnd={resetDrag}
+                              />
                               {isFolder ? (
                                 <button
                                   type="button"
@@ -533,44 +774,86 @@ export function SidebarEditorModal({
 
                             {/* フォルダの場合: サブ項目（子リンク）のリスト */}
                             {isFolder && (
-                              <div className="ml-6 pl-3 border-l-2 border-slate-200 dark:border-slate-700 space-y-2 pt-1">
+                              <div
+                                onDragOver={(e) => handleChildListDragOver(e, secIdx, linkIdx)}
+                                onDrop={handleDrop}
+                                className="ml-6 pl-3 border-l-2 border-slate-200 dark:border-slate-700 space-y-2 pt-1"
+                              >
                                 {link.children && link.children.length > 0 ? (
-                                  link.children.map((child, childIdx) => (
-                                    <div
-                                      key={child.id || childIdx}
-                                      className="flex items-center gap-2 text-xs"
-                                    >
-                                      <span className="text-slate-400 dark:text-slate-500">•</span>
-                                      <input
-                                        type="text"
-                                        value={child.title}
-                                        onChange={(e) =>
-                                          handleChildChange(secIdx, linkIdx, childIdx, 'title', e.target.value)
+                                  link.children.map((child, childIdx) => {
+                                    const isChildDragging = isDraggingItem(secIdx, linkIdx, childIdx);
+
+                                    return (
+                                      <div
+                                        key={child.id || childIdx}
+                                        data-dnd-row
+                                        onDragOver={(e) =>
+                                          handleChildDragOver(e, secIdx, linkIdx, childIdx)
                                         }
-                                        placeholder="サブリンク名"
-                                        className="w-44 bg-white dark:bg-slate-800 px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200"
-                                      />
-                                      <input
-                                        type="text"
-                                        value={child.url}
-                                        onChange={(e) =>
-                                          handleChildChange(secIdx, linkIdx, childIdx, 'url', e.target.value)
-                                        }
-                                        placeholder="スラグ または URL"
-                                        className="flex-1 font-mono text-[11px] bg-white dark:bg-slate-800 px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200"
-                                      />
-                                      <button
-                                        type="button"
-                                        onClick={() => handleDeleteChild(secIdx, linkIdx, childIdx)}
-                                        className="p-1 rounded text-slate-400 hover:text-rose-500 cursor-pointer"
-                                        title="サブ項目を削除"
+                                        className={`relative flex items-center gap-2 text-xs transition-opacity ${
+                                          isChildDragging ? 'opacity-40' : ''
+                                        }`}
                                       >
-                                        <Trash2 className="size-3" />
-                                      </button>
-                                    </div>
-                                  ))
+                                        {isItemDrop(secIdx, linkIdx, childIdx) && (
+                                          <DropLine className="-top-1" />
+                                        )}
+                                        {isItemDrop(secIdx, linkIdx, link.children!.length) &&
+                                          childIdx === link.children!.length - 1 && (
+                                            <DropLine className="-bottom-1" />
+                                          )}
+
+                                        <DragHandle
+                                          size="size-3.5"
+                                          onDragStart={(e) =>
+                                            startDrag(e, {
+                                              type: 'item',
+                                              secIdx,
+                                              linkIdx,
+                                              childIdx,
+                                              isFolder: false,
+                                            })
+                                          }
+                                          onDragEnd={resetDrag}
+                                        />
+                                        <span className="text-slate-400 dark:text-slate-500">•</span>
+                                        <input
+                                          type="text"
+                                          value={child.title}
+                                          onChange={(e) =>
+                                            handleChildChange(secIdx, linkIdx, childIdx, 'title', e.target.value)
+                                          }
+                                          placeholder="サブリンク名"
+                                          className="w-44 bg-white dark:bg-slate-800 px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200"
+                                        />
+                                        <input
+                                          type="text"
+                                          value={child.url}
+                                          onChange={(e) =>
+                                            handleChildChange(secIdx, linkIdx, childIdx, 'url', e.target.value)
+                                          }
+                                          placeholder="スラグ または URL"
+                                          className="flex-1 font-mono text-[11px] bg-white dark:bg-slate-800 px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200"
+                                        />
+                                        <button
+                                          type="button"
+                                          onClick={() => handleDeleteChild(secIdx, linkIdx, childIdx)}
+                                          className="p-1 rounded text-slate-400 hover:text-rose-500 cursor-pointer"
+                                          title="サブ項目を削除"
+                                        >
+                                          <Trash2 className="size-3" />
+                                        </button>
+                                      </div>
+                                    );
+                                  })
                                 ) : (
-                                  <div className="text-[11px] text-slate-400 py-1 italic">
+                                  <div
+                                    onDragOver={(e) => handleChildListDragOver(e, secIdx, linkIdx)}
+                                    className={`relative text-[11px] py-1 italic rounded px-2 ${
+                                      isItemDrop(secIdx, linkIdx, 0)
+                                        ? 'bg-blue-50/50 dark:bg-blue-950/30 text-blue-600'
+                                        : 'text-slate-400'
+                                    }`}
+                                  >
                                     サブ項目がまだありません
                                   </div>
                                 )}
@@ -590,7 +873,19 @@ export function SidebarEditorModal({
                       })}
 
                       {sec.links.length === 0 && (
-                        <div className="text-center py-4 text-xs text-slate-400 border border-dashed border-slate-200 dark:border-slate-800 rounded-xl">
+                        <div
+                          onDragOver={(e) => {
+                            if (drag?.type === 'item') {
+                              acceptDrop(e);
+                              updateDropTarget({ type: 'item', secIdx, index: 0 });
+                            }
+                          }}
+                          className={`relative text-center py-4 text-xs rounded-xl border border-dashed ${
+                            isItemDrop(secIdx, undefined, 0)
+                              ? 'border-blue-500 bg-blue-50/50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400'
+                              : 'border-slate-200 dark:border-slate-800 text-slate-400'
+                          }`}
+                        >
                           項目がまだありません。「リンクを追加」または「開閉グループを追加」してください
                         </div>
                       )}
