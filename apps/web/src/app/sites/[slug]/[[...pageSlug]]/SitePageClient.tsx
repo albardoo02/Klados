@@ -1,6 +1,6 @@
 'use client';
 
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { publicApi, commentsApi } from '@/lib/api';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
@@ -521,6 +521,8 @@ export default function SitePageClient() {
     return currentSlug.replace(/^(?:category|カテゴリ):/i, '');
   }, [isCategoryPage, currentSlug]);
 
+  const queryClient = useQueryClient();
+
   // 認証および権限判定
   const { user, token } = useAuthStore();
   const [isClientMounted, setIsClientMounted] = useState(false);
@@ -649,14 +651,35 @@ export default function SitePageClient() {
   const [sidebarSections, setSidebarSections] = useState<SidebarSection[] | null>(null);
   const [showToolsSection, setShowToolsSection] = useState<boolean>(true);
 
-  // サイドバー初期値の解決 (サイト設定 -> LocalStorage -> デフォルト)
+  // サイドバー初期値の解決 (サーバー設定優先 -> LocalStorage -> デフォルト)
   useEffect(() => {
+    if (
+      site.settings?.sidebar_sections &&
+      Array.isArray(site.settings.sidebar_sections) &&
+      site.settings.sidebar_sections.length > 0
+    ) {
+      setSidebarSections(site.settings.sidebar_sections);
+      setShowToolsSection(site.settings.sidebar_show_tools ?? true);
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.setItem(
+            `klados_sidebar_${siteSlug}`,
+            JSON.stringify({
+              sections: site.settings.sidebar_sections,
+              showTools: site.settings.sidebar_show_tools ?? true,
+            })
+          );
+        } catch {}
+      }
+      return;
+    }
+
     if (typeof window !== 'undefined') {
       const cached = localStorage.getItem(`klados_sidebar_${siteSlug}`);
       if (cached) {
         try {
           const parsed = JSON.parse(cached);
-          if (parsed.sections && Array.isArray(parsed.sections)) {
+          if (parsed.sections && Array.isArray(parsed.sections) && parsed.sections.length > 0) {
             setSidebarSections(parsed.sections);
             setShowToolsSection(parsed.showTools ?? true);
             return;
@@ -667,10 +690,7 @@ export default function SitePageClient() {
       }
     }
 
-    if (site.settings?.sidebar_sections && Array.isArray(site.settings.sidebar_sections)) {
-      setSidebarSections(site.settings.sidebar_sections);
-      setShowToolsSection(site.settings.sidebar_show_tools ?? true);
-    }
+    setSidebarSections(null);
   }, [site.settings, siteSlug]);
 
   // 実効サイドバーセクション (設定がなければデモまたは既存ページ一覧から生成)
@@ -1429,6 +1449,10 @@ export default function SitePageClient() {
           onSaved={(newSections, newShowTools) => {
             setSidebarSections(newSections);
             setShowToolsSection(newShowTools);
+            queryClient.invalidateQueries({ queryKey: ['public-site', siteSlug] });
+            if (site.id && site.id !== 'demo-site') {
+              queryClient.invalidateQueries({ queryKey: ['site', site.id] });
+            }
           }}
         />
       )}

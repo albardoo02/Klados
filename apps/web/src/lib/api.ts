@@ -27,10 +27,19 @@ export const api = axios.create({
   withCredentials: true,
 });
 
-// リクエストインターセプター: JWTトークン付与（localStorage → sessionStorage の順で探す）
+// リクエストインターセプター: JWTトークン付与（localStorage → sessionStorage → cookie の順で探す）
 api.interceptors.request.use((config) => {
   if (typeof window !== 'undefined') {
-    const token = localStorage.getItem('access_token') ?? sessionStorage.getItem('access_token');
+    let token = localStorage.getItem('access_token') ?? sessionStorage.getItem('access_token');
+    if (!token) {
+      const match = document.cookie.match(/(?:^|;\s*)access_token=([^;]*)/);
+      token = match ? decodeURIComponent(match[1]) : null;
+      if (token) {
+        try {
+          localStorage.setItem('access_token', token);
+        } catch {}
+      }
+    }
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }

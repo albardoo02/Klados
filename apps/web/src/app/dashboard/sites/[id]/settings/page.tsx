@@ -189,6 +189,7 @@ export default function SiteSettingsPage() {
         primary_color: primaryColor,
         custom_css: customCss,
         settings: {
+          ...(site.settings || {}),
           ogp_title: site.settings?.ogp_title || '',
           ogp_description: site.settings?.ogp_description || '',
           ogp_image: site.settings?.ogp_image || '',
@@ -196,6 +197,8 @@ export default function SiteSettingsPage() {
           custom_font: customFont,
           primary_color: primaryColor,
           custom_css: customCss,
+          sidebar_sections: site.settings?.sidebar_sections || [],
+          sidebar_show_tools: site.settings?.sidebar_show_tools ?? true,
         },
       });
     }
@@ -216,10 +219,11 @@ export default function SiteSettingsPage() {
 
   const handleSave = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    // settings 内にも同期
+    // settings 内にも同期（既存の sidebar_sections など他項目を上書き消去しないようマージ）
     const payload: SiteSettingsData = {
       ...form,
       settings: {
+        ...(site?.settings || {}),
         ...form.settings,
         custom_font: form.custom_font,
         primary_color: form.primary_color,
@@ -1068,10 +1072,15 @@ export default function SiteSettingsPage() {
         onClose={() => setSidebarEditorOpen(false)}
         siteId={id}
         siteSlug={form.slug || site?.slug || ''}
-        currentSections={form.settings?.sidebar_sections}
-        showToolsSection={form.settings?.sidebar_show_tools ?? true}
+        currentSections={
+          form.settings?.sidebar_sections && form.settings.sidebar_sections.length > 0
+            ? form.settings.sidebar_sections
+            : site?.settings?.sidebar_sections
+        }
+        showToolsSection={form.settings?.sidebar_show_tools ?? site?.settings?.sidebar_show_tools ?? true}
         availablePages={pages}
         onSaved={(newSections, newShowTools) => {
+          queryClient.invalidateQueries({ queryKey: ['site', id] });
           setForm((prev) => ({
             ...prev,
             settings: {

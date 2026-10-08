@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/klados/api/internal/model"
 	"golang.org/x/crypto/bcrypt"
+	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
 
@@ -230,12 +231,49 @@ func (h *SiteHandler) Update(c *gin.Context) {
 		}
 	}
 
-	if err := c.ShouldBindJSON(&site); err != nil {
+	var rawReq map[string]interface{}
+	if err := c.ShouldBindJSON(&rawReq); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	h.DB.Save(&site)
+	if title, ok := rawReq["title"].(string); ok && title != "" {
+		site.Title = title
+	}
+	if slug, ok := rawReq["slug"].(string); ok && slug != "" {
+		site.Slug = slug
+	}
+	if desc, ok := rawReq["description"].(string); ok {
+		site.Description = desc
+	}
+	if theme, ok := rawReq["theme"].(string); ok && theme != "" {
+		site.Theme = theme
+	}
+	if isPub, ok := rawReq["is_public"].(bool); ok {
+		site.IsPublic = isPub
+	}
+	if customDomain, ok := rawReq["custom_domain"].(string); ok {
+		site.CustomDomain = customDomain
+	}
+
+	// settings のディープマージ (既存キーを保持しつつ更新)
+	if newSettings, ok := rawReq["settings"].(map[string]interface{}); ok && newSettings != nil {
+		existing := make(map[string]interface{})
+		if len(site.Settings) > 0 {
+			_ = json.Unmarshal(site.Settings, &existing)
+		}
+		for k, v := range newSettings {
+			existing[k] = v
+		}
+		mergedBytes, _ := json.Marshal(existing)
+		site.Settings = datatypes.JSON(mergedBytes)
+	}
+
+	if err := h.DB.Save(&site).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": site})
 }
 

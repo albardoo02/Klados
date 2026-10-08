@@ -460,27 +460,35 @@ export function SidebarEditorModal({
     }
 
     try {
-      if (siteId) {
+      if (siteId && siteId !== 'demo-site') {
         // サイト設定をAPIで保存
-        const res = await sitesApi.get(siteId);
-        const currentSite = res.data?.data;
-        if (currentSite) {
-          await sitesApi.update(siteId, {
-            settings: {
-              ...(currentSite.settings || {}),
-              sidebar_sections: finalSections,
-              sidebar_show_tools: showTools,
-            },
-          });
+        let baseSettings = {};
+        try {
+          const res = await sitesApi.get(siteId);
+          if (res.data?.data?.settings) {
+            baseSettings = res.data.data.settings;
+          }
+        } catch {
+          // getが失敗してもバックエンド側でディープマージされるため続行
         }
+
+        await sitesApi.update(siteId, {
+          settings: {
+            ...baseSettings,
+            sidebar_sections: finalSections,
+            sidebar_show_tools: showTools,
+          },
+        });
       }
 
-      // LocalStorageにもキャッシュ保存（フォールバック用）
+      // LocalStorageにもキャッシュ保存
       if (typeof window !== 'undefined') {
-        localStorage.setItem(
-          `klados_sidebar_${siteSlug}`,
-          JSON.stringify({ sections: finalSections, showTools })
-        );
+        try {
+          localStorage.setItem(
+            `klados_sidebar_${siteSlug}`,
+            JSON.stringify({ sections: finalSections, showTools })
+          );
+        } catch {}
       }
 
       onSaved(finalSections, showTools);
@@ -490,14 +498,18 @@ export function SidebarEditorModal({
         onClose();
       }, 800);
     } catch (err: any) {
+      console.error('Failed to update sidebar on server:', err);
       // LocalStorageだけでも保存
       if (typeof window !== 'undefined') {
-        localStorage.setItem(
-          `klados_sidebar_${siteSlug}`,
-          JSON.stringify({ sections: finalSections, showTools })
-        );
+        try {
+          localStorage.setItem(
+            `klados_sidebar_${siteSlug}`,
+            JSON.stringify({ sections: finalSections, showTools })
+          );
+        } catch {}
       }
       onSaved(finalSections, showTools);
+      alert('サーバーへの保存に失敗しました（ローカルに一時保存されました）: ' + (err?.response?.data?.error || err?.message || '不明なエラー'));
       onClose();
     } finally {
       setIsSaving(false);
