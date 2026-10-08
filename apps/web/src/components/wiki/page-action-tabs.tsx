@@ -22,6 +22,7 @@ import {
   Move,
   Trash2,
   BookmarkCheck,
+  Plus,
 } from 'lucide-react';
 import { PageHistoryModal } from './page-history-modal';
 import { PageSourceModal } from './page-source-modal';
@@ -62,6 +63,7 @@ interface PageActionTabsProps {
   onOpenComments?: () => void;
   commentsCount?: number;
   canEdit?: boolean;
+  onOpenCreatePage?: () => void;
 }
 
 export function PageActionTabs({
@@ -71,6 +73,7 @@ export function PageActionTabs({
   onOpenComments,
   commentsCount = 0,
   canEdit = false,
+  onOpenCreatePage,
 }: PageActionTabsProps) {
   const router = useRouter();
 
@@ -223,6 +226,19 @@ export function PageActionTabs({
               <Edit3 className="size-3.5" />
               <span>編集</span>
             </Link>
+          )}
+
+          {/* 新規作成タブ (関係者・編集権限がある場合のみ表示) */}
+          {canEdit && onOpenCreatePage && (
+            <button
+              type="button"
+              onClick={onOpenCreatePage}
+              className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/60 rounded-t-xl transition-colors cursor-pointer"
+              title="新しいWikiページを作成"
+            >
+              <Plus className="size-3.5" />
+              <span>新規作成</span>
+            </button>
           )}
 
           {/* ソースを表示タブ */}

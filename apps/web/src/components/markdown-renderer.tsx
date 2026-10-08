@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
@@ -225,13 +226,17 @@ function preprocessMarkdown(content: string, siteSlug?: string): string {
     if (target.includes('#')) {
       const [pageSlug, heading] = target.split('#');
       const slug = slugifyHeading(heading.trim());
-      const pSlug = pageSlug.trim().replace(/^\//, '');
-      return `[${label}](${sitePrefix}/${pSlug}#${slug})`;
+      const pSlug = pageSlug.trim().replace(/^\.?\//, '').replace(/\.(?:md|markdown)$/i, '');
+      const isHome = pSlug.toLowerCase() === 'readme' || pSlug.toLowerCase() === 'index' || pSlug.toLowerCase() === 'home' || pSlug === '';
+      const targetPath = isHome ? (sitePrefix || '') : (sitePrefix ? `${sitePrefix}/${pSlug}` : `/${pSlug}`);
+      return `[${label}](${targetPath}#${slug})`;
     }
 
     // サイト内別ページ: [[page-slug]]
-    const pSlug = target.replace(/^\//, '');
-    return `[${label}](${sitePrefix}/${pSlug})`;
+    const pSlug = target.trim().replace(/^\.?\//, '').replace(/\.(?:md|markdown)$/i, '');
+    const isHome = pSlug.toLowerCase() === 'readme' || pSlug.toLowerCase() === 'index' || pSlug.toLowerCase() === 'home' || pSlug === '';
+    const targetPath = isHome ? (sitePrefix || '/') : (sitePrefix ? `${sitePrefix}/${pSlug}` : `/${pSlug}`);
+    return `[${label}](${targetPath})`;
   });
 
   return result;
@@ -543,12 +548,11 @@ export function MarkdownRenderer({ content, className = '', siteSlug }: Markdown
 
             const isExternal =
               Boolean(href) &&
-              (/^(?:https?:|\/\/|www\.|mailto:)/i.test(href!) ||
-                (!href!.startsWith('/') && !href!.startsWith('#') && !href!.startsWith('?')));
-
-            const formattedHref = href?.startsWith('www.') ? `https://${href}` : href;
+              (/^(?:https?:|\/\/|mailto:|tel:|sms:|javascript:)/i.test(href!) ||
+                href!.startsWith('www.'));
 
             if (isExternal) {
+              const formattedHref = href?.startsWith('www.') ? `https://${href}` : href;
               return (
                 <a
                   href={formattedHref}
@@ -563,14 +567,65 @@ export function MarkdownRenderer({ content, className = '', siteSlug }: Markdown
               );
             }
 
+            // 内部リンク（./README.md, ./02-development-environment.md, page-slug など）の正規化
+            let targetPath = href || '';
+            let hash = '';
+            let search = '';
+
+            const hashIdx = targetPath.indexOf('#');
+            if (hashIdx !== -1) {
+              hash = targetPath.slice(hashIdx);
+              targetPath = targetPath.slice(0, hashIdx);
+            }
+
+            const searchIdx = targetPath.indexOf('?');
+            if (searchIdx !== -1) {
+              search = targetPath.slice(searchIdx);
+              targetPath = targetPath.slice(0, searchIdx);
+            }
+
+            // 先頭の相対パス記号 './' の除去
+            let cleanSlug = targetPath.replace(/^\.\//, '');
+
+            // .md / .markdown 拡張子の除去
+            cleanSlug = cleanSlug.replace(/\.(?:md|markdown)$/i, '');
+
+            const lowerClean = cleanSlug.toLowerCase();
+            const isHomeLike =
+              cleanSlug === '' ||
+              lowerClean === 'readme' ||
+              lowerClean === 'index' ||
+              lowerClean === 'home';
+
+            let internalHref = href || '';
+
+            if (targetPath.startsWith('/')) {
+              // 絶対パスで始まっている場合 (例: /sites/developer/page や /dashboard)
+              const cleanAbsPath = targetPath.replace(/\.(?:md|markdown)$/i, '');
+              internalHref = cleanAbsPath + search + hash;
+            } else if (siteSlug) {
+              const sitePrefix = getSitePrefix(siteSlug);
+              if (isHomeLike) {
+                internalHref = (sitePrefix || '/') + search + hash;
+              } else {
+                internalHref = (sitePrefix ? `${sitePrefix}/${cleanSlug}` : `/${cleanSlug}`) + search + hash;
+              }
+            } else {
+              if (isHomeLike) {
+                internalHref = './' + search + hash;
+              } else {
+                internalHref = cleanSlug + search + hash;
+              }
+            }
+
             return (
-              <a
-                href={formattedHref}
+              <Link
+                href={internalHref}
                 className="text-blue-500 hover:text-blue-600 underline underline-offset-4 transition-colors font-medium"
                 {...props}
               >
                 {children}
-              </a>
+              </Link>
             );
           },
           p({ children, ...props }) {

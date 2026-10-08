@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { publicApi, commentsApi } from '@/lib/api';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { MarkdownRenderer } from '@/components/markdown-renderer';
 import { CommandPalette } from '@/components/command-palette';
 import { CommentsDrawer } from '@/components/comments-drawer';
@@ -31,10 +31,18 @@ import {
   LogIn,
   UserPlus,
   FolderTree,
+  Plus,
+  User,
+  LogOut,
+  ChevronDown,
+  Settings,
+  FolderKanban,
 } from 'lucide-react';
+import { UserAvatar } from '@/components/user-avatar';
 import { PageActionTabs } from '@/components/wiki/page-action-tabs';
 import { SidebarEditorModal } from '@/components/wiki/sidebar-editor-modal';
 import { PageInfoModal } from '@/components/wiki/page-info-modal';
+import { CreatePageModal } from '@/components/wiki/create-page-modal';
 import { CategoryBox } from '@/components/wiki/category-box';
 import { CategoryView } from '@/components/wiki/category-view';
 import { SpecialCategoriesView } from '@/components/wiki/special-categories-view';
@@ -483,6 +491,13 @@ function cleanArticleContent(content?: string, pageTitle?: string): string {
   return filteredLines.join('\n');
 }
 
+function cleanPageSlug(s?: string): string {
+  if (!s) return '';
+  let c = s.trim().replace(/^\.?\//, '');
+  c = c.replace(/\.(?:md|markdown)$/i, '');
+  return c.replace(/^\/+/, '');
+}
+
 export default function SitePageClient() {
   const params = useParams<{ slug: string; pageSlug?: string[] }>();
   const siteSlug = params.slug;
@@ -524,7 +539,7 @@ export default function SitePageClient() {
   const queryClient = useQueryClient();
 
   // 認証および権限判定
-  const { user, token } = useAuthStore();
+  const { user, token, clearAuth } = useAuthStore();
   const [isClientMounted, setIsClientMounted] = useState(false);
   useEffect(() => {
     setIsClientMounted(true);
@@ -585,11 +600,35 @@ export default function SitePageClient() {
   const isOwner = !isGuest && !!site.user_id && site.user_id === user?.id;
   const canEdit = !isGuest && (site.can_edit !== undefined ? site.can_edit : isOwner);
 
-  const targetSlug =
-    currentSlug ||
-    (pages.find((p) => p.slug === 'home' || p.slug === 'index' || p.slug === '')?.slug ||
-      pages[0]?.slug ||
-      '');
+  const targetSlug = useMemo(() => {
+    const raw = currentSlug;
+    if (!raw) {
+      return (
+        pages.find((p) => {
+          const s = cleanPageSlug(p.slug).toLowerCase();
+          return s === 'home' || s === 'index' || s === 'readme' || s === '';
+        })?.slug ||
+        pages[0]?.slug ||
+        ''
+      );
+    }
+    const cleaned = cleanPageSlug(raw);
+    const lower = cleaned.toLowerCase();
+    if (lower === 'readme' || lower === 'index' || lower === 'home') {
+      const homePage = pages.find((p) => {
+        const s = cleanPageSlug(p.slug).toLowerCase();
+        return s === 'home' || s === 'index' || s === 'readme' || s === '';
+      });
+      if (homePage) return homePage.slug;
+    }
+    // pages 内からマッチするスラッグを探す
+    const match = pages.find((p) => {
+      if (p.slug === raw || p.slug === `/${raw}`) return true;
+      return cleanPageSlug(p.slug).toLowerCase() === lower;
+    });
+    if (match) return match.slug;
+    return raw;
+  }, [currentSlug, pages]);
 
   // 個別ページ情報取得
   const {
@@ -613,11 +652,18 @@ export default function SitePageClient() {
     enabled: !!siteSlug && !!targetSlug,
   });
 
-  const activePage: PublicPage | undefined =
-    pageData ||
-    (targetSlug
-      ? pages.find((p) => p.slug === targetSlug || p.slug === `/${targetSlug}`)
-      : pages[0]);
+  const activePage: PublicPage | undefined = useMemo(() => {
+    if (pageData) return pageData;
+    if (!targetSlug) return pages[0];
+    const cleanedTarget = cleanPageSlug(targetSlug).toLowerCase();
+    return (
+      pages.find((p) => {
+        if (p.slug === targetSlug || p.slug === `/${targetSlug}`) return true;
+        const cleanedP = cleanPageSlug(p.slug).toLowerCase();
+        return cleanedP === cleanedTarget;
+      }) || pages[0]
+    );
+  }, [pageData, targetSlug, pages]);
 
   // ページに付与されたカテゴリの抽出
   const pageCategories = useMemo(() => {
@@ -640,12 +686,25 @@ export default function SitePageClient() {
     enabled: !!activePage?.id,
   });
 
-  // UIステート: 検索モーダル & コメントドロワー
+  // UIステート: 検索モーダル & コメントドロワー & ページ作成 & ユーザーメニュー
   const [searchOpen, setSearchOpen] = useState(false);
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [sidebarEditorOpen, setSidebarEditorOpen] = useState(false);
   const [infoModalOpen, setInfoModalOpen] = useState(false);
+  const [createPageOpen, setCreatePageOpen] = useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (userMenuRef.current && !userMenuRef.current.contains(event.target as Node)) {
+        setUserMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   // サイドバー構成ステート (MediaWiki:Sidebar)
   const [sidebarSections, setSidebarSections] = useState<SidebarSection[] | null>(null);
@@ -986,17 +1045,124 @@ export default function SitePageClient() {
                 </Link>
               </div>
             ) : (
-              <Link
-                href={canEdit && site.id && site.id !== 'demo-site' ? `/dashboard/sites/${site.id}` : '/dashboard'}
-                className={`hidden sm:inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-xl border transition-colors ${
-                  isDark
-                    ? 'border-slate-800 text-slate-300 hover:text-white hover:bg-slate-800'
-                    : 'border-slate-200 text-slate-700 hover:text-slate-900 hover:bg-slate-50'
-                }`}
-              >
-                <span>{canEdit ? 'サイト管理' : 'ダッシュボード'}</span>
-                <ExternalLink className="size-3 text-slate-400" />
-              </Link>
+              <div className="flex items-center gap-2">
+                {/* ページ新規作成ボタン (編集権限がある場合) */}
+                {canEdit && site.id && site.id !== 'demo-site' && (
+                  <button
+                    type="button"
+                    onClick={() => setCreatePageOpen(true)}
+                    className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-xl text-white shadow-2xs hover:opacity-90 transition-all cursor-pointer"
+                    style={{ backgroundColor: brandPrimaryColor }}
+                    title="新しいWikiページを作成"
+                  >
+                    <Plus className="size-3.5 stroke-[2.5]" />
+                    <span className="hidden sm:inline">新規作成</span>
+                  </button>
+                )}
+
+                {/* サイト管理リンク (デスクトップ) */}
+                {canEdit && site.id && site.id !== 'demo-site' && (
+                  <Link
+                    href={`/dashboard/sites/${site.id}`}
+                    className={`hidden lg:inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-xl border transition-colors ${
+                      isDark
+                        ? 'border-slate-800 text-slate-300 hover:text-white hover:bg-slate-800'
+                        : 'border-slate-200 text-slate-700 hover:text-slate-900 hover:bg-slate-50'
+                    }`}
+                    title="サイト管理画面を開く"
+                  >
+                    <span>サイト管理</span>
+                    <ExternalLink className="size-3 text-slate-400" />
+                  </Link>
+                )}
+
+                {/* アカウント設定メニュー ドロップダウン */}
+                <div className="relative" ref={userMenuRef}>
+                  <button
+                    type="button"
+                    onClick={() => setUserMenuOpen(!userMenuOpen)}
+                    className={`inline-flex items-center gap-2 p-1 sm:px-2.5 sm:py-1.5 rounded-xl border text-xs font-medium transition-colors cursor-pointer ${
+                      isDark
+                        ? 'border-slate-800 bg-slate-900/60 text-slate-200 hover:bg-slate-800'
+                        : 'border-slate-200 bg-slate-50 text-slate-800 hover:bg-slate-100'
+                    }`}
+                    title="アカウントメニュー"
+                  >
+                    <UserAvatar
+                      name={user?.display_name || user?.username || 'ユーザー'}
+                      src={user?.avatar_url}
+                      size="sm"
+                    />
+                    <span className="hidden md:inline font-semibold max-w-[100px] truncate">
+                      {user?.display_name || user?.username}
+                    </span>
+                    <ChevronDown className="size-3 text-slate-400 hidden sm:inline" />
+                  </button>
+
+                  {userMenuOpen && (
+                    <div
+                      className={`absolute right-0 mt-2 w-56 rounded-2xl shadow-xl border py-1.5 z-50 animate-in fade-in-0 zoom-in-95 duration-100 ${
+                        isDark
+                          ? 'bg-slate-900 border-slate-800 text-slate-200'
+                          : 'bg-white border-slate-200 text-slate-800'
+                      }`}
+                    >
+                      <div className="px-4 py-2 border-b border-slate-100 dark:border-slate-800">
+                        <p className="text-xs font-bold truncate">
+                          {user?.display_name || user?.username}
+                        </p>
+                        <p className="text-[11px] text-slate-400 truncate">{user?.email}</p>
+                      </div>
+
+                      <div className="py-1">
+                        <Link
+                          href="/dashboard/settings/profile"
+                          onClick={() => setUserMenuOpen(false)}
+                          className="flex items-center gap-2.5 px-4 py-2 text-xs hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                        >
+                          <User className="size-3.5 text-slate-400" />
+                          <span className="font-medium">アカウント設定</span>
+                        </Link>
+
+                        {canEdit && site.id && site.id !== 'demo-site' && (
+                          <Link
+                            href={`/dashboard/sites/${site.id}`}
+                            onClick={() => setUserMenuOpen(false)}
+                            className="flex items-center gap-2.5 px-4 py-2 text-xs hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                          >
+                            <FolderKanban className="size-3.5 text-slate-400" />
+                            <span>サイト管理</span>
+                          </Link>
+                        )}
+
+                        <Link
+                          href="/dashboard"
+                          onClick={() => setUserMenuOpen(false)}
+                          className="flex items-center gap-2.5 px-4 py-2 text-xs hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                        >
+                          <Settings className="size-3.5 text-slate-400" />
+                          <span>ダッシュボード</span>
+                        </Link>
+                      </div>
+
+                      <div className="border-t border-slate-100 dark:border-slate-800 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setUserMenuOpen(false);
+                            clearAuth();
+                            window.location.reload();
+                          }}
+                          className="w-full flex items-center gap-2.5 px-4 py-2 text-xs text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors cursor-pointer text-left"
+                        >
+                          <LogOut className="size-3.5" />
+                          <span>ログアウト</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
             )}
           </div>
         </div>
@@ -1187,17 +1353,47 @@ export default function SitePageClient() {
                       </Link>
                     </div>
                   ) : (
-                    <Link
-                      href={canEdit && site.id && site.id !== 'demo-site' ? `/dashboard/sites/${site.id}` : '/dashboard'}
-                      onClick={() => setMobileMenuOpen(false)}
-                      className="flex items-center justify-between px-3 py-2 rounded-xl text-sm font-medium border border-border text-foreground hover:bg-muted transition-colors"
-                    >
-                      <div className="flex items-center gap-2">
-                        <ExternalLink className="size-4 text-primary" />
-                        <span>{canEdit ? 'サイト管理' : 'ダッシュボード'}</span>
-                      </div>
-                      <ChevronRight className="size-4 text-muted-foreground" />
-                    </Link>
+                    <div className="space-y-2">
+                      {canEdit && site.id && site.id !== 'demo-site' && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setMobileMenuOpen(false);
+                            setCreatePageOpen(true);
+                          }}
+                          className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-sm font-semibold text-white shadow-xs cursor-pointer"
+                          style={{ backgroundColor: brandPrimaryColor }}
+                        >
+                          <div className="flex items-center gap-2">
+                            <Plus className="size-4" />
+                            <span>新規ページ作成</span>
+                          </div>
+                          <ChevronRight className="size-4 opacity-75" />
+                        </button>
+                      )}
+                      <Link
+                        href="/dashboard/settings/profile"
+                        onClick={() => setMobileMenuOpen(false)}
+                        className="flex items-center justify-between px-3 py-2 rounded-xl text-sm font-medium border border-border text-foreground hover:bg-muted transition-colors"
+                      >
+                        <div className="flex items-center gap-2">
+                          <User className="size-4 text-primary" />
+                          <span>アカウント設定</span>
+                        </div>
+                        <ChevronRight className="size-4 text-muted-foreground" />
+                      </Link>
+                      <Link
+                        href={canEdit && site.id && site.id !== 'demo-site' ? `/dashboard/sites/${site.id}` : '/dashboard'}
+                        onClick={() => setMobileMenuOpen(false)}
+                        className="flex items-center justify-between px-3 py-2 rounded-xl text-sm font-medium border border-border text-foreground hover:bg-muted transition-colors"
+                      >
+                        <div className="flex items-center gap-2">
+                          <ExternalLink className="size-4 text-primary" />
+                          <span>{canEdit ? 'サイト管理' : 'ダッシュボード'}</span>
+                        </div>
+                        <ChevronRight className="size-4 text-muted-foreground" />
+                      </Link>
+                    </div>
                   )}
                 </div>
               </div>
@@ -1241,6 +1437,7 @@ export default function SitePageClient() {
                 onOpenComments={() => setCommentsOpen(true)}
                 commentsCount={comments.length}
                 canEdit={canEdit}
+                onOpenCreatePage={() => setCreatePageOpen(true)}
               />
 
               {/* パンくずリスト */}
@@ -1464,6 +1661,20 @@ export default function SitePageClient() {
           onClose={() => setInfoModalOpen(false)}
           page={activePage}
           site={site}
+        />
+      )}
+
+      {/* 新規ページ作成モーダル */}
+      {canEdit && site.id && site.id !== 'demo-site' && (
+        <CreatePageModal
+          isOpen={createPageOpen}
+          onClose={() => setCreatePageOpen(false)}
+          siteId={site.id}
+          siteSlug={siteSlug}
+          onCreated={(newPageId, newSlug) => {
+            queryClient.invalidateQueries({ queryKey: ['public-site', siteSlug] });
+            queryClient.invalidateQueries({ queryKey: ['pages', site.id] });
+          }}
         />
       )}
     </div>

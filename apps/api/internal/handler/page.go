@@ -202,10 +202,21 @@ func (h *PageHandler) GetPublicPage(c *gin.Context) {
 
 	pageSlug := strings.Trim(rawPageSlug, "/")
 	unescaped, _ := url.PathUnescape(pageSlug)
+
+	// .md / .markdown 拡張子と相対パス記号 "./" の除去
+	trimmedSlug := strings.TrimPrefix(pageSlug, "./")
+	trimmedSlug = strings.TrimSuffix(trimmedSlug, ".md")
+	trimmedSlug = strings.TrimSuffix(trimmedSlug, ".markdown")
+	trimmedSlug = strings.Trim(trimmedSlug, "/")
+
+	lowerTrimmed := strings.ToLower(trimmedSlug)
+	isHomeLike := pageSlug == "" || pageSlug == "index" ||
+		lowerTrimmed == "" || lowerTrimmed == "index" || lowerTrimmed == "home" || lowerTrimmed == "readme"
+
 	var page model.Page
 	var err error
-	if pageSlug == "" || pageSlug == "index" {
-		err = h.DB.Where("site_id = ? AND slug IN ('index', 'home', '') AND status = ? AND deleted_at IS NULL",
+	if isHomeLike {
+		err = h.DB.Where("site_id = ? AND LOWER(slug) IN ('index', 'home', 'readme', '') AND status = ? AND deleted_at IS NULL",
 			site.ID, model.PageStatusPublished).Order("position asc, created_at asc").First(&page).Error
 		if err != nil {
 			err = h.DB.Where("site_id = ? AND status = ? AND deleted_at IS NULL", site.ID, model.PageStatusPublished).
@@ -213,8 +224,18 @@ func (h *PageHandler) GetPublicPage(c *gin.Context) {
 		}
 	} else {
 		possibleSlugs := []string{pageSlug, "/" + pageSlug}
+		if trimmedSlug != "" && trimmedSlug != pageSlug {
+			possibleSlugs = append(possibleSlugs, trimmedSlug, "/"+trimmedSlug)
+		}
 		if unescaped != "" && unescaped != pageSlug {
 			possibleSlugs = append(possibleSlugs, unescaped, "/"+unescaped)
+			unescapedTrimmed := strings.TrimPrefix(unescaped, "./")
+			unescapedTrimmed = strings.TrimSuffix(unescapedTrimmed, ".md")
+			unescapedTrimmed = strings.TrimSuffix(unescapedTrimmed, ".markdown")
+			unescapedTrimmed = strings.Trim(unescapedTrimmed, "/")
+			if unescapedTrimmed != "" && unescapedTrimmed != unescaped {
+				possibleSlugs = append(possibleSlugs, unescapedTrimmed, "/"+unescapedTrimmed)
+			}
 		}
 		err = h.DB.Where("site_id = ? AND slug IN ? AND status = ? AND deleted_at IS NULL",
 			site.ID, possibleSlugs, model.PageStatusPublished).First(&page).Error

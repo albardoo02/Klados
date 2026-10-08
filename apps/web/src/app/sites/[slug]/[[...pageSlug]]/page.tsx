@@ -25,9 +25,10 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
     const currentSlug = Array.isArray(pageSlug) ? pageSlug.join('/') : '';
     if (currentSlug) {
+      const cleanSlug = currentSlug.replace(/^\.?\//, '').replace(/\.(?:md|markdown)$/i, '');
       try {
         const pageRes = await fetch(
-          `${API_BASE}/public/sites/${slug}/pages/${currentSlug}`,
+          `${API_BASE}/public/sites/${slug}/pages/${cleanSlug || currentSlug}`,
           { next: { revalidate: 60 } }
         );
         if (pageRes.ok) {
