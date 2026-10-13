@@ -501,7 +501,7 @@ func (h *AuthHandler) QuickVerify(c *gin.Context) {
 
 // GET /v1/auth/routing-rules (振り分けルール一覧)
 func (h *AuthHandler) ListRoutingRules(c *gin.Context) {
-	var rules []model.AuthRoutingRule
+	rules := make([]model.AuthRoutingRule, 0)
 	query := h.DB.Preload("TargetSite")
 	if siteIDStr := strings.TrimSpace(c.Query("site_id")); siteIDStr != "" {
 		if siteUUID, err := uuid.Parse(siteIDStr); err == nil {

@@ -2445,17 +2445,19 @@ export default function PageEditPage() {
                     </span>
                     <div className="flex flex-wrap gap-1 max-h-32 overflow-y-auto">
                       {siteCategories.map((c) => {
+                        const catName = String(c?.name || c?.category_name || '').trim();
+                        if (!catName) return null;
                         const isAssigned = pageCategories.some(
-                          (item) => item.toLowerCase() === c.name.toLowerCase()
+                          (item) => item.toLowerCase() === catName.toLowerCase()
                         );
                         return (
                           <button
-                            key={c.name}
+                            key={catName}
                             type="button"
                             onClick={() =>
                               isAssigned
-                                ? handleRemovePageCategory(c.name)
-                                : handleAddPageCategory(c.name)
+                                ? handleRemovePageCategory(catName)
+                                : handleAddPageCategory(catName)
                             }
                             className={`text-[11px] px-2 py-0.5 rounded-full border transition-colors cursor-pointer ${
                               isAssigned
@@ -2464,7 +2466,7 @@ export default function PageEditPage() {
                             }`}
                           >
                             {isAssigned ? '✓ ' : '+ '}
-                            {c.name}
+                            {catName}
                           </button>
                         );
                       })}
@@ -4366,21 +4368,23 @@ export default function PageEditPage() {
                     </span>
                     <div className="flex flex-wrap gap-1">
                       {siteCategories.map((sc) => {
-                        const isAdded = mdUploadModal.categories.includes(sc.name);
+                        const catName = String(sc?.name || sc?.category_name || '').trim();
+                        if (!catName) return null;
+                        const isAdded = mdUploadModal.categories.includes(catName);
                         return (
                           <button
-                            key={sc.name}
+                            key={catName}
                             type="button"
                             onClick={() => {
                               if (isAdded) {
                                 setMdUploadModal((prev) => ({
                                   ...prev,
-                                  categories: prev.categories.filter((c) => c !== sc.name),
+                                  categories: prev.categories.filter((c) => c !== catName),
                                 }));
                               } else {
                                 setMdUploadModal((prev) => ({
                                   ...prev,
-                                  categories: [...prev.categories, sc.name],
+                                  categories: [...prev.categories, catName],
                                 }));
                               }
                             }}
@@ -4391,7 +4395,7 @@ export default function PageEditPage() {
                             }`}
                           >
                             <Plus className={`size-2.5 ${isAdded ? 'rotate-45' : ''}`} />
-                            <span>{sc.name}</span>
+                            <span>{catName}</span>
                           </button>
                         );
                       })}

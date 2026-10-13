@@ -762,21 +762,23 @@ export default function SiteDetailPage() {
                   </button>
                 </div>
 
-                {siteCategories.length > 0 && (
+                {Array.isArray(siteCategories) && siteCategories.length > 0 && (
                   <div className="flex flex-wrap items-center gap-1 pt-1">
                     <span className="text-[10px] text-slate-400 mr-1">サイト内の既存カテゴリ:</span>
                     {siteCategories.slice(0, 15).map((c) => {
+                      const catName = String(c?.name || c?.category_name || '').trim();
+                      if (!catName) return null;
                       const isSelected = editCategories.some(
-                        (item) => item.toLowerCase() === c.name.toLowerCase()
+                        (item) => item.toLowerCase() === catName.toLowerCase()
                       );
                       return (
                         <button
-                          key={c.name}
+                          key={catName}
                           type="button"
                           onClick={() =>
                             isSelected
-                              ? handleRemoveEditCategory(c.name)
-                              : handleAddEditCategory(c.name)
+                              ? handleRemoveEditCategory(catName)
+                              : handleAddEditCategory(catName)
                           }
                           className={`text-[10px] px-2 py-0.5 rounded-full border transition-colors cursor-pointer ${
                             isSelected
@@ -785,7 +787,7 @@ export default function SiteDetailPage() {
                           }`}
                         >
                           {isSelected ? '✓ ' : '+ '}
-                          {c.name}
+                          {catName}
                         </button>
                       );
                     })}

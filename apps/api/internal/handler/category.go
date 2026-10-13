@@ -413,22 +413,47 @@ func (h *CategoryHandler) ListForSite(c *gin.Context) {
 		siteID = c.Param("siteId")
 	}
 
-	type CatCount struct {
-		CategoryName string `json:"category_name"`
-		Count        int    `json:"count"`
+	type SiteCategoryItem struct {
+		Name             string `json:"name"`
+		CategoryName     string `json:"category_name"`
+		Count            int    `json:"count"`
+		PageCount        int    `json:"page_count"`
+		SubcategoryCount int    `json:"subcategory_count"`
+		TotalCount       int    `json:"total_count"`
 	}
 
-	var results []CatCount
+	type CatRow struct {
+		CategoryName string
+		Count        int
+	}
+
+	var rows []CatRow
 	err := h.DB.Table("page_categories").
 		Select("category_name, COUNT(*) as count").
 		Where("site_id = ?", siteID).
 		Group("category_name").
 		Order("category_name ASC").
-		Find(&results).Error
+		Find(&rows).Error
 
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
+	}
+
+	results := make([]SiteCategoryItem, 0, len(rows))
+	for _, r := range rows {
+		name := strings.TrimSpace(r.CategoryName)
+		if name == "" {
+			continue
+		}
+		results = append(results, SiteCategoryItem{
+			Name:             name,
+			CategoryName:     name,
+			Count:            r.Count,
+			PageCount:        r.Count,
+			SubcategoryCount: 0,
+			TotalCount:       r.Count,
+		})
 	}
 
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": results})

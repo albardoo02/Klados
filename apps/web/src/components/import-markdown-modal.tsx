@@ -368,16 +368,18 @@ export function ImportMarkdownModal({
                 </div>
                 <div className="flex flex-wrap gap-1.5">
                   {siteCategories.map((sc) => {
-                    const isAlreadyAdded = commonCategories.includes(sc.name);
+                    const catName = String(sc?.name || sc?.category_name || '').trim();
+                    if (!catName) return null;
+                    const isAlreadyAdded = commonCategories.includes(catName);
                     return (
                       <button
-                        key={sc.name}
+                        key={catName}
                         type="button"
                         onClick={() => {
                           if (isAlreadyAdded) {
-                            handleRemoveCommonCategory(sc.name);
+                            handleRemoveCommonCategory(catName);
                           } else {
-                            handleAddCommonCategory(sc.name);
+                            handleAddCommonCategory(catName);
                           }
                         }}
                         className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] transition-colors cursor-pointer border ${
@@ -387,8 +389,8 @@ export function ImportMarkdownModal({
                         }`}
                       >
                         <Plus className={`size-2.5 ${isAlreadyAdded ? 'rotate-45 text-blue-500' : ''}`} />
-                        <span>{sc.name}</span>
-                        <span className="text-[9px] opacity-60 font-mono">({sc.total_count})</span>
+                        <span>{catName}</span>
+                        <span className="text-[9px] opacity-60 font-mono">({sc.total_count ?? sc.count ?? 0})</span>
                       </button>
                     );
                   })}

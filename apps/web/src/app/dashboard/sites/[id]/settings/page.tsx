@@ -198,10 +198,11 @@ export default function SiteSettingsPage() {
     queryFn: () => sitesApi.get(id).then((r) => r.data.data),
   });
 
-  const { data: pages = [] } = useQuery({
+  const { data: pagesData } = useQuery({
     queryKey: ['pages', id],
-    queryFn: () => pagesApi.list(id).then((r) => r.data.data),
+    queryFn: () => pagesApi.list(id).then((r) => r.data?.data || []),
   });
+  const pages = Array.isArray(pagesData) ? pagesData : [];
 
   // サイト別認証設定の取得
   const { data: siteAuthData } = useQuery({
@@ -211,11 +212,12 @@ export default function SiteSettingsPage() {
   });
 
   // このサイト向けの自動振り分けルール一覧
-  const { data: siteRules = [] } = useQuery<AuthRoutingRule[]>({
+  const { data: siteRulesData } = useQuery<AuthRoutingRule[]>({
     queryKey: ['site-routing-rules', id],
-    queryFn: () => authApi.getRoutingRules(id).then((r) => r.data.data),
+    queryFn: () => authApi.getRoutingRules(id).then((r) => r.data?.data || []),
     enabled: !!id,
   });
+  const siteRules = Array.isArray(siteRulesData) ? siteRulesData : [];
 
   useEffect(() => {
     if (siteAuthData?.config && !siteAuthInitialized) {

@@ -439,9 +439,31 @@ export const publicApi = {
 // --- Categories (MediaWiki Style) ---
 export interface CategorySummary {
   name: string;
+  category_name?: string;
+  count?: number;
   page_count: number;
   subcategory_count: number;
   total_count: number;
+}
+
+export function normalizeCategorySummaries(raw: any): CategorySummary[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((item: any) => {
+      const name = String(item?.name || item?.category_name || '').trim();
+      const totalCount = Number(item?.total_count ?? item?.count ?? item?.page_count ?? 0);
+      const pageCount = Number(item?.page_count ?? item?.count ?? totalCount);
+      const subcategoryCount = Number(item?.subcategory_count ?? 0);
+      return {
+        name,
+        category_name: name,
+        count: totalCount,
+        page_count: pageCount,
+        subcategory_count: subcategoryCount,
+        total_count: totalCount,
+      };
+    })
+    .filter((item) => item.name.length > 0);
 }
 
 export interface CategoryMemberItem {
@@ -473,11 +495,21 @@ export interface CategoryDetailData {
 
 export const categoriesApi = {
   listPublic: (siteSlug: string) =>
-    api.get(`/public/sites/${siteSlug}/categories`),
+    api.get(`/public/sites/${siteSlug}/categories`).then((res) => {
+      if (res?.data) {
+        res.data.data = normalizeCategorySummaries(res.data.data);
+      }
+      return res;
+    }),
   getPublic: (siteSlug: string, categoryName: string) =>
     api.get(`/public/sites/${siteSlug}/categories/${encodeURIComponent(categoryName)}`),
   listForSite: (siteId: string) =>
-    api.get(`/sites/${siteId}/categories`),
+    api.get(`/sites/${siteId}/categories`).then((res) => {
+      if (res?.data) {
+        res.data.data = normalizeCategorySummaries(res.data.data);
+      }
+      return res;
+    }),
 };
 
 // --- Comments (Phase 3) ---

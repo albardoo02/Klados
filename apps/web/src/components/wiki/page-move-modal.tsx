@@ -235,13 +235,15 @@ export function PageMoveModal({ isOpen, onClose, page, siteSlug, siteId }: PageM
               <div className="flex flex-wrap items-center gap-1 pt-0.5">
                 <span className="text-[10px] text-slate-400 mr-1">既存カテゴリ:</span>
                 {existingCategories.slice(0, 12).map((c) => {
-                  const selected = categories.some((item) => item.toLowerCase() === c.name.toLowerCase());
+                  const catName = String(c?.name || c?.category_name || '').trim();
+                  if (!catName) return null;
+                  const selected = categories.some((item) => item.toLowerCase() === catName.toLowerCase());
                   return (
                     <button
-                      key={c.name}
+                      key={catName}
                       type="button"
                       onClick={() =>
-                        selected ? handleRemoveCategory(c.name) : handleAddCategory(c.name)
+                        selected ? handleRemoveCategory(catName) : handleAddCategory(catName)
                       }
                       className={`text-[10px] px-2 py-0.5 rounded-full border transition-colors cursor-pointer ${
                         selected
@@ -250,7 +252,7 @@ export function PageMoveModal({ isOpen, onClose, page, siteSlug, siteId }: PageM
                       }`}
                     >
                       {selected ? '✓ ' : '+ '}
-                      {c.name}
+                      {catName}
                     </button>
                   );
                 })}
