@@ -2,6 +2,7 @@ services:
   postgres:
     image: postgres:16-alpine
     container_name: klados-postgres
+    restart: unless-stopped
     environment:
       POSTGRES_USER: klados
       POSTGRES_PASSWORD: klados
@@ -19,6 +20,7 @@ services:
   redis:
     image: redis:7-alpine
     container_name: klados-redis
+    restart: unless-stopped
     ports:
       - "6379:6379"
     volumes:
@@ -36,6 +38,7 @@ services:
     image: klados-minio:latest
     pull_policy: never
     container_name: klados-minio
+    restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: minioadmin
@@ -53,6 +56,7 @@ services:
 
   api:
     container_name: klados-api
+    restart: unless-stopped
     build:
       context: ./apps/api
       dockerfile: Dockerfile
@@ -75,11 +79,10 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    profiles:
-      - all
 
   web:
     container_name: klados-web
+    restart: unless-stopped
     build:
       context: ./apps/web
       dockerfile: Dockerfile
@@ -93,8 +96,6 @@ services:
       INTERNAL_API_URL: http://api:8080/v1
     depends_on:
       - api
-    profiles:
-      - all
 
 volumes:
   postgres_data:

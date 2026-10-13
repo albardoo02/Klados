@@ -29,7 +29,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "Starting infrastructure services (PostgreSQL, Redis, MinIO)..." -ForegroundColor Cyan
-docker compose up -d
+docker compose up -d postgres redis minio
 if ($LASTEXITCODE -eq 0) {
     Write-Host "[OK] Infrastructure containers running." -ForegroundColor Green
 } else {
