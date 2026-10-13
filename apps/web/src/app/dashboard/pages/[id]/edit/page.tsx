@@ -15,6 +15,11 @@ import { DiffViewer } from '@/components/diff-viewer';
 import { MediaLibraryModal } from '@/components/media-library-modal';
 import { CommentsDrawer } from '@/components/comments-drawer';
 import { InternalLinkModal } from '@/components/wiki/internal-link-modal';
+import {
+  TableMakerModal,
+  detectMarkdownTableAtCursor,
+  ParsedMarkdownTable,
+} from '@/components/wiki/table-maker-modal';
 import { useAuthStore } from '@/store/auth';
 import {
   buildMediaMarkdown,
@@ -240,6 +245,36 @@ export default function PageEditPage() {
     }
     setLinkInitialText(selText);
     setInternalLinkModalOpen(true);
+  };
+
+  // Markdownテーブルメーカー モーダル ステート
+  const [tableMakerOpen, setTableMakerOpen] = useState(false);
+  const [editingTableData, setEditingTableData] = useState<ParsedMarkdownTable | null>(null);
+
+  const handleOpenTableMaker = (explicitRange?: { from: number; to: number }) => {
+    if (viewRef.current) {
+      // スラッシュコマンド (/table) から起動された場合は、まずスラッシュコマンド文字列を消去
+      if (explicitRange) {
+        viewRef.current.dispatch({
+          changes: { from: explicitRange.from, to: explicitRange.to, insert: '' },
+          selection: { anchor: explicitRange.from },
+        });
+        lastSelectionRef.current = { from: explicitRange.from, to: explicitRange.from };
+      }
+
+      const state = viewRef.current.state;
+      const caretPos =
+        explicitRange?.from ??
+        (state.selection.main.from > 0
+          ? state.selection.main.from
+          : lastSelectionRef.current?.from ?? state.selection.main.from);
+
+      const detected = detectMarkdownTableAtCursor(state.doc.toString(), caretPos);
+      setEditingTableData(detected);
+    } else {
+      setEditingTableData(null);
+    }
+    setTableMakerOpen(true);
   };
 
   // 画像オプション編集モーダル (MediaWiki風 サイズ・位置・枠・キャプション設定) ステート
@@ -1159,15 +1194,10 @@ export default function PageEditPage() {
       },
       {
         id: 'table',
-        label: 'テーブル (表)',
-        description: 'GFM構文のMarkdownテーブルを挿入',
+        label: 'テーブルメーカー (表の作成・編集)',
+        description: '行数・列数・文字揃え・内容を自由に設定して表を挿入/編集',
         icon: TableIcon,
-        action: (range) =>
-          insertText(
-            '\n| 項目名 | 説明 | 状態 |\n| :--- | :--- | :---: |\n| サンプル1 | 詳細テキスト | ✅ 完了 |\n| サンプル2 | 詳細テキスト | ⏳ 進行中 |\n',
-            undefined,
-            range
-          ),
+        action: (range) => handleOpenTableMaker(range),
       },
       {
         id: 'link',
@@ -2987,14 +3017,12 @@ export default function PageEditPage() {
           </button>
           <button
             type="button"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() =>
-              insertText(
-                '\n| ヘッダー 1 | ヘッダー 2 | ヘッダー 3 |\n| :--- | :---: | ---: |\n| データ 1 | 中央揃え | 右揃え |\n| データ 2 | データ | データ |\n'
-              )
-            }
+            onMouseDown={(e) => {
+              e.preventDefault();
+              handleOpenTableMaker();
+            }}
             className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer"
-            title="テーブル (表)"
+            title="テーブルメーカー (表の作成 / カーソル位置の表を編集)"
           >
             <TableIcon className="size-4" />
           </button>
@@ -3596,6 +3624,20 @@ export default function PageEditPage() {
         currentPageId={id}
         initialSelectedText={linkInitialText}
         onInsertLink={(syntax) => insertText(syntax)}
+      />
+
+      {/* Markdownテーブルメーカー モーダル */}
+      <TableMakerModal
+        isOpen={tableMakerOpen}
+        onClose={() => setTableMakerOpen(false)}
+        initialTable={editingTableData}
+        onInsertTable={(markdownTable, replaceRange) => {
+          if (replaceRange) {
+            insertText(markdownTable, undefined, replaceRange);
+          } else {
+            insertText(`\n${markdownTable}\n`);
+          }
+        }}
       />
 
       {/* バージョン履歴 & 差分表示モーダル */}
