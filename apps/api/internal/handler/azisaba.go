@@ -599,7 +599,7 @@ func (h *AuthHandler) AzisabaAuth(c *gin.Context) {
 		evaluations = append(evaluations, eval)
 	}
 
-	token, err := h.generateToken(currentUser.ID.String())
+	token, err := h.generateToken(currentUser.ID.String(), 30*24*time.Hour)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "トークン生成に失敗しました"})
 		return
