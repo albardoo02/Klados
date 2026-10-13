@@ -133,21 +133,19 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
           <div className="h-4 w-px bg-slate-200 hidden sm:block" />
 
-          {/* 認証・振り分け設定リンク (root管理者のみ表示) */}
-          {user?.is_root && (
-            <Link
-              href="/dashboard/settings/auth"
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition-colors ${
-                pathname === '/dashboard/settings/auth'
-                  ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-              }`}
-              title="認証・アクセス振り分け設定 (root管理者)"
-            >
-              <ShieldCheck className="size-3.5 text-blue-600" />
-              <span className="hidden md:inline">認証・SSO</span>
-            </Link>
-          )}
+          {/* 認証・振り分け設定リンク (サイト単位および全体設定) */}
+          <Link
+            href="/dashboard/settings/auth"
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition-colors ${
+              pathname === '/dashboard/settings/auth'
+                ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+            }`}
+            title="サイト別・全体のログイン認証 & アクセス振り分け設定"
+          >
+            <ShieldCheck className="size-3.5 text-blue-600" />
+            <span className="hidden md:inline">認証・ログイン設定</span>
+          </Link>
 
           {/* APIキー設定リンク */}
           <Link
@@ -235,19 +233,17 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                     </div>
                   </Link>
 
-                  {user.is_root && (
-                    <Link
-                      href="/dashboard/settings/auth"
-                      onClick={() => setUserMenuOpen(false)}
-                      className="flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-slate-100 transition-colors text-slate-700 hover:text-slate-900"
-                    >
-                      <ShieldCheck className="size-4 text-emerald-600" />
-                      <div className="flex-1">
-                        <span>認証 & 振り分け設定</span>
-                        <span className="block text-[10px] text-slate-400 font-normal">システム管理者(root)専用</span>
-                      </div>
-                    </Link>
-                  )}
+                  <Link
+                    href="/dashboard/settings/auth"
+                    onClick={() => setUserMenuOpen(false)}
+                    className="flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-slate-100 transition-colors text-slate-700 hover:text-slate-900"
+                  >
+                    <ShieldCheck className="size-4 text-emerald-600" />
+                    <div className="flex-1">
+                      <span>認証 & 振り分け設定</span>
+                      <span className="block text-[10px] text-slate-400 font-normal">サイト別ログイン・権限自動付与</span>
+                    </div>
+                  </Link>
 
                   <Link
                     href="/dashboard/settings/api-keys"

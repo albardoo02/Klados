@@ -20,7 +20,11 @@ export default function RegisterPage() {
   const [authConfig, setAuthConfig] = useState<AuthConfig | null>(null);
 
   useEffect(() => {
-    authApi.getAuthConfig()
+    const siteParam =
+      typeof window !== 'undefined'
+        ? new URLSearchParams(window.location.search).get('site') || undefined
+        : undefined;
+    authApi.getAuthConfig(siteParam)
       .then((res) => setAuthConfig(res.data.data.config))
       .catch(() => setAuthConfig(null));
   }, []);

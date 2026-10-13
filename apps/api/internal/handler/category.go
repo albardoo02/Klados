@@ -78,6 +78,71 @@ func ExtractCategories(content, defaultSortKey string) []ExtractedCategory {
 	return result
 }
 
+// ExtractAllPageCategories combines categories stored in page Frontmatter with categories in Markdown content
+func ExtractAllPageCategories(page *model.Page) []ExtractedCategory {
+	if page == nil {
+		return nil
+	}
+	defaultSort := page.Title
+	if defaultSort == "" {
+		defaultSort = page.Slug
+	}
+
+	seen := make(map[string]bool)
+	var combined []ExtractedCategory
+
+	// 1. Categories explicitly set in page Frontmatter / options UI
+	for _, name := range page.GetFrontmatterCategories() {
+		trimmed := strings.TrimSpace(name)
+		if trimmed == "" {
+			continue
+		}
+		lower := strings.ToLower(trimmed)
+		if !seen[lower] {
+			seen[lower] = true
+			sortKey := defaultSort
+			if sortKey == "" {
+				sortKey = trimmed
+			}
+			combined = append(combined, ExtractedCategory{
+				Name:    trimmed,
+				SortKey: sortKey,
+			})
+		}
+	}
+
+	// 2. Categories written inline in Markdown content [[Category:xxx]]
+	for _, c := range ExtractCategories(page.Content, defaultSort) {
+		lower := strings.ToLower(c.Name)
+		if !seen[lower] {
+			seen[lower] = true
+			combined = append(combined, c)
+		}
+	}
+
+	return combined
+}
+
+// PopulatePageCategories fills page.Categories from both Frontmatter and Markdown content
+func PopulatePageCategories(page *model.Page) {
+	if page == nil {
+		return
+	}
+	all := ExtractAllPageCategories(page)
+	names := make([]string, 0, len(all))
+	for _, c := range all {
+		names = append(names, c.Name)
+	}
+	page.Categories = names
+}
+
+// PopulatePagesCategories fills Categories for a slice of pages
+func PopulatePagesCategories(pages []model.Page) {
+	for i := range pages {
+		PopulatePageCategories(&pages[i])
+	}
+}
+
 // SyncPageCategories synchronizes category records for a given page
 func SyncPageCategories(db *gorm.DB, page *model.Page) error {
 	if db == nil || page == nil || page.ID == uuid.Nil {
@@ -89,12 +154,8 @@ func SyncPageCategories(db *gorm.DB, page *model.Page) error {
 		return db.Where("page_id = ?", page.ID).Delete(&model.PageCategory{}).Error
 	}
 
-	defaultSort := page.Title
-	if defaultSort == "" {
-		defaultSort = page.Slug
-	}
-
-	cats := ExtractCategories(page.Content, defaultSort)
+	cats := ExtractAllPageCategories(page)
+	PopulatePageCategories(page)
 
 	return db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("page_id = ?", page.ID).Delete(&model.PageCategory{}).Error; err != nil {

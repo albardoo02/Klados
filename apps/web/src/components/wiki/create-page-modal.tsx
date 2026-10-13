@@ -83,21 +83,17 @@ export function CreatePageModal({
     setError(null);
 
     try {
-      let initialContent = `# ${title.trim()}\n\nここにコンテンツを入力してください。\n`;
-      if (category.trim()) {
-        const cats = category
-          .split(',')
-          .map((c) => c.trim())
-          .filter(Boolean);
-        if (cats.length > 0) {
-          initialContent += '\n' + cats.map((c) => `[[Category:${c}]]`).join('\n') + '\n';
-        }
-      }
+      const initialContent = `# ${title.trim()}\n\nここにコンテンツを入力してください。\n`;
+      const cats = category
+        .split(',')
+        .map((c) => c.trim())
+        .filter(Boolean);
 
       const res = await pagesApi.create(siteId, {
         title: title.trim(),
         slug: finalSlug,
         content: initialContent,
+        categories: cats.length > 0 ? cats : undefined,
       });
 
       const newPage = res.data?.data;

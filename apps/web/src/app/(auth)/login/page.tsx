@@ -22,6 +22,8 @@ export default function LoginPage() {
   const [authMeta, setAuthMeta] = useState<{
     github_configured?: boolean;
     discord_configured?: boolean;
+    site_title?: string;
+    site_slug?: string;
   } | null>(null);
   const [showAdminEmailForm, setShowAdminEmailForm] = useState(false);
 
@@ -34,25 +36,34 @@ export default function LoginPage() {
           router.replace(returnTo);
           return;
         }
+        const siteSlug = params.get('site');
+        if (siteSlug) {
+          router.replace(`/sites/${siteSlug}`);
+          return;
+        }
       }
       router.replace('/dashboard');
     }
   }, [user, token, router]);
 
   useEffect(() => {
+    let siteParam: string | undefined;
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
       if (params.get('admin') === '1' || params.get('emergency') === '1' || params.get('root') === '1') {
         setShowAdminEmailForm(true);
       }
+      siteParam = params.get('site') || undefined;
     }
 
-    authApi.getAuthConfig()
+    authApi.getAuthConfig(siteParam)
       .then((res) => {
         setAuthConfig(res.data.data.config);
         setAuthMeta({
           github_configured: res.data.data.github_configured,
           discord_configured: res.data.data.discord_configured,
+          site_title: res.data.data.site_title,
+          site_slug: res.data.data.site_slug,
         });
       })
       .catch(() => {
@@ -123,7 +134,9 @@ export default function LoginPage() {
           <Link href="/" className="text-2xl font-black tracking-tight inline-block mb-1">
             Kla<span className="text-blue-600">dos</span>
           </Link>
-          <h1 className="text-xl font-bold text-slate-900">{t('auth.login.title')}</h1>
+          <h1 className="text-xl font-bold text-slate-900">
+            {authMeta?.site_title ? `${authMeta.site_title} - ${t('auth.login.title')}` : t('auth.login.title')}
+          </h1>
           <p className="text-xs text-slate-500 mt-1">{t('brand.description')}</p>
         </div>
 

@@ -9,17 +9,28 @@ import {markdown} from '@codemirror/lang-markdown';
 import { Annotation, Compartment, EditorState } from '@codemirror/state';
 import { vim } from '@replit/codemirror-vim';
 import { keymap } from '@codemirror/view';
-import { MarkdownRenderer } from '@/components/markdown-renderer';
+import { MarkdownRenderer, getPageCategories, getPageCategoryNames } from '@/components/markdown-renderer';
+import { CategoryBox } from '@/components/wiki/category-box';
 import { DiffViewer } from '@/components/diff-viewer';
 import { MediaLibraryModal } from '@/components/media-library-modal';
 import { CommentsDrawer } from '@/components/comments-drawer';
 import { InternalLinkModal } from '@/components/wiki/internal-link-modal';
 import { useAuthStore } from '@/store/auth';
-import { formatMediaRef } from '@/lib/media';
-import { parseMarkdownFrontmatter, appendCategoriesToMarkdown } from '@/lib/markdown-import';
+import {
+  buildMediaMarkdown,
+  formatMediaRef,
+  MediaImageAlign,
+  MediaImageFrame,
+  parseExistingImageMarkdown,
+  resolveMediaUrl,
+} from '@/lib/media';
+import { parseMarkdownFrontmatter } from '@/lib/markdown-import';
 import { getSitePublicUrl } from '@/lib/site-url';
 import Link from 'next/link';
 import {
+  AlignCenter,
+  AlignLeft,
+  AlignRight,
   ArrowLeft,
   Bold,
   Check,
@@ -45,6 +56,7 @@ import {
   List,
   ListOrdered,
   Loader2,
+  Maximize2,
   MessageSquare,
   Minus,
   Palette,
@@ -52,6 +64,7 @@ import {
   Quote,
   RotateCcw,
   Save,
+  Settings2,
   Sigma,
   Sparkles,
   Strikethrough,
@@ -62,6 +75,76 @@ import {
   UploadCloud,
   X,
 } from 'lucide-react';
+
+// --- HSV / RGB / HEX カラー変換ユーティリティ ---
+function clampNum(val: number, min: number, max: number): number {
+  return Math.min(Math.max(val, min), max);
+}
+
+function hsvToRgb(h: number, s: number, v: number): { r: number; g: number; b: number } {
+  const sn = clampNum(s, 0, 100) / 100;
+  const vn = clampNum(v, 0, 100) / 100;
+  const c = vn * sn;
+  const hh = ((h % 360) + 360) % 360 / 60;
+  const x = c * (1 - Math.abs((hh % 2) - 1));
+  const m = vn - c;
+  let r1 = 0, g1 = 0, b1 = 0;
+  if (hh >= 0 && hh < 1) { r1 = c; g1 = x; b1 = 0; }
+  else if (hh >= 1 && hh < 2) { r1 = x; g1 = c; b1 = 0; }
+  else if (hh >= 2 && hh < 3) { r1 = 0; g1 = c; b1 = x; }
+  else if (hh >= 3 && hh < 4) { r1 = 0; g1 = x; b1 = c; }
+  else if (hh >= 4 && hh < 5) { r1 = x; g1 = 0; b1 = c; }
+  else { r1 = c; g1 = 0; b1 = x; }
+  return {
+    r: Math.round((r1 + m) * 255),
+    g: Math.round((g1 + m) * 255),
+    b: Math.round((b1 + m) * 255),
+  };
+}
+
+function rgbToHex(r: number, g: number, b: number): string {
+  const toHex = (n: number) => clampNum(Math.round(n), 0, 255).toString(16).padStart(2, '0');
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+}
+
+function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
+  const clean = hex.trim().replace(/^#/, '');
+  if (/^[0-9a-fA-F]{3}$/.test(clean)) {
+    return {
+      r: parseInt(clean[0] + clean[0], 16),
+      g: parseInt(clean[1] + clean[1], 16),
+      b: parseInt(clean[2] + clean[2], 16),
+    };
+  }
+  if (/^[0-9a-fA-F]{6}$/.test(clean)) {
+    return {
+      r: parseInt(clean.slice(0, 2), 16),
+      g: parseInt(clean.slice(2, 4), 16),
+      b: parseInt(clean.slice(4, 6), 16),
+    };
+  }
+  return null;
+}
+
+function rgbToHsv(r: number, g: number, b: number): { h: number; s: number; v: number } {
+  const rn = clampNum(r, 0, 255) / 255;
+  const gn = clampNum(g, 0, 255) / 255;
+  const bn = clampNum(b, 0, 255) / 255;
+  const max = Math.max(rn, gn, bn);
+  const min = Math.min(rn, gn, bn);
+  const d = max - min;
+  let h = 0;
+  if (d !== 0) {
+    if (max === rn) h = ((gn - bn) / d) % 6;
+    else if (max === gn) h = (bn - rn) / d + 2;
+    else h = (rn - gn) / d + 4;
+    h = Math.round(h * 60);
+    if (h < 0) h += 360;
+  }
+  const s = max === 0 ? 0 : Math.round((d / max) * 100);
+  const v = Math.round(max * 100);
+  return { h, s, v };
+}
 
 interface Collaborator {
   id: string;
@@ -119,6 +202,26 @@ export default function PageEditPage() {
   const [isReverting, setIsReverting] = useState(false);
   const [revertSuccessMsg, setRevertSuccessMsg] = useState<string | null>(null);
 
+  // カテゴリ設定メニューバー (オプション) 用ステート
+  const [pageCategories, setPageCategories] = useState<string[]>([]);
+  const [categoryMenuOpen, setCategoryMenuOpen] = useState(false);
+  const [categoryInput, setCategoryInput] = useState('');
+  const categoryMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (categoryMenuRef.current && !categoryMenuRef.current.contains(e.target as Node)) {
+        setCategoryMenuOpen(false);
+      }
+    };
+    if (categoryMenuOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [categoryMenuOpen]);
+
   const handleOpenLinkModal = () => {
     let selText = '';
     if (viewRef.current) {
@@ -137,6 +240,95 @@ export default function PageEditPage() {
     }
     setLinkInitialText(selText);
     setInternalLinkModalOpen(true);
+  };
+
+  // 画像オプション編集モーダル (MediaWiki風 サイズ・位置・枠・キャプション設定) ステート
+  const [imageOptionsModal, setImageOptionsModal] = useState<{
+    isOpen: boolean;
+    mediaRef: string;
+    syntaxMode: 'mediawiki' | 'markdown';
+    frame: MediaImageFrame;
+    align: MediaImageAlign;
+    width: string;
+    height: string;
+    caption: string;
+    alt: string;
+    replaceRange?: { from: number; to: number };
+  }>({
+    isOpen: false,
+    mediaRef: '',
+    syntaxMode: 'mediawiki',
+    frame: 'thumb',
+    align: 'right',
+    width: '300px',
+    height: '',
+    caption: '',
+    alt: '',
+  });
+
+  const handleOpenImageOptionsModal = (explicitRange?: { from: number; to: number }) => {
+    if (viewRef.current) {
+      const state = viewRef.current.state;
+      const caretPos =
+        explicitRange?.from ??
+        (state.selection.main.from > 0
+          ? state.selection.main.from
+          : lastSelectionRef.current?.from ?? state.selection.main.from);
+      const line = state.doc.lineAt(Math.min(Math.max(0, caretPos), state.doc.length));
+      const parsed = parseExistingImageMarkdown(line.text);
+      if (parsed) {
+        setImageOptionsModal({
+          isOpen: true,
+          mediaRef: parsed.mediaRef,
+          syntaxMode: parsed.syntaxMode,
+          frame: parsed.options.frame || 'none',
+          align: parsed.options.align || 'none',
+          width: parsed.options.width || '',
+          height: parsed.options.height || '',
+          caption: parsed.options.caption || '',
+          alt: parsed.options.alt || '',
+          replaceRange: {
+            from: line.from + parsed.matchFromOffset,
+            to: line.from + parsed.matchToOffset,
+          },
+        });
+        return;
+      }
+    }
+
+    // カーソル行に画像がない場合は新規設定モードで開く
+    setImageOptionsModal({
+      isOpen: true,
+      mediaRef: '',
+      syntaxMode: 'mediawiki',
+      frame: 'thumb',
+      align: 'right',
+      width: '300px',
+      height: '',
+      caption: '',
+      alt: '',
+      replaceRange: explicitRange,
+    });
+  };
+
+  const handleApplyImageOptions = () => {
+    const targetRef = imageOptionsModal.mediaRef.trim() || 'media:サンプル画像ID';
+    const generated = buildMediaMarkdown(targetRef, {
+      syntaxMode: imageOptionsModal.syntaxMode,
+      frame: imageOptionsModal.frame,
+      align: imageOptionsModal.align,
+      width: imageOptionsModal.width.trim() || undefined,
+      height: imageOptionsModal.height.trim() || undefined,
+      caption: imageOptionsModal.caption.trim() || undefined,
+      alt: imageOptionsModal.alt.trim() || undefined,
+    });
+
+    if (imageOptionsModal.replaceRange) {
+      insertText(generated, undefined, imageOptionsModal.replaceRange);
+    } else {
+      insertText(`\n${generated}\n`);
+    }
+    setImageOptionsModal((prev) => ({ ...prev, isOpen: false }));
   };
 
   // Markdownファイル読み込み & カテゴリ指定モーダル ステート
@@ -181,10 +373,88 @@ export default function PageEditPage() {
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0);
   const slashMenuRef = useRef<HTMLDivElement>(null);
 
-  // カラーピッカー ステート
+  // カラーピッカー (2D HSVポインタ + RGB/HEX指定) ステート
   const [colorPickerOpen, setColorPickerOpen] = useState(false);
+  const [colorMode, setColorMode] = useState<'text' | 'bg'>('text');
   const [customColor, setCustomColor] = useState('#ef4444');
+  const [hsv, setHsv] = useState<{ h: number; s: number; v: number }>({ h: 0, s: 72, v: 94 });
+  const [rgbInput, setRgbInput] = useState<{ r: number; g: number; b: number }>({
+    r: 239,
+    g: 68,
+    b: 68,
+  });
   const colorPickerRef = useRef<HTMLDivElement>(null);
+  const svBoxRef = useRef<HTMLDivElement>(null);
+  const hueBarRef = useRef<HTMLDivElement>(null);
+
+  const updateColorFromHsv = (nextH: number, nextS: number, nextV: number) => {
+    const h = clampNum(Math.round(nextH), 0, 360);
+    const s = clampNum(Math.round(nextS), 0, 100);
+    const v = clampNum(Math.round(nextV), 0, 100);
+    setHsv({ h, s, v });
+    const rgb = hsvToRgb(h, s, v);
+    setRgbInput(rgb);
+    setCustomColor(rgbToHex(rgb.r, rgb.g, rgb.b));
+  };
+
+  const updateColorFromRgb = (nextR: number, nextG: number, nextB: number) => {
+    const r = clampNum(Math.round(nextR || 0), 0, 255);
+    const g = clampNum(Math.round(nextG || 0), 0, 255);
+    const b = clampNum(Math.round(nextB || 0), 0, 255);
+    setRgbInput({ r, g, b });
+    setHsv(rgbToHsv(r, g, b));
+    setCustomColor(rgbToHex(r, g, b));
+  };
+
+  const updateColorFromHex = (hexStr: string) => {
+    setCustomColor(hexStr);
+    const parsed = hexToRgb(hexStr);
+    if (parsed) {
+      setRgbInput(parsed);
+      setHsv(rgbToHsv(parsed.r, parsed.g, parsed.b));
+    }
+  };
+
+  // 2Dカラーボックス (彩度・明度) ドラッグ操作
+  const handleSvPointerDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const updateFromClientPos = (clientX: number, clientY: number) => {
+      if (!svBoxRef.current) return;
+      const rect = svBoxRef.current.getBoundingClientRect();
+      const nextS = clampNum(((clientX - rect.left) / rect.width) * 100, 0, 100);
+      const nextV = clampNum(100 - ((clientY - rect.top) / rect.height) * 100, 0, 100);
+      updateColorFromHsv(hsv.h, nextS, nextV);
+    };
+    updateFromClientPos(e.clientX, e.clientY);
+
+    const onMove = (ev: MouseEvent) => updateFromClientPos(ev.clientX, ev.clientY);
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
+
+  // 色相 (Hue) バー ドラッグ操作
+  const handleHuePointerDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const updateFromClientX = (clientX: number) => {
+      if (!hueBarRef.current) return;
+      const rect = hueBarRef.current.getBoundingClientRect();
+      const nextH = clampNum(((clientX - rect.left) / rect.width) * 360, 0, 360);
+      updateColorFromHsv(nextH, hsv.s, hsv.v);
+    };
+    updateFromClientX(e.clientX);
+
+    const onMove = (ev: MouseEvent) => updateFromClientX(ev.clientX);
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
 
   // カラーピッカー外側クリックで閉じる
   useEffect(() => {
@@ -256,14 +526,52 @@ export default function PageEditPage() {
     }
   }, [historyOpen, versions, selectedVersion]);
 
+  // ページデータ取得時にカテゴリ配列を同期
+  useEffect(() => {
+    if (page) {
+      setPageCategories(getPageCategoryNames(page));
+    }
+  }, [page]);
+
   const updateMutation = useMutation({
-    mutationFn: (content: string) => pagesApi.update(id, { content }),
+    mutationFn: (content: string) =>
+      pagesApi.update(id, { content, categories: pageCategories }),
     onSuccess: () => {
       setSaved(true);
       queryClient.invalidateQueries({ queryKey: ['page', id] });
       queryClient.invalidateQueries({ queryKey: ['page-versions', id] });
+      if (page?.site_id) {
+        queryClient.invalidateQueries({ queryKey: ['site-categories', page.site_id] });
+      }
     },
   });
+
+  const saveCategoriesImmediately = (nextCats: string[]) => {
+    setPageCategories(nextCats);
+    pagesApi.update(id, { categories: nextCats }).then(() => {
+      queryClient.invalidateQueries({ queryKey: ['page', id] });
+      if (page?.site_id) {
+        queryClient.invalidateQueries({ queryKey: ['site-categories', page.site_id] });
+      }
+    });
+  };
+
+  const handleAddPageCategory = (catName?: string) => {
+    const target = (catName ?? categoryInput).trim().replace(/^(?:category|カテゴリ)\s*:\s*/i, '');
+    if (!target) return;
+    if (!pageCategories.some((c) => c.toLowerCase() === target.toLowerCase())) {
+      const next = [...pageCategories, target];
+      saveCategoriesImmediately(next);
+    }
+    if (catName === undefined) {
+      setCategoryInput('');
+    }
+  };
+
+  const handleRemovePageCategory = (catName: string) => {
+    const next = pageCategories.filter((c) => c !== catName);
+    saveCategoriesImmediately(next);
+  };
 
   const publishMutation = useMutation({
     mutationFn: (status: 'published' | 'draft') => pagesApi.update(id, { status }),
@@ -301,27 +609,23 @@ export default function PageEditPage() {
     }
   };
 
-  // Markdown ファイル読み込みの確定反映
+  // Markdown ファイル読み込みの確定反映 (カテゴリは本文ではなくページオプションとして保存)
   const handleApplyMdUpload = () => {
     if (!viewRef.current) return;
 
-    // 選択されたカテゴリを MediaWiki 構文 ([[Category:xxx]]) として末尾に反映
-    const contentWithCategories = appendCategoriesToMarkdown(
-      mdUploadModal.content,
-      mdUploadModal.categories
-    );
+    const cleanContent = mdUploadModal.content;
 
     if (mdUploadModal.insertMode === 'replace') {
       viewRef.current.dispatch({
         changes: {
           from: 0,
           to: viewRef.current.state.doc.length,
-          insert: contentWithCategories,
+          insert: cleanContent,
         },
       });
-      setPreview(contentWithCategories);
+      setPreview(cleanContent);
       setSaved(false);
-      broadcastDocChange(contentWithCategories);
+      broadcastDocChange(cleanContent);
     } else {
       // 現在のカーソル位置、または末尾に挿入
       const insertPos = lastSelectionRef.current?.to ?? viewRef.current.state.doc.length;
@@ -329,7 +633,7 @@ export default function PageEditPage() {
         changes: {
           from: insertPos,
           to: insertPos,
-          insert: '\n\n' + contentWithCategories,
+          insert: '\n\n' + cleanContent,
         },
       });
       const newContent = viewRef.current.state.doc.toString();
@@ -338,12 +642,28 @@ export default function PageEditPage() {
       broadcastDocChange(newContent);
     }
 
-    // タイトル更新が選択されている場合
-    if (mdUploadModal.updateTitle && mdUploadModal.parsedTitle) {
-      pagesApi.update(id, { title: mdUploadModal.parsedTitle }).then(() => {
-        queryClient.invalidateQueries({ queryKey: ['page', id] });
-      });
+    // カテゴリのマージ保存 & タイトル更新
+    const mergedCats = [...pageCategories];
+    for (const c of mdUploadModal.categories) {
+      const trimmed = c.trim();
+      if (trimmed && !mergedCats.some((ex) => ex.toLowerCase() === trimmed.toLowerCase())) {
+        mergedCats.push(trimmed);
+      }
     }
+    setPageCategories(mergedCats);
+
+    const patchPayload: { title?: string; categories?: string[] } = {
+      categories: mergedCats,
+    };
+    if (mdUploadModal.updateTitle && mdUploadModal.parsedTitle) {
+      patchPayload.title = mdUploadModal.parsedTitle;
+    }
+    pagesApi.update(id, patchPayload).then(() => {
+      queryClient.invalidateQueries({ queryKey: ['page', id] });
+      if (page?.site_id) {
+        queryClient.invalidateQueries({ queryKey: ['site-categories', page.site_id] });
+      }
+    });
 
     setMdUploadModal((prev) => ({ ...prev, isOpen: false }));
   };
@@ -616,16 +936,129 @@ export default function PageEditPage() {
     view.focus();
   };
 
+  const applyColorSyntax = (attrKey: 'color' | 'bg', colorVal: string) => {
+    if (!viewRef.current) return;
+    const view = viewRef.current;
+    const { state, dispatch } = view;
+
+    let from = state.selection.main.from;
+    let to = state.selection.main.to;
+    if (
+      from === to &&
+      lastSelectionRef.current &&
+      lastSelectionRef.current.from !== lastSelectionRef.current.to
+    ) {
+      from = Math.min(lastSelectionRef.current.from, state.doc.length);
+      to = Math.min(lastSelectionRef.current.to, state.doc.length);
+    }
+
+    if (from !== to) {
+      const selText = state.sliceDoc(from, to);
+      // 1) 選択テキスト全体が [text]{color:...} または [text]{bg:...} の場合
+      const fullMatch = /^\[([^\]\n]+)\]\{([^\}\n]+)\}$/.exec(selText);
+      if (fullMatch) {
+        const inner = fullMatch[1];
+        const replacement = `[${inner}]{${attrKey}:${colorVal}}`;
+        dispatch({
+          changes: { from, to, insert: replacement },
+          selection: { anchor: from + 1, head: from + 1 + inner.length },
+          scrollIntoView: true,
+        });
+        lastSelectionRef.current = { from: from + 1, to: from + 1 + inner.length };
+        view.focus();
+        return;
+      }
+
+      // 2) 選択範囲の直前が `[` で直後が `]{...}` の場合 (中身だけ選択されている状態)
+      const beforeChar = from >= 1 ? state.sliceDoc(from - 1, from) : '';
+      const afterSlice = state.sliceDoc(to, Math.min(state.doc.length, to + 40));
+      const afterAttrMatch = /^\]\{([^\}\n]+)\}/.exec(afterSlice);
+      if (beforeChar === '[' && afterAttrMatch) {
+        const targetFrom = from - 1;
+        const targetTo = to + afterAttrMatch[0].length;
+        const replacement = `[${selText}]{${attrKey}:${colorVal}}`;
+        dispatch({
+          changes: { from: targetFrom, to: targetTo, insert: replacement },
+          selection: { anchor: targetFrom + 1, head: targetFrom + 1 + selText.length },
+          scrollIntoView: true,
+        });
+        lastSelectionRef.current = {
+          from: targetFrom + 1,
+          to: targetFrom + 1 + selText.length,
+        };
+        view.focus();
+        return;
+      }
+    }
+
+    wrapText(
+      '[',
+      `]{${attrKey}:${colorVal}}`,
+      attrKey === 'color' ? '色付きテキスト' : 'ハイライトテキスト'
+    );
+  };
+
+  const clearColorSyntax = () => {
+    if (!viewRef.current) return;
+    const view = viewRef.current;
+    const { state, dispatch } = view;
+    let from = state.selection.main.from;
+    let to = state.selection.main.to;
+    if (
+      from === to &&
+      lastSelectionRef.current &&
+      lastSelectionRef.current.from !== lastSelectionRef.current.to
+    ) {
+      from = Math.min(lastSelectionRef.current.from, state.doc.length);
+      to = Math.min(lastSelectionRef.current.to, state.doc.length);
+    }
+    if (from !== to) {
+      const selText = state.sliceDoc(from, to);
+      const fullMatch = /^\[([^\]\n]+)\]\{([^\}\n]+)\}$/.exec(selText);
+      if (fullMatch) {
+        const inner = fullMatch[1];
+        dispatch({
+          changes: { from, to, insert: inner },
+          selection: { anchor: from, head: from + inner.length },
+          scrollIntoView: true,
+        });
+        lastSelectionRef.current = { from, to: from + inner.length };
+        view.focus();
+        setColorPickerOpen(false);
+        return;
+      }
+      const beforeChar = from >= 1 ? state.sliceDoc(from - 1, from) : '';
+      const afterSlice = state.sliceDoc(to, Math.min(state.doc.length, to + 40));
+      const afterAttrMatch = /^\]\{([^\}\n]+)\}/.exec(afterSlice);
+      if (beforeChar === '[' && afterAttrMatch) {
+        const targetFrom = from - 1;
+        const targetTo = to + afterAttrMatch[0].length;
+        dispatch({
+          changes: { from: targetFrom, to: targetTo, insert: selText },
+          selection: { anchor: targetFrom, head: targetFrom + selText.length },
+          scrollIntoView: true,
+        });
+        lastSelectionRef.current = { from: targetFrom, to: targetFrom + selText.length };
+        view.focus();
+        setColorPickerOpen(false);
+        return;
+      }
+    }
+    setColorPickerOpen(false);
+  };
+
   const applyTextColor = (color: string) => {
-    wrapText('[', `]{color:${color}}`, '色付きテキスト');
+    updateColorFromHex(color);
+    applyColorSyntax('color', color);
     setColorPickerOpen(false);
   };
 
   const applyBgHighlight = (bg: string) => {
+    updateColorFromHex(bg);
     if (bg === '#fef08a') {
       wrapText('==', '==', 'ハイライトテキスト');
     } else {
-      wrapText('[', `]{bg:${bg}}`, 'ハイライトテキスト');
+      applyColorSyntax('bg', bg);
     }
     setColorPickerOpen(false);
   };
@@ -821,8 +1254,8 @@ export default function PageEditPage() {
       },
       {
         id: 'image',
-        label: '画像挿入',
-        description: 'メディアライブラリまたは画像ファイルを選択',
+        label: '画像挿入 (メディア一覧・詳細設定)',
+        description: 'サイズ・挿入位置・サムネイル枠・キャプションを指定して挿入',
         icon: ImageIcon,
         action: (range) => {
           if (viewRef.current) {
@@ -840,6 +1273,22 @@ export default function PageEditPage() {
             }
           }
           setMediaLibraryOpen(true);
+        },
+      },
+      {
+        id: 'thumb',
+        label: 'MediaWiki風 サムネイル画像 ([[File:...]])',
+        description: '右回り込み・サイズ・キャプション付き画像記法を挿入',
+        icon: Settings2,
+        action: (range) => {
+          if (viewRef.current && range) {
+            viewRef.current.dispatch({
+              changes: { from: range.from, to: range.to, insert: '' },
+              selection: { anchor: range.from },
+            });
+            lastSelectionRef.current = { from: range.from, to: range.from };
+          }
+          handleOpenImageOptionsModal(range ? { from: range.from, to: range.from } : undefined);
         },
       },
     ],
@@ -1865,6 +2314,137 @@ export default function PageEditPage() {
             </button>
           </div>
 
+          {/* カテゴリ設定 (メニューバー・オプション) */}
+          <div className="relative" ref={categoryMenuRef}>
+            <button
+              type="button"
+              onClick={() => setCategoryMenuOpen(!categoryMenuOpen)}
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs border rounded-lg transition-colors cursor-pointer relative whitespace-nowrap shrink-0 ${
+                categoryMenuOpen || pageCategories.length > 0
+                  ? 'border-amber-300 dark:border-amber-700 bg-amber-50/70 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 font-semibold'
+                  : 'text-muted-foreground hover:text-foreground border-border hover:bg-muted'
+              }`}
+              title="ページのカテゴリを設定 (本文に [[Category:...]] を書かずに管理できます)"
+            >
+              <FolderTree className="size-3.5 text-amber-500 shrink-0" />
+              <span className="hidden md:inline">カテゴリ設定</span>
+              {pageCategories.length > 0 && (
+                <span className="px-1.5 py-0.2 rounded-full bg-amber-500 text-white text-[10px] font-bold">
+                  {pageCategories.length}
+                </span>
+              )}
+            </button>
+
+            {categoryMenuOpen && (
+              <div className="absolute right-0 top-full mt-2 z-50 w-80 p-4 bg-card text-card-foreground border border-border rounded-2xl shadow-2xl space-y-3 animate-in fade-in-0 zoom-in-95 duration-100">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <FolderTree className="size-4 text-amber-500" />
+                    <h4 className="font-bold text-xs">ページのカテゴリ設定</h4>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setCategoryMenuOpen(false)}
+                    className="p-0.5 rounded text-muted-foreground hover:text-foreground cursor-pointer"
+                  >
+                    <X className="size-4" />
+                  </button>
+                </div>
+                <p className="text-[11px] text-muted-foreground leading-relaxed">
+                  コンテンツ内に <code className="font-mono text-[10px]">[[Category:...]]</code> を書かなくても、ここで安全にカテゴリを割り当て・保持できます。
+                </p>
+
+                {/* 現在のカテゴリチップ */}
+                {pageCategories.length > 0 ? (
+                  <div className="flex flex-wrap gap-1.5">
+                    {pageCategories.map((cat) => (
+                      <span
+                        key={cat}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/70"
+                      >
+                        <FolderTree className="size-3 text-amber-500" />
+                        {cat}
+                        <button
+                          type="button"
+                          onClick={() => handleRemovePageCategory(cat)}
+                          className="ml-0.5 hover:text-rose-500 cursor-pointer"
+                          title="カテゴリを解除"
+                        >
+                          <X className="size-3" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-[11px] text-muted-foreground italic py-1">
+                    カテゴリはまだ割り当てられていません
+                  </div>
+                )}
+
+                {/* 新規追加 */}
+                <div className="flex gap-1.5">
+                  <input
+                    type="text"
+                    value={categoryInput}
+                    onChange={(e) => setCategoryInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddPageCategory();
+                      }
+                    }}
+                    placeholder="カテゴリ名を入力してEnter..."
+                    className="flex-1 text-xs px-2.5 py-1.5 bg-muted/50 border border-border rounded-xl focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleAddPageCategory()}
+                    disabled={!categoryInput.trim()}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 disabled:opacity-40 cursor-pointer"
+                  >
+                    <Plus className="size-3.5" />
+                    追加
+                  </button>
+                </div>
+
+                {/* 既存カテゴリ候補 */}
+                {siteCategories.length > 0 && (
+                  <div className="pt-2 border-t border-border space-y-1.5">
+                    <span className="text-[10px] font-semibold text-muted-foreground block">
+                      サイト内の既存カテゴリから選択:
+                    </span>
+                    <div className="flex flex-wrap gap-1 max-h-32 overflow-y-auto">
+                      {siteCategories.map((c) => {
+                        const isAssigned = pageCategories.some(
+                          (item) => item.toLowerCase() === c.name.toLowerCase()
+                        );
+                        return (
+                          <button
+                            key={c.name}
+                            type="button"
+                            onClick={() =>
+                              isAssigned
+                                ? handleRemovePageCategory(c.name)
+                                : handleAddPageCategory(c.name)
+                            }
+                            className={`text-[11px] px-2 py-0.5 rounded-full border transition-colors cursor-pointer ${
+                              isAssigned
+                                ? 'bg-amber-500 text-white border-amber-500 font-semibold'
+                                : 'bg-muted/40 text-muted-foreground border-border hover:border-amber-400 hover:text-foreground'
+                            }`}
+                          >
+                            {isAssigned ? '✓ ' : '+ '}
+                            {c.name}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* コメント ドロワー開閉ボタン */}
           <button
             type="button"
@@ -2077,7 +2657,7 @@ export default function PageEditPage() {
             <Strikethrough className="size-4" />
           </button>
 
-          {/* テキストカラー & ハイライト ドロップダウン */}
+          {/* テキストカラー & ハイライト (2D HSVポインタ + RGB/HEX カラーピッカー) */}
           <div className="relative" ref={colorPickerRef}>
             <button
               type="button"
@@ -2091,127 +2671,251 @@ export default function PageEditPage() {
                 }
               }}
               onClick={() => setColorPickerOpen(!colorPickerOpen)}
-              className={`p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer flex items-center gap-1 ${
+              className={`px-2 py-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer flex items-center gap-1.5 ${
                 colorPickerOpen ? 'bg-muted text-foreground ring-1 ring-border' : ''
               }`}
-              title="文字色・ハイライト"
+              title="選択箇所の文字色・背景色を自由に設定 (RGBポインタピッカー)"
             >
               <Palette className="size-4 text-primary" />
+              <span
+                className="size-3 rounded-full border border-border shadow-2xs"
+                style={{ backgroundColor: customColor }}
+              />
             </button>
 
             {colorPickerOpen && (
-              <div className="absolute left-0 top-full mt-2 z-50 w-64 p-3 bg-card text-card-foreground border border-border rounded-2xl shadow-2xl space-y-3 animate-in fade-in-0 zoom-in-95 duration-100">
-                {/* 文字色セクション */}
-                <div>
-                  <div className="text-[11px] font-semibold text-muted-foreground mb-1.5 flex items-center justify-between">
-                    <span className="flex items-center gap-1">
-                      <Palette className="size-3 text-primary" />
-                      文字色
-                    </span>
+              <div className="absolute left-0 top-full mt-2 z-50 w-72 p-3.5 bg-card text-card-foreground border border-border rounded-2xl shadow-2xl space-y-3 animate-in fade-in-0 zoom-in-95 duration-100 select-none">
+                {/* モード切替 (文字色 / 背景ハイライト) & リセット */}
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex flex-1 bg-muted/60 p-0.5 rounded-xl border border-border text-[11px] font-semibold">
                     <button
                       type="button"
                       onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => {
-                        wrapText('[', ']{color:currentColor}', 'テキスト');
-                        setColorPickerOpen(false);
-                      }}
-                      className="text-[10px] text-muted-foreground hover:text-foreground underline cursor-pointer"
+                      onClick={() => setColorMode('text')}
+                      className={`flex-1 py-1 rounded-lg flex items-center justify-center gap-1 transition-all cursor-pointer ${
+                        colorMode === 'text'
+                          ? 'bg-background text-foreground shadow-2xs'
+                          : 'text-muted-foreground hover:text-foreground'
+                      }`}
                     >
-                      リセット
+                      <Palette className="size-3 text-primary" />
+                      <span>文字色</span>
+                    </button>
+                    <button
+                      type="button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => setColorMode('bg')}
+                      className={`flex-1 py-1 rounded-lg flex items-center justify-center gap-1 transition-all cursor-pointer ${
+                        colorMode === 'bg'
+                          ? 'bg-background text-foreground shadow-2xs'
+                          : 'text-muted-foreground hover:text-foreground'
+                      }`}
+                    >
+                      <Highlighter className="size-3 text-amber-500" />
+                      <span>背景マーカー</span>
                     </button>
                   </div>
-                  <div className="grid grid-cols-6 gap-1.5">
-                    {[
-                      { name: '赤', color: '#ef4444', bg: 'bg-red-500' },
-                      { name: 'オレンジ', color: '#f97316', bg: 'bg-orange-500' },
-                      { name: '黄', color: '#f59e0b', bg: 'bg-amber-500' },
-                      { name: '緑', color: '#10b981', bg: 'bg-emerald-500' },
-                      { name: '青', color: '#3b82f6', bg: 'bg-blue-500' },
-                      { name: '紫', color: '#8b5cf6', bg: 'bg-purple-500' },
-                      { name: 'ピンク', color: '#ec4899', bg: 'bg-pink-500' },
-                      { name: 'シアン', color: '#06b6d4', bg: 'bg-cyan-500' },
-                      { name: 'インディゴ', color: '#6366f1', bg: 'bg-indigo-500' },
-                      { name: 'グレー', color: '#64748b', bg: 'bg-slate-500' },
-                      { name: 'ダーク', color: '#1e293b', bg: 'bg-slate-800' },
-                      { name: '白', color: '#ffffff', bg: 'bg-white border border-slate-300 dark:border-slate-600' },
-                    ].map((c) => (
-                      <button
-                        key={c.color}
-                        type="button"
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={() => applyTextColor(c.color)}
-                        className={`size-6 rounded-full ${c.bg} transition-transform hover:scale-110 cursor-pointer shadow-xs`}
-                        title={c.name}
-                      />
-                    ))}
+                  <button
+                    type="button"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={clearColorSyntax}
+                    className="text-[10px] text-muted-foreground hover:text-rose-500 underline px-1 cursor-pointer shrink-0"
+                    title="選択箇所の色指定を解除"
+                  >
+                    色解除
+                  </button>
+                </div>
+
+                {/* 2D Saturation / Value ポインタ移動カラーピッカー */}
+                <div className="space-y-2">
+                  <div
+                    ref={svBoxRef}
+                    onMouseDown={handleSvPointerDown}
+                    className="relative w-full h-36 rounded-xl overflow-hidden cursor-crosshair border border-border shadow-inner"
+                    style={{
+                      backgroundColor: `hsl(${hsv.h}, 100%, 50%)`,
+                      backgroundImage:
+                        'linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, transparent)',
+                    }}
+                  >
+                    {/* ポインタ */}
+                    <div
+                      className="absolute size-4 -ml-2 -mt-2 rounded-full border-2 border-white shadow-md ring-1 ring-black/40 pointer-events-none transition-transform duration-75"
+                      style={{
+                        left: `${hsv.s}%`,
+                        top: `${100 - hsv.v}%`,
+                        backgroundColor: customColor,
+                      }}
+                    />
                   </div>
 
-                  {/* カスタムカラー指定 */}
-                  <div className="flex items-center gap-1.5 mt-2.5 pt-2 border-t border-border">
-                    <input
-                      type="color"
-                      value={customColor}
-                      onChange={(e) => setCustomColor(e.target.value)}
-                      className="size-6 p-0 rounded cursor-pointer border-0 bg-transparent"
-                      title="カラーピッカー"
+                  {/* 色相 (Hue) スライダーバー */}
+                  <div
+                    ref={hueBarRef}
+                    onMouseDown={handleHuePointerDown}
+                    className="relative w-full h-3.5 rounded-full cursor-pointer border border-border/60 shadow-inner"
+                    style={{
+                      background:
+                        'linear-gradient(to right, #ff0000 0%, #ffff00 17%, #00ff00 33%, #00ffff 50%, #0000ff 67%, #ff00ff 83%, #ff0000 100%)',
+                    }}
+                  >
+                    <div
+                      className="absolute top-1/2 -translate-y-1/2 -ml-2 size-4 rounded-full bg-white border-2 border-slate-700 shadow pointer-events-none"
+                      style={{ left: `${(hsv.h / 360) * 100}%` }}
                     />
-                    <input
-                      type="text"
-                      value={customColor}
-                      onChange={(e) => setCustomColor(e.target.value)}
-                      placeholder="#hex"
-                      className="flex-1 h-6 px-1.5 text-xs font-mono bg-muted/50 border border-border rounded text-foreground"
-                    />
+                  </div>
+                </div>
+
+                {/* RGB & HEX 数値入力 + プレビュー */}
+                <div className="space-y-2 pt-1 border-t border-border">
+                  <div className="grid grid-cols-4 gap-1.5 items-end">
+                    <div>
+                      <label className="block text-[9px] font-mono text-muted-foreground mb-0.5 text-center">
+                        R
+                      </label>
+                      <input
+                        type="number"
+                        min={0}
+                        max={255}
+                        value={rgbInput.r}
+                        onChange={(e) =>
+                          updateColorFromRgb(Number(e.target.value), rgbInput.g, rgbInput.b)
+                        }
+                        className="w-full h-6 px-1 text-[11px] font-mono text-center bg-muted/50 border border-border rounded text-foreground"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[9px] font-mono text-muted-foreground mb-0.5 text-center">
+                        G
+                      </label>
+                      <input
+                        type="number"
+                        min={0}
+                        max={255}
+                        value={rgbInput.g}
+                        onChange={(e) =>
+                          updateColorFromRgb(rgbInput.r, Number(e.target.value), rgbInput.b)
+                        }
+                        className="w-full h-6 px-1 text-[11px] font-mono text-center bg-muted/50 border border-border rounded text-foreground"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[9px] font-mono text-muted-foreground mb-0.5 text-center">
+                        B
+                      </label>
+                      <input
+                        type="number"
+                        min={0}
+                        max={255}
+                        value={rgbInput.b}
+                        onChange={(e) =>
+                          updateColorFromRgb(rgbInput.r, rgbInput.g, Number(e.target.value))
+                        }
+                        className="w-full h-6 px-1 text-[11px] font-mono text-center bg-muted/50 border border-border rounded text-foreground"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[9px] font-mono text-muted-foreground mb-0.5 text-center">
+                        HEX
+                      </label>
+                      <input
+                        type="text"
+                        value={customColor}
+                        onChange={(e) => updateColorFromHex(e.target.value)}
+                        className="w-full h-6 px-1 text-[10px] font-mono text-center bg-muted/50 border border-border rounded text-foreground"
+                      />
+                    </div>
+                  </div>
+
+                  {/* プレビュー & 適用ボタン */}
+                  <div className="flex items-center gap-2 pt-1">
+                    <div
+                      className="px-2.5 py-1 rounded-lg border border-border text-xs font-bold shrink-0"
+                      style={
+                        colorMode === 'text'
+                          ? { color: customColor }
+                          : { backgroundColor: customColor, color: '#0f172a' }
+                      }
+                    >
+                      Aa サンプル
+                    </div>
                     <button
                       type="button"
                       onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => applyTextColor(customColor)}
-                      className="h-6 px-2 text-[11px] font-medium bg-primary text-primary-foreground rounded hover:bg-primary/90 cursor-pointer"
+                      onClick={() =>
+                        colorMode === 'text'
+                          ? applyTextColor(customColor)
+                          : applyBgHighlight(customColor)
+                      }
+                      className="flex-1 py-1.5 px-3 text-xs font-semibold bg-primary text-primary-foreground rounded-xl hover:bg-primary/90 shadow-xs transition-colors cursor-pointer"
                     >
-                      適用
+                      {colorMode === 'text' ? '選択箇所に文字色を適用' : '選択箇所に背景色を適用'}
                     </button>
                   </div>
                 </div>
 
-                {/* ハイライト / 背景色セクション */}
+                {/* クイックプリセットスウォッチ */}
                 <div className="pt-2 border-t border-border">
-                  <div className="text-[11px] font-semibold text-muted-foreground mb-1.5 flex items-center justify-between">
-                    <span className="flex items-center gap-1">
-                      <Highlighter className="size-3 text-amber-500" />
-                      ハイライト (マーカー)
-                    </span>
-                    <button
-                      type="button"
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => {
-                        wrapText('==', '==', 'ハイライトテキスト');
-                        setColorPickerOpen(false);
-                      }}
-                      className="text-[10px] text-primary hover:underline cursor-pointer font-medium"
-                      title="標準Markdownハイライト (==テキスト==)"
-                    >
-                      == 標準 ==
-                    </button>
+                  <div className="text-[10px] font-semibold text-muted-foreground mb-1.5 flex items-center justify-between">
+                    <span>プリセット (ワンクリック適用)</span>
+                    {colorMode === 'bg' && (
+                      <button
+                        type="button"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => {
+                          wrapText('==', '==', 'ハイライトテキスト');
+                          setColorPickerOpen(false);
+                        }}
+                        className="text-[10px] text-primary hover:underline cursor-pointer font-medium"
+                      >
+                        == 標準マーカー ==
+                      </button>
+                    )}
                   </div>
-                  <div className="grid grid-cols-6 gap-1.5">
-                    {[
-                      { name: 'イエロー', color: '#fef08a', bg: 'bg-yellow-200 text-yellow-900' },
-                      { name: 'グリーン', color: '#bbf7d0', bg: 'bg-green-200 text-green-900' },
-                      { name: 'ブルー', color: '#bfdbfe', bg: 'bg-blue-200 text-blue-900' },
-                      { name: 'ピンク', color: '#fbcfe8', bg: 'bg-pink-200 text-pink-900' },
-                      { name: 'オレンジ', color: '#fed7aa', bg: 'bg-orange-200 text-orange-900' },
-                      { name: 'パープル', color: '#e9d5ff', bg: 'bg-purple-200 text-purple-900' },
-                    ].map((c) => (
+                  <div className="grid grid-cols-8 gap-1.5">
+                    {(colorMode === 'text'
+                      ? [
+                          { name: '赤', color: '#ef4444' },
+                          { name: 'オレンジ', color: '#f97316' },
+                          { name: 'アンバー', color: '#f59e0b' },
+                          { name: 'エメラルド', color: '#10b981' },
+                          { name: 'シアン', color: '#06b6d4' },
+                          { name: 'ブルー', color: '#3b82f6' },
+                          { name: 'インディゴ', color: '#6366f1' },
+                          { name: 'バイオレット', color: '#8b5cf6' },
+                          { name: 'ピンク', color: '#ec4899' },
+                          { name: 'ローズ', color: '#f43f5e' },
+                          { name: 'ライム', color: '#84cc16' },
+                          { name: 'ティール', color: '#14b8a6' },
+                          { name: 'スカイ', color: '#0ea5e9' },
+                          { name: 'スレート', color: '#64748b' },
+                          { name: 'ダーク', color: '#1e293b' },
+                          { name: 'ホワイト', color: '#ffffff' },
+                        ]
+                      : [
+                          { name: 'イエロー', color: '#fef08a' },
+                          { name: 'グリーン', color: '#bbf7d0' },
+                          { name: 'ブルー', color: '#bfdbfe' },
+                          { name: 'ピンク', color: '#fbcfe8' },
+                          { name: 'オレンジ', color: '#fed7aa' },
+                          { name: 'パープル', color: '#e9d5ff' },
+                          { name: 'シアン', color: '#a5f3fc' },
+                          { name: 'ローズ', color: '#fecdd3' },
+                        ]
+                    ).map((c) => (
                       <button
                         key={c.color}
                         type="button"
                         onMouseDown={(e) => e.preventDefault()}
-                        onClick={() => applyBgHighlight(c.color)}
-                        className={`size-6 rounded-md ${c.bg} transition-transform hover:scale-110 cursor-pointer border border-border/40 shadow-xs flex items-center justify-center text-[10px] font-bold`}
-                        title={c.name}
-                      >
-                        A
-                      </button>
+                        onClick={() =>
+                          colorMode === 'text'
+                            ? applyTextColor(c.color)
+                            : applyBgHighlight(c.color)
+                        }
+                        className="size-6 rounded-full border border-border/60 transition-transform hover:scale-110 cursor-pointer shadow-2xs"
+                        style={{ backgroundColor: c.color }}
+                        title={`${c.name} (${c.color})`}
+                      />
                     ))}
                   </div>
                 </div>
@@ -2326,9 +3030,9 @@ export default function PageEditPage() {
           <button
             type="button"
             onMouseDown={(e) => e.preventDefault()}
-            onClick={() => wrapText('[[Category:', ']]', 'カテゴリ名')}
-            className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer"
-            title="カテゴリを付与 ([[Category:カテゴリ名]])"
+            onClick={() => setCategoryMenuOpen(true)}
+            className="p-1.5 rounded hover:bg-muted text-amber-500 hover:text-amber-600 cursor-pointer"
+            title="カテゴリ設定を開く (メニューオプションでカテゴリを管理)"
           >
             <FolderTree className="size-4" />
           </button>
@@ -2397,10 +3101,30 @@ export default function PageEditPage() {
               setMediaLibraryOpen(true);
             }}
             className="flex items-center gap-1.5 px-2 py-1 rounded bg-secondary hover:bg-secondary/80 text-secondary-foreground transition-colors cursor-pointer font-medium"
-            title="アップロード済みメディアから選択"
+            title="アップロード済みメディアからサイズ・挿入位置・キャプションを指定して挿入"
           >
             <Images className="size-3.5" />
             <span>メディア一覧から挿入</span>
+          </button>
+
+          {/* カーソル行の画像サイズ・配置・キャプション編集 / MediaWiki画像設定 */}
+          <button
+            type="button"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              if (viewRef.current) {
+                lastSelectionRef.current = {
+                  from: viewRef.current.state.selection.main.from,
+                  to: viewRef.current.state.selection.main.to,
+                };
+              }
+            }}
+            onClick={() => handleOpenImageOptionsModal()}
+            className="flex items-center gap-1 px-2 py-1 rounded border border-border hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer font-medium"
+            title="画像のサイズ・挿入位置（右/左回り込み・中央）・サムネイル枠・キャプションを設定"
+          >
+            <Settings2 className="size-3.5 text-primary" />
+            <span>画像サイズ・配置設定</span>
           </button>
         </div>
       )}
@@ -2824,8 +3548,20 @@ export default function PageEditPage() {
             } overflow-auto p-8 bg-card/40`}
           >
             <div className="max-w-3xl mx-auto">
-              {preview ? (
-                <MarkdownRenderer content={preview} siteSlug={site?.slug} />
+              {preview || pageCategories.length > 0 ? (
+                <>
+                  {preview && <MarkdownRenderer content={preview} siteSlug={site?.slug} />}
+                  <CategoryBox
+                    categories={getPageCategories({
+                      title: page?.title,
+                      slug: page?.slug,
+                      content: preview,
+                      categories: pageCategories,
+                    })}
+                    siteSlug={site?.slug || ''}
+                    primaryColor={site?.primary_color || '#3b82f6'}
+                  />
+                </>
               ) : (
                 <div className="flex flex-col items-center justify-center py-24 text-muted-foreground">
                   <FileEdit className="size-12 stroke-[1.2] mb-3 text-muted-foreground/50" />
@@ -3030,7 +3766,7 @@ export default function PageEditPage() {
           isOpen={mediaLibraryOpen}
           onClose={() => setMediaLibraryOpen(false)}
           siteId={page.site_id}
-          onSelectImage={(targetRef, filename, item) => {
+          onSelectImage={(targetRef, filename, item, formattedMarkdown) => {
             const alt = filename.replace(/\.[^/.]+$/, '');
             const targetPos =
               lastSelectionRef.current && lastSelectionRef.current.from > 0
@@ -3039,9 +3775,331 @@ export default function PageEditPage() {
                 ? viewRef.current.state.selection.main.from
                 : lastSelectionRef.current?.from ?? viewRef.current?.state.doc.length;
             const ref = item?.id ? formatMediaRef(item.id, targetRef) : targetRef;
-            insertText(`\n![${alt}](${ref})\n`, targetPos);
+            const toInsert = formattedMarkdown || `![${alt}](${ref})`;
+            insertText(`\n${toInsert}\n`, targetPos);
           }}
         />
+      )}
+
+      {/* MediaWiki風 画像サイズ・挿入位置・キャプション設定モーダル */}
+      {imageOptionsModal.isOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4"
+          onClick={() => setImageOptionsModal((prev) => ({ ...prev, isOpen: false }))}
+        >
+          <div
+            className="bg-card text-card-foreground border border-border rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden flex flex-col max-h-[90vh] animate-in fade-in-0 zoom-in-95 duration-150"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* ヘッダー */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-muted/30">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-primary/10 text-primary">
+                  <Settings2 className="size-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm">
+                    {imageOptionsModal.replaceRange
+                      ? '画像のサイズ・配置・キャプション編集'
+                      : 'MediaWiki風 画像オプション挿入'}
+                  </h3>
+                  <p className="text-xs text-muted-foreground">
+                    MediaWiki互換のサムネイル枠・回り込み配置・サイズ・キャプションを設定します
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setImageOptionsModal((prev) => ({ ...prev, isOpen: false }))}
+                className="p-1 rounded-lg text-muted-foreground hover:text-foreground cursor-pointer"
+              >
+                <X className="size-5" />
+              </button>
+            </div>
+
+            {/* 本文 */}
+            <div className="p-6 space-y-4 overflow-y-auto text-xs">
+              {/* 画像参照元 / メディア選択 */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="font-semibold text-foreground">
+                    画像ID / ファイル名 / URL
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setImageOptionsModal((prev) => ({ ...prev, isOpen: false }));
+                      setMediaLibraryOpen(true);
+                    }}
+                    className="text-[11px] text-primary hover:underline font-medium inline-flex items-center gap-1 cursor-pointer"
+                  >
+                    <Images className="size-3" />
+                    <span>メディア一覧から選択</span>
+                  </button>
+                </div>
+                <div className="flex items-center gap-2.5">
+                  {imageOptionsModal.mediaRef && (
+                    <img
+                      src={resolveMediaUrl(imageOptionsModal.mediaRef)}
+                      alt="preview"
+                      className="size-10 rounded-lg object-cover border border-border bg-muted shrink-0"
+                    />
+                  )}
+                  <input
+                    type="text"
+                    value={imageOptionsModal.mediaRef}
+                    onChange={(e) =>
+                      setImageOptionsModal((prev) => ({ ...prev, mediaRef: e.target.value }))
+                    }
+                    placeholder="media:UUID または https://..."
+                    className="flex-1 px-3 py-1.5 rounded-lg border border-border bg-background font-mono text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
+                </div>
+              </div>
+
+              {/* キャプション */}
+              <div className="space-y-1.5">
+                <label className="font-semibold text-foreground block">
+                  キャプション (画像下部の説明文)
+                </label>
+                <input
+                  type="text"
+                  value={imageOptionsModal.caption}
+                  onChange={(e) =>
+                    setImageOptionsModal((prev) => ({ ...prev, caption: e.target.value }))
+                  }
+                  placeholder="例: 図1: システム全体構成図"
+                  className="w-full px-3 py-1.5 rounded-lg border border-border bg-background text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+                />
+              </div>
+
+              {/* 挿入位置・配置 */}
+              <div className="space-y-1.5">
+                <label className="font-semibold text-foreground block">
+                  挿入位置・テキスト回り込み (Alignment)
+                </label>
+                <div className="grid grid-cols-4 gap-2">
+                  {(
+                    [
+                      { id: 'right', label: '右寄せ', sub: '左に文章回り込み', icon: AlignRight },
+                      { id: 'center', label: '中央揃え', sub: 'ブロック中央', icon: AlignCenter },
+                      { id: 'left', label: '左寄せ', sub: '右に文章回り込み', icon: AlignLeft },
+                      { id: 'none', label: '標準', sub: '回り込みなし', icon: Maximize2 },
+                    ] as const
+                  ).map((opt) => {
+                    const Icon = opt.icon;
+                    const active = imageOptionsModal.align === opt.id;
+                    return (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() =>
+                          setImageOptionsModal((prev) => ({ ...prev, align: opt.id }))
+                        }
+                        className={`flex flex-col items-center justify-center p-2.5 rounded-xl border text-center transition-all cursor-pointer ${
+                          active
+                            ? 'border-primary bg-primary/10 text-primary font-semibold'
+                            : 'border-border bg-background text-muted-foreground hover:text-foreground'
+                        }`}
+                      >
+                        <Icon className="size-4 mb-1" />
+                        <span className="text-[11px]">{opt.label}</span>
+                        <span className="text-[9px] opacity-75 mt-0.5">{opt.sub}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* 表示枠スタイル */}
+              <div className="space-y-1.5">
+                <label className="font-semibold text-foreground block">
+                  表示スタイル (枠)
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  {(
+                    [
+                      {
+                        id: 'thumb',
+                        label: 'サムネイル枠 (thumb)',
+                        desc: 'MediaWiki標準枠＋キャプション＋拡大アイコン',
+                      },
+                      {
+                        id: 'none',
+                        label: '標準カード',
+                        desc: '角丸シャドウ＋中央イタリックキャプション',
+                      },
+                      {
+                        id: 'frameless',
+                        label: '枠なし (frameless)',
+                        desc: 'キャプション非表示・シンプル画像',
+                      },
+                      {
+                        id: 'border',
+                        label: '境界線のみ (border)',
+                        desc: '細い境界線付き',
+                      },
+                    ] as const
+                  ).map((f) => {
+                    const active = imageOptionsModal.frame === f.id;
+                    return (
+                      <button
+                        key={f.id}
+                        type="button"
+                        onClick={() =>
+                          setImageOptionsModal((prev) => ({ ...prev, frame: f.id }))
+                        }
+                        className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                          active
+                            ? 'border-primary bg-primary/10 text-primary font-semibold'
+                            : 'border-border bg-background text-muted-foreground hover:text-foreground'
+                        }`}
+                      >
+                        <div className="text-[11px] font-semibold">{f.label}</div>
+                        <div className="text-[10px] opacity-75 mt-0.5">{f.desc}</div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* サイズ指定 */}
+              <div className="space-y-2">
+                <label className="font-semibold text-foreground block">サイズ指定</label>
+                <div className="flex flex-wrap gap-1.5">
+                  {[
+                    { label: '自動', value: '' },
+                    { label: '小 (200px)', value: '200px' },
+                    { label: '標準 (300px)', value: '300px' },
+                    { label: '中 (450px)', value: '450px' },
+                    { label: '大 (650px)', value: '650px' },
+                    { label: '最大 (100%)', value: '100%' },
+                  ].map((p) => {
+                    const active =
+                      imageOptionsModal.width === p.value && !imageOptionsModal.height;
+                    return (
+                      <button
+                        key={p.label}
+                        type="button"
+                        onClick={() =>
+                          setImageOptionsModal((prev) => ({
+                            ...prev,
+                            width: p.value,
+                            height: '',
+                          }))
+                        }
+                        className={`px-2.5 py-1 rounded-lg border text-[11px] transition-colors cursor-pointer ${
+                          active
+                            ? 'border-primary bg-primary text-primary-foreground font-semibold'
+                            : 'border-border bg-background text-muted-foreground hover:text-foreground'
+                        }`}
+                      >
+                        {p.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="grid grid-cols-2 gap-2.5 pt-1">
+                  <div>
+                    <span className="text-[10px] text-muted-foreground block mb-1">
+                      幅 (例: 300px, 50%)
+                    </span>
+                    <input
+                      type="text"
+                      value={imageOptionsModal.width}
+                      onChange={(e) =>
+                        setImageOptionsModal((prev) => ({ ...prev, width: e.target.value }))
+                      }
+                      placeholder="300px"
+                      className="w-full px-2.5 py-1 rounded-lg border border-border bg-background font-mono text-xs"
+                    />
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-muted-foreground block mb-1">
+                      最大高さ (オプション, 例: 200px)
+                    </span>
+                    <input
+                      type="text"
+                      value={imageOptionsModal.height}
+                      onChange={(e) =>
+                        setImageOptionsModal((prev) => ({ ...prev, height: e.target.value }))
+                      }
+                      placeholder="未指定"
+                      className="w-full px-2.5 py-1 rounded-lg border border-border bg-background font-mono text-xs"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* 記法モード & プレビュー */}
+              <div className="space-y-1.5 pt-2 border-t border-border">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-foreground">出力フォーマット</span>
+                  <div className="flex rounded-lg border border-border bg-background p-0.5 text-[10px]">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setImageOptionsModal((prev) => ({ ...prev, syntaxMode: 'mediawiki' }))
+                      }
+                      className={`px-2.5 py-0.5 rounded-md cursor-pointer ${
+                        imageOptionsModal.syntaxMode === 'mediawiki'
+                          ? 'bg-primary text-primary-foreground font-semibold'
+                          : 'text-muted-foreground hover:text-foreground'
+                      }`}
+                    >
+                      MediaWiki [[File:...]]
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setImageOptionsModal((prev) => ({ ...prev, syntaxMode: 'markdown' }))
+                      }
+                      className={`px-2.5 py-0.5 rounded-md cursor-pointer ${
+                        imageOptionsModal.syntaxMode === 'markdown'
+                          ? 'bg-primary text-primary-foreground font-semibold'
+                          : 'text-muted-foreground hover:text-foreground'
+                      }`}
+                    >
+                      Markdown ![...]
+                    </button>
+                  </div>
+                </div>
+                <pre className="p-2.5 rounded-xl bg-slate-950 text-slate-100 font-mono text-[11px] overflow-x-auto whitespace-pre-wrap break-all border border-slate-800">
+                  {buildMediaMarkdown(imageOptionsModal.mediaRef || 'media:サンプル画像ID', {
+                    syntaxMode: imageOptionsModal.syntaxMode,
+                    frame: imageOptionsModal.frame,
+                    align: imageOptionsModal.align,
+                    width: imageOptionsModal.width.trim() || undefined,
+                    height: imageOptionsModal.height.trim() || undefined,
+                    caption: imageOptionsModal.caption.trim() || undefined,
+                    alt: imageOptionsModal.alt.trim() || undefined,
+                  })}
+                </pre>
+              </div>
+            </div>
+
+            {/* フッター */}
+            <div className="px-6 py-3 border-t border-border bg-muted/20 flex items-center justify-end gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => setImageOptionsModal((prev) => ({ ...prev, isOpen: false }))}
+                className="px-3.5 py-1.5 rounded-xl text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
+              >
+                キャンセル
+              </button>
+              <button
+                type="button"
+                onClick={handleApplyImageOptions}
+                className="inline-flex items-center gap-1.5 px-4 py-1.5 bg-primary text-primary-foreground rounded-xl text-xs font-semibold hover:bg-primary/90 transition-colors shadow-xs cursor-pointer"
+              >
+                <Check className="size-3.5" />
+                <span>
+                  {imageOptionsModal.replaceRange ? '画像設定を更新' : 'エディタに挿入'}
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* GNU nano ヘルプモーダル */}

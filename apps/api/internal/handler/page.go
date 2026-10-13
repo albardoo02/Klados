@@ -19,16 +19,19 @@ type PageHandler struct {
 }
 
 type createPageRequest struct {
-	ParentID *uuid.UUID `json:"parent_id"`
-	Slug     string     `json:"slug" binding:"required"`
-	Title    string     `json:"title" binding:"required"`
-	Content  string     `json:"content"`
+	ParentID   *uuid.UUID `json:"parent_id"`
+	Slug       string     `json:"slug" binding:"required"`
+	Title      string     `json:"title" binding:"required"`
+	Content    string     `json:"content"`
+	Categories []string   `json:"categories"`
 }
 
 type updatePageRequest struct {
-	Title   string           `json:"title"`
-	Content string           `json:"content"`
-	Status  model.PageStatus `json:"status"`
+	Title      *string          `json:"title"`
+	Slug       *string          `json:"slug"`
+	Content    *string          `json:"content"`
+	Status     model.PageStatus `json:"status"`
+	Categories *[]string        `json:"categories"`
 }
 
 func (h *PageHandler) List(c *gin.Context) {
@@ -41,6 +44,9 @@ func (h *PageHandler) List(c *gin.Context) {
 		Order("position asc").Find(&pages).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
+	}
+	for i := range pages {
+		PopulatePageCategories(&pages[i])
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": pages})
 }
@@ -64,10 +70,13 @@ func (h *PageHandler) Create(c *gin.Context) {
 	page := &model.Page{
 		SiteID:   sUID,
 		ParentID: req.ParentID,
-		Slug:     req.Slug,
-		Title:    req.Title,
+		Slug:     strings.TrimSpace(req.Slug),
+		Title:    strings.TrimSpace(req.Title),
 		Content:  req.Content,
 		Status:   model.PageStatusDraft,
+	}
+	if len(req.Categories) > 0 {
+		page.SetFrontmatterCategories(req.Categories)
 	}
 
 	if err := h.DB.Create(page).Error; err != nil {
@@ -87,6 +96,7 @@ func (h *PageHandler) Get(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "page not found"})
 		return
 	}
+	PopulatePageCategories(&page)
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": page})
 }
 
@@ -108,7 +118,7 @@ func (h *PageHandler) Update(c *gin.Context) {
 	}
 
 	// コンテンツに変更がある場合のみ新しいバージョンとして履歴を保存
-	if req.Content != "" && req.Content != page.Content {
+	if req.Content != nil && *req.Content != page.Content {
 		var maxVer struct{ Max int }
 		h.DB.Model(&model.PageVersion{}).Select("COALESCE(MAX(version), 0) as max").Where("page_id = ?", page.ID).Scan(&maxVer)
 		h.DB.Create(&model.PageVersion{
@@ -117,12 +127,33 @@ func (h *PageHandler) Update(c *gin.Context) {
 			Content: page.Content,
 			Version: maxVer.Max + 1,
 		})
-		page.Content = req.Content
+		page.Content = *req.Content
 	}
 
-	if req.Title != "" {
-		page.Title = req.Title
+	if req.Title != nil && strings.TrimSpace(*req.Title) != "" {
+		page.Title = strings.TrimSpace(*req.Title)
 	}
+
+	if req.Slug != nil {
+		newSlug := strings.TrimSpace(*req.Slug)
+		newSlug = strings.TrimPrefix(newSlug, "/")
+		if newSlug != "" && newSlug != page.Slug {
+			var dupCount int64
+			h.DB.Model(&model.Page{}).
+				Where("site_id = ? AND LOWER(slug) = LOWER(?) AND id != ? AND deleted_at IS NULL", page.SiteID, newSlug, page.ID).
+				Count(&dupCount)
+			if dupCount > 0 {
+				c.JSON(http.StatusConflict, gin.H{"error": "指定されたスラッグは既にこのサイト内の別ページで使用されています"})
+				return
+			}
+			page.Slug = newSlug
+		}
+	}
+
+	if req.Categories != nil {
+		page.SetFrontmatterCategories(*req.Categories)
+	}
+
 	if req.Status != "" {
 		page.Status = req.Status
 		if req.Status == model.PageStatusPublished && page.PublishedAt == nil {
@@ -175,6 +206,9 @@ func (h *PageHandler) ListPublicBySlug(c *gin.Context) {
 		Order("position asc, created_at asc").Find(&pages).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
+	}
+	for i := range pages {
+		PopulatePageCategories(&pages[i])
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": pages})
 }
@@ -267,6 +301,7 @@ func (h *PageHandler) GetPublicPage(c *gin.Context) {
 		return
 	}
 
+	PopulatePageCategories(&page)
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": page})
 }
 

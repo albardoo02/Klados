@@ -1,14 +1,31 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeHighlight from 'rehype-highlight';
 import rehypeKatex from 'rehype-katex';
-import { Check, Copy, ExternalLink, Image as ImageIcon } from 'lucide-react';
-import { resolveMediaUrl } from '@/lib/media';
+import {
+  Check,
+  Copy,
+  Download,
+  ExternalLink,
+  Image as ImageIcon,
+  Maximize2,
+  Minimize2,
+  RotateCw,
+  X,
+  ZoomIn,
+  ZoomOut,
+} from 'lucide-react';
+import {
+  MediaImageOptions,
+  parseMediaWikiImageOptions,
+  resolveMediaUrl,
+} from '@/lib/media';
 import { getSitePrefix } from '@/lib/site-url';
 
 interface MarkdownRendererProps {
@@ -70,6 +87,60 @@ export function extractCategoriesFromMarkdown(
   }
 
   return categories;
+}
+
+/**
+ * ページの categories 配列 / frontmatter.categories / Markdown本文内の [[Category:...]] を統合して取得
+ */
+export function getPageCategories(
+  page?: {
+    title?: string;
+    slug?: string;
+    content?: string;
+    categories?: string[];
+    frontmatter?: { categories?: string[]; [key: string]: any };
+  } | null
+): ExtractedCategoryItem[] {
+  if (!page) return [];
+  const defaultSortKey = page.title || page.slug || '';
+  const result: ExtractedCategoryItem[] = [];
+  const seen = new Set<string>();
+
+  const explicitCats = Array.isArray(page.categories)
+    ? page.categories
+    : Array.isArray(page.frontmatter?.categories)
+    ? page.frontmatter!.categories!
+    : [];
+
+  for (const raw of explicitCats) {
+    const name = String(raw || '').trim();
+    if (!name) continue;
+    const lower = name.toLowerCase();
+    if (seen.has(lower)) continue;
+    seen.add(lower);
+    result.push({ name, sortKey: defaultSortKey || name });
+  }
+
+  for (const item of extractCategoriesFromMarkdown(page.content, defaultSortKey)) {
+    const lower = item.name.toLowerCase();
+    if (seen.has(lower)) continue;
+    seen.add(lower);
+    result.push(item);
+  }
+
+  return result;
+}
+
+export function getPageCategoryNames(
+  page?: {
+    title?: string;
+    slug?: string;
+    content?: string;
+    categories?: string[];
+    frontmatter?: { categories?: string[]; [key: string]: any };
+  } | null
+): string[] {
+  return getPageCategories(page).map((c) => c.name);
 }
 
 /**
@@ -170,74 +241,109 @@ function preprocessMarkdown(content: string, siteSlug?: string): string {
   // 6.5.2. ページカテゴリ付与: [[Category:カテゴリ名]] または [[Category:カテゴリ名|ソートキー]] (本文からは除去)
   result = result.replace(/\[\[(?:category|カテゴリ)\s*:\s*([^\]\n|]+)(?:\|([^\]\n]*))?\]\]\n?/gi, '');
 
+  // 6.6. MediaWiki インラインファイルリンク: [[:File:ファイル名|表示名]] / [[:Image:...]] / [[:ファイル:...]] / [[:画像:...]]
+  result = result.replace(
+    /\[\[:(?:file|image|ファイル|画像)\s*:\s*([^\]\n|]+)(?:\|([^\]\n]+))?\]\]/gi,
+    (_, rawFile, rawLabel) => {
+      const fileTarget = (rawFile || '').trim();
+      if (!fileTarget) return '';
+      const resolved = resolveMediaUrl(fileTarget);
+      const label = (rawLabel ? rawLabel.trim() : fileTarget) || fileTarget;
+      return `[${label}](${(resolved || fileTarget).replace(/\s+/g, '%20')})`;
+    }
+  );
+
   // 7. Wikiリンク [[target]] または [[target|label]] または [[label>target]]
-  result = result.replace(/\[\[([^\]\n]+)\]\]/g, (fullMatch, inner) => {
-    // MediaWikiカテゴリ構文 [[:Category:...]] または [[Category:...]] は別処理のためスキップ
-    if (/^:?(?:category|カテゴリ)\s*:/i.test(inner.trim())) {
-      return fullMatch;
-    }
-
-    let target = '';
-    let label = '';
-
-    if (inner.includes('>')) {
-      // SeesaaWiki / PukiWiki スタイル: [[表示名>URL/ページ]]
-      const parts = inner.split('>');
-      label = parts[0].trim();
-      target = parts.slice(1).join('>').trim();
-    } else if (inner.includes('|')) {
-      const parts = inner.split('|');
-      const p1 = parts[0].trim();
-      const p2 = parts.slice(1).join('|').trim();
-      // URLがどちらにあるかを自動判定
-      if (/^https?:\/\//i.test(p1) || /^www\./i.test(p1)) {
-        target = p1;
-        label = p2 || p1;
-      } else if (/^https?:\/\//i.test(p2) || /^www\./i.test(p2)) {
-        label = p1;
-        target = p2;
-      } else {
-        // MediaWiki標準: [[target|label]]
-        target = p1;
-        label = p2 || p1;
+  // (MediaWiki の File:/Image:/Category: は除外し、内側の [[WikiLink]] から先に解決できるようにする)
+  result = result.replace(
+    /\[\[(?!:?(?:file|image|ファイル|画像|category|カテゴリ)\s*:)([^\[\]\n]+)\]\]/gi,
+    (fullMatch, inner) => {
+      if (/^:?(?:category|カテゴリ|file|image|ファイル|画像)\s*:/i.test(inner.trim())) {
+        return fullMatch;
       }
-    } else {
-      target = inner.trim();
-      label = target;
-    }
 
-    if (!target) return '';
+      let target = '';
+      let label = '';
 
-    // 外部リンク判定 (http://, https://, www., //)
-    const isExt = /^https?:\/\//i.test(target) || /^www\./i.test(target) || target.startsWith('//');
-    if (isExt) {
-      const finalUrl = /^www\./i.test(target) ? `https://${target}` : target;
-      return `[${label}](${finalUrl})`;
-    }
+      if (inner.includes('>')) {
+        // SeesaaWiki / PukiWiki スタイル: [[表示名>URL/ページ]]
+        const parts = inner.split('>');
+        label = parts[0].trim();
+        target = parts.slice(1).join('>').trim();
+      } else if (inner.includes('|')) {
+        const parts = inner.split('|');
+        const p1 = parts[0].trim();
+        const p2 = parts.slice(1).join('|').trim();
+        // URLがどちらにあるかを自動判定
+        if (/^https?:\/\//i.test(p1) || /^www\./i.test(p1)) {
+          target = p1;
+          label = p2 || p1;
+        } else if (/^https?:\/\//i.test(p2) || /^www\./i.test(p2)) {
+          label = p1;
+          target = p2;
+        } else {
+          // MediaWiki標準: [[target|label]]
+          target = p1;
+          label = p2 || p1;
+        }
+      } else {
+        target = inner.trim();
+        label = target;
+      }
 
-    // ページ内アンカー: [[#見出し]]
-    if (target.startsWith('#')) {
-      const heading = target.slice(1).trim();
-      const slug = slugifyHeading(heading);
-      return `[${label}](#${slug})`;
-    }
+      if (!target) return '';
 
-    // 別ページのアンカー: [[page-slug#見出し]]
-    if (target.includes('#')) {
-      const [pageSlug, heading] = target.split('#');
-      const slug = slugifyHeading(heading.trim());
-      const pSlug = pageSlug.trim().replace(/^\.?\//, '').replace(/\.(?:md|markdown)$/i, '');
+      // 外部リンク判定 (http://, https://, www., //)
+      const isExt = /^https?:\/\//i.test(target) || /^www\./i.test(target) || target.startsWith('//');
+      if (isExt) {
+        const finalUrl = /^www\./i.test(target) ? `https://${target}` : target;
+        return `[${label}](${finalUrl})`;
+      }
+
+      // ページ内アンカー: [[#見出し]]
+      if (target.startsWith('#')) {
+        const heading = target.slice(1).trim();
+        const slug = slugifyHeading(heading);
+        return `[${label}](#${slug})`;
+      }
+
+      // 別ページのアンカー: [[page-slug#見出し]]
+      if (target.includes('#')) {
+        const [pageSlug, heading] = target.split('#');
+        const slug = slugifyHeading(heading.trim());
+        const pSlug = pageSlug.trim().replace(/^\.?\//, '').replace(/\.(?:md|markdown)$/i, '');
+        const isHome = pSlug.toLowerCase() === 'readme' || pSlug.toLowerCase() === 'index' || pSlug.toLowerCase() === 'home' || pSlug === '';
+        const targetPath = isHome ? (sitePrefix || '') : (sitePrefix ? `${sitePrefix}/${pSlug}` : `/${pSlug}`);
+        return `[${label}](${targetPath}#${slug})`;
+      }
+
+      // サイト内別ページ: [[page-slug]]
+      const pSlug = target.trim().replace(/^\.?\//, '').replace(/\.(?:md|markdown)$/i, '');
       const isHome = pSlug.toLowerCase() === 'readme' || pSlug.toLowerCase() === 'index' || pSlug.toLowerCase() === 'home' || pSlug === '';
-      const targetPath = isHome ? (sitePrefix || '') : (sitePrefix ? `${sitePrefix}/${pSlug}` : `/${pSlug}`);
-      return `[${label}](${targetPath}#${slug})`;
+      const targetPath = isHome ? (sitePrefix || '/') : (sitePrefix ? `${sitePrefix}/${pSlug}` : `/${pSlug}`);
+      return `[${label}](${targetPath})`;
     }
+  );
 
-    // サイト内別ページ: [[page-slug]]
-    const pSlug = target.trim().replace(/^\.?\//, '').replace(/\.(?:md|markdown)$/i, '');
-    const isHome = pSlug.toLowerCase() === 'readme' || pSlug.toLowerCase() === 'index' || pSlug.toLowerCase() === 'home' || pSlug === '';
-    const targetPath = isHome ? (sitePrefix || '/') : (sitePrefix ? `${sitePrefix}/${pSlug}` : `/${pSlug}`);
-    return `[${label}](${targetPath})`;
-  });
+  // 7.5. MediaWiki 画像埋め込み記法: [[File:target|thumb|right|300px|キャプション]] / [[Image:...]] / [[ファイル:...]] / [[画像:...]]
+  result = result.replace(
+    /\[\[(?:file|image|ファイル|画像)\s*:\s*([^\n]+?)\]\]/gi,
+    (_, inner) => {
+      const parts = String(inner || '').split('|');
+      const rawTarget = (parts[0] || '').trim();
+      if (!rawTarget) return '';
+      const options = parseMediaWikiImageOptions(parts.slice(1));
+      const resolved = resolveMediaUrl(rawTarget);
+      const safeUrl = (resolved || rawTarget).replace(/\s+/g, '%20');
+      const metaPayload = encodeURIComponent(
+        JSON.stringify({
+          rawTarget,
+          options,
+        })
+      );
+      return `![__mw_img__${metaPayload}](${safeUrl})`;
+    }
+  );
 
   return result;
 }
@@ -254,21 +360,493 @@ function extractText(node: React.ReactNode): string {
 }
 
 /**
- * 画像コンポーネント (エラー時フォールバック付き)
+ * キャプション内の簡易インライン装飾（リンク [text](url)、**太字**、*斜体*、`コード`）をReactノードに変換
+ */
+function renderInlineCaption(text?: string): React.ReactNode {
+  if (!text) return null;
+  const tokenRegex = /(\[([^\]]+)\]\(([^)]+)\)|\*\*([^*]+)\*\*|\*([^*]+)\*|`([^`]+)`)/g;
+  const nodes: React.ReactNode[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  let keyIdx = 0;
+
+  while ((match = tokenRegex.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      nodes.push(text.slice(lastIndex, match.index));
+    }
+    if (match[2] !== undefined && match[3] !== undefined) {
+      const label = match[2];
+      const href = match[3];
+      const isExt = /^https?:\/\//i.test(href);
+      nodes.push(
+        <a
+          key={`cap-link-${keyIdx++}`}
+          href={href}
+          target={isExt ? '_blank' : undefined}
+          rel={isExt ? 'noopener noreferrer' : undefined}
+          onClick={(e) => e.stopPropagation()}
+          className="text-blue-500 hover:text-blue-600 underline underline-offset-2 font-medium"
+        >
+          {label}
+        </a>
+      );
+    } else if (match[4] !== undefined) {
+      nodes.push(
+        <strong key={`cap-bold-${keyIdx++}`} className="font-semibold text-foreground">
+          {match[4]}
+        </strong>
+      );
+    } else if (match[5] !== undefined) {
+      nodes.push(
+        <em key={`cap-em-${keyIdx++}`} className="italic">
+          {match[5]}
+        </em>
+      );
+    } else if (match[6] !== undefined) {
+      nodes.push(
+        <code
+          key={`cap-code-${keyIdx++}`}
+          className="px-1 py-0.5 rounded bg-muted text-foreground font-mono text-[11px] not-italic"
+        >
+          {match[6]}
+        </code>
+      );
+    }
+    lastIndex = tokenRegex.lastIndex;
+  }
+
+  if (lastIndex < text.length) {
+    nodes.push(text.slice(lastIndex));
+  }
+
+  return nodes.length > 0 ? nodes : text;
+}
+
+/**
+ * MediaWiki MultimediaViewer 風 全画面画像拡大モーダル (Lightbox)
+ */
+function ImageLightboxModal({
+  src,
+  alt,
+  caption,
+  onClose,
+}: {
+  src: string;
+  alt?: string;
+  caption?: string;
+  onClose: () => void;
+}) {
+  const [zoom, setZoom] = useState(1);
+  const [fitScreen, setFitScreen] = useState(true);
+  const [rotation, setRotation] = useState(0);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStartRef = useRef({ x: 0, y: 0, panX: 0, panY: 0 });
+
+  const [naturalSize, setNaturalSize] = useState<{ width: number; height: number } | null>(null);
+  const [viewportSize, setViewportSize] = useState<{ width: number; height: number }>({
+    width: typeof window !== 'undefined' ? window.innerWidth : 1280,
+    height: typeof window !== 'undefined' ? window.innerHeight : 800,
+  });
+
+  useEffect(() => {
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    const handleResize = () => {
+      setViewportSize({ width: window.innerWidth, height: window.innerHeight });
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+      } else if (e.key === '+' || e.key === '=') {
+        e.preventDefault();
+        setZoom((z) => Math.min(5, +(z + 0.25).toFixed(2)));
+      } else if (e.key === '-') {
+        e.preventDefault();
+        setZoom((z) => {
+          const next = Math.max(0.25, +(z - 0.25).toFixed(2));
+          if (next <= 1) setPan({ x: 0, y: 0 });
+          return next;
+        });
+      } else if (e.key === '0') {
+        e.preventDefault();
+        setZoom(1);
+        setPan({ x: 0, y: 0 });
+        setRotation(0);
+        setFitScreen(true);
+      }
+    };
+
+    window.addEventListener('resize', handleResize);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      window.removeEventListener('resize', handleResize);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [onClose]);
+
+  const handleWheel = (e: React.WheelEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const delta = e.deltaY < 0 ? 0.2 : -0.2;
+    setZoom((z) => {
+      const next = Math.min(5, Math.max(0.25, +(z + delta).toFixed(2)));
+      if (next <= 1) setPan({ x: 0, y: 0 });
+      return next;
+    });
+  };
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+    dragStartRef.current = {
+      x: e.clientX,
+      y: e.clientY,
+      panX: pan.x,
+      panY: pan.y,
+    };
+  };
+
+  useEffect(() => {
+    if (!isDragging) return;
+    const onMove = (e: MouseEvent) => {
+      const dx = e.clientX - dragStartRef.current.x;
+      const dy = e.clientY - dragStartRef.current.y;
+      setPan({
+        x: dragStartRef.current.panX + dx,
+        y: dragStartRef.current.panY + dy,
+      });
+    };
+    const onUp = () => {
+      setIsDragging(false);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, [isDragging]);
+
+  // 画面いっぱいにフィットさせるための表示サイズ計算
+  let computedWidth: number | undefined;
+  let computedHeight: number | undefined;
+
+  if (naturalSize && naturalSize.width > 0 && naturalSize.height > 0) {
+    if (fitScreen) {
+      const availW = viewportSize.width * 0.9;
+      const availH = viewportSize.height * 0.78;
+      const scale = Math.min(availW / naturalSize.width, availH / naturalSize.height);
+      computedWidth = Math.max(120, Math.round(naturalSize.width * scale));
+      computedHeight = Math.max(120, Math.round(naturalSize.height * scale));
+    } else {
+      computedWidth = naturalSize.width;
+      computedHeight = naturalSize.height;
+    }
+  }
+
+  if (typeof document === 'undefined') return null;
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[9999] bg-black/90 backdrop-blur-md flex flex-col select-none animate-in fade-in duration-150"
+      onClick={onClose}
+      onWheel={handleWheel}
+      role="dialog"
+      aria-modal="true"
+      aria-label={caption || alt || '画像の拡大表示'}
+    >
+      {/* 上部コントロールバー */}
+      <div
+        className="flex items-center justify-between px-4 sm:px-6 py-3 bg-gradient-to-b from-black/80 to-transparent text-white z-10 shrink-0 gap-3"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="p-1.5 rounded-lg bg-white/10 text-blue-400 shrink-0">
+            <ImageIcon className="size-4" />
+          </div>
+          <div className="min-w-0">
+            <div className="text-xs sm:text-sm font-semibold truncate max-w-[200px] sm:max-w-md md:max-w-xl">
+              {caption || alt || '画像プレビュー'}
+            </div>
+            {naturalSize && (
+              <div className="text-[11px] text-white/60 font-mono">
+                {naturalSize.width} × {naturalSize.height} px
+                {fitScreen ? ' (画面最大化フィット)' : ' (原寸 1:1 基準)'}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
+          {/* ズームアウト */}
+          <button
+            type="button"
+            onClick={() =>
+              setZoom((z) => {
+                const next = Math.max(0.25, +(z - 0.25).toFixed(2));
+                if (next <= 1) setPan({ x: 0, y: 0 });
+                return next;
+              })
+            }
+            className="p-2 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer"
+            title="縮小 (-)"
+          >
+            <ZoomOut className="size-4" />
+          </button>
+
+          {/* ズーム倍率表示 & リセット */}
+          <button
+            type="button"
+            onClick={() => {
+              setZoom(1);
+              setPan({ x: 0, y: 0 });
+              setRotation(0);
+            }}
+            className="px-2.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-mono font-semibold transition-colors cursor-pointer min-w-[54px] text-center"
+            title="クリックして倍率と位置をリセット (0)"
+          >
+            {Math.round(zoom * 100)}%
+          </button>
+
+          {/* ズームイン */}
+          <button
+            type="button"
+            onClick={() => setZoom((z) => Math.min(5, +(z + 0.25).toFixed(2)))}
+            className="p-2 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer"
+            title="拡大 (+)"
+          >
+            <ZoomIn className="size-4" />
+          </button>
+
+          {/* 画面フィット / 原寸1:1 切替 */}
+          <button
+            type="button"
+            onClick={() => {
+              setFitScreen((prev) => !prev);
+              setZoom(1);
+              setPan({ x: 0, y: 0 });
+            }}
+            className={`hidden sm:inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
+              fitScreen
+                ? 'bg-blue-600/80 hover:bg-blue-600 text-white'
+                : 'bg-white/10 hover:bg-white/20 text-white/90'
+            }`}
+            title={fitScreen ? '原寸サイズ (1:1) で表示' : '画面いっぱいにフィット拡大'}
+          >
+            {fitScreen ? (
+              <>
+                <Maximize2 className="size-3.5" />
+                <span>画面フィット</span>
+              </>
+            ) : (
+              <>
+                <Minimize2 className="size-3.5" />
+                <span>原寸 1:1</span>
+              </>
+            )}
+          </button>
+
+          {/* 90度回転 */}
+          <button
+            type="button"
+            onClick={() => setRotation((r) => (r + 90) % 360)}
+            className="p-2 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer"
+            title="90°回転"
+          >
+            <RotateCw className="size-4" />
+          </button>
+
+          {/* 別タブで原寸画像を開く */}
+          <a
+            href={src}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="p-2 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer"
+            title="新しいタブで元画像を開く"
+          >
+            <ExternalLink className="size-4" />
+          </a>
+
+          {/* ダウンロード */}
+          <a
+            href={src}
+            download={alt || 'image'}
+            className="hidden sm:inline-flex p-2 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer"
+            title="画像をダウンロード"
+          >
+            <Download className="size-4" />
+          </a>
+
+          <div className="h-5 w-px bg-white/20 mx-1" />
+
+          {/* 閉じるボタン */}
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-2 rounded-lg bg-white/15 hover:bg-rose-500 text-white transition-colors cursor-pointer"
+            title="閉じる (Esc)"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
+      </div>
+
+      {/* メイン画像ステージ (クリックで背景閉じ、画像はドラッグ移動＆ダブルクリック拡大) */}
+      <div className="flex-1 relative overflow-hidden flex items-center justify-center p-4 sm:p-8">
+        <img
+          src={src}
+          alt={alt || caption || 'image'}
+          onLoad={(e) => {
+            const img = e.currentTarget;
+            if (img.naturalWidth && img.naturalHeight) {
+              setNaturalSize({ width: img.naturalWidth, height: img.naturalHeight });
+            }
+          }}
+          onClick={(e) => e.stopPropagation()}
+          onDoubleClick={(e) => {
+            e.stopPropagation();
+            if (zoom > 1) {
+              setZoom(1);
+              setPan({ x: 0, y: 0 });
+            } else {
+              setZoom(2);
+            }
+          }}
+          onMouseDown={handleMouseDown}
+          draggable={false}
+          style={{
+            width: computedWidth ? `${computedWidth}px` : undefined,
+            height: computedHeight ? `${computedHeight}px` : undefined,
+            maxWidth: computedWidth ? 'none' : '90vw',
+            maxHeight: computedHeight ? 'none' : '78vh',
+            transform: `translate3d(${pan.x}px, ${pan.y}px, 0) scale(${zoom}) rotate(${rotation}deg)`,
+            transition: isDragging ? 'none' : 'transform 150ms cubic-bezier(0.2, 0, 0, 1)',
+          }}
+          className={`object-contain rounded-lg shadow-2xl ring-1 ring-white/15 ${
+            isDragging ? 'cursor-grabbing' : zoom > 1 ? 'cursor-grab' : 'cursor-zoom-in'
+          }`}
+        />
+      </div>
+
+      {/* 下部キャプション・操作ヒントバー (MediaWiki MediaViewer 風) */}
+      <div
+        className="px-6 py-3.5 bg-gradient-to-t from-black/85 via-black/60 to-transparent text-white z-10 shrink-0 flex flex-col sm:flex-row items-center justify-between gap-2"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="text-xs sm:text-sm text-white/95 font-medium text-center sm:text-left max-w-3xl leading-relaxed">
+          {caption ? (
+            <span>{renderInlineCaption(caption)}</span>
+          ) : alt ? (
+            <span className="text-white/80">{alt}</span>
+          ) : (
+            <span className="text-white/50 text-xs">キャプションなし</span>
+          )}
+        </div>
+        <div className="text-[11px] text-white/50 shrink-0 hidden md:flex items-center gap-3">
+          <span>ホイール: 拡大/縮小</span>
+          <span>ドラッグ: 移動</span>
+          <span>ダブルクリック: 2倍ズーム</span>
+          <span>背景クリック / Esc: 閉じる</span>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+/**
+ * 画像コンポーネント (MediaWikiオプション・サイズ・配置・サムネイル枠・全画面Lightbox対応)
  */
 function MarkdownImage({
   src,
   rawSrc,
   alt,
+  title,
   ...props
 }: {
   src: string;
   rawSrc: string;
   alt?: string;
+  title?: string;
   [key: string]: any;
 }) {
   const [error, setError] = useState(false);
   const [triedFallback, setTriedFallback] = useState(false);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+
+  // alt / title / rawSrc から MediaWiki 画像オプションを解析
+  const parsed = React.useMemo(() => {
+    let resolvedRawTarget = rawSrc;
+    let opts: MediaImageOptions = { frame: 'none' };
+    let isMediaWikiSyntax = false;
+
+    const rawAlt = typeof alt === 'string' ? alt : '';
+
+    if (rawAlt.startsWith('__mw_img__')) {
+      isMediaWikiSyntax = true;
+      try {
+        const jsonStr = decodeURIComponent(rawAlt.slice('__mw_img__'.length));
+        const decoded = JSON.parse(jsonStr);
+        if (decoded && typeof decoded === 'object') {
+          if (decoded.rawTarget) resolvedRawTarget = decoded.rawTarget;
+          if (decoded.options) opts = decoded.options;
+        }
+      } catch {
+        // ignore JSON parse error
+      }
+    } else if (rawAlt.includes('|')) {
+      opts = parseMediaWikiImageOptions(rawAlt.split('|'), title);
+    } else {
+      // 単一キーワード (例: ![300px](url) や ![thumb](url)) の判定
+      const singleParsed = parseMediaWikiImageOptions(rawAlt ? [rawAlt] : [], title);
+      const consumedAsOption =
+        singleParsed.frame !== 'none' ||
+        singleParsed.align !== undefined ||
+        singleParsed.width !== undefined ||
+        singleParsed.height !== undefined;
+
+      if (consumedAsOption) {
+        opts = singleParsed;
+      } else {
+        opts = {
+          frame: 'none',
+          alt: rawAlt || undefined,
+          caption: title !== undefined ? title : rawAlt || undefined,
+        };
+      }
+    }
+
+    // URLハッシュによる追加パラメータ指定 (#width=300px&align=right&frame=thumb 等) のサポート
+    const hashIdx = resolvedRawTarget.indexOf('#');
+    if (hashIdx !== -1) {
+      const hashStr = resolvedRawTarget.slice(hashIdx + 1);
+      if (hashStr.includes('=')) {
+        const hashSegs = hashStr.split('&').map((s) => {
+          const [k, v] = s.split('=');
+          return `${decodeURIComponent(k || '')}=${decodeURIComponent(v || '')}`;
+        });
+        const hashOpts = parseMediaWikiImageOptions(hashSegs);
+        if (hashOpts.frame !== 'none') opts.frame = hashOpts.frame;
+        if (hashOpts.align) opts.align = hashOpts.align;
+        if (hashOpts.width) opts.width = hashOpts.width;
+        if (hashOpts.height) opts.height = hashOpts.height;
+        if (hashOpts.caption) opts.caption = hashOpts.caption;
+        if (hashOpts.alt) opts.alt = hashOpts.alt;
+      }
+    }
+
+    return { opts, resolvedRawTarget, isMediaWikiSyntax };
+  }, [alt, title, rawSrc]);
+
+  const { opts, resolvedRawTarget } = parsed;
+  const activeSrc = triedFallback ? rawSrc : src;
 
   const handleError = () => {
     if (rawSrc && src !== rawSrc && !triedFallback) {
@@ -280,10 +858,10 @@ function MarkdownImage({
 
   if (error) {
     return (
-      <div className="my-6 p-4 rounded-xl border border-dashed border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/30 flex items-center justify-center gap-2.5 text-xs text-slate-400 select-none">
+      <div className="my-6 p-4 rounded-xl border border-dashed border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/30 flex items-center justify-center gap-2.5 text-xs text-slate-400 select-none clear-both">
         <ImageIcon className="size-4 text-slate-400 shrink-0" />
         <span className="font-mono text-[11px] truncate max-w-xs">
-          {alt || rawSrc || '画像'}
+          {opts.caption || opts.alt || resolvedRawTarget || '画像'}
         </span>
         <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-800 text-slate-500 font-medium">
           読み込み失敗 (404)
@@ -292,22 +870,209 @@ function MarkdownImage({
     );
   }
 
+  const isThumbOrFrame = opts.frame === 'thumb' || opts.frame === 'frame';
+  const isFrameless = opts.frame === 'frameless';
+  const hasBorder = opts.frame === 'border' || Boolean(opts.border);
+
+  // 配置クラス (MediaWiki の right / left フロート回り込み、center 中央揃え、none 左揃え)
+  let alignClass = 'my-6 mx-auto clear-both';
+  if (opts.align === 'right') {
+    alignClass = ' my-2 sm:float-right sm:ml-6 sm:mr-0 mb-4 clear-right mx-auto';
+  } else if (opts.align === 'left') {
+    alignClass = ' my-2 sm:float-left sm:mr-6 sm:ml-0 mb-4 clear-left mx-auto';
+  } else if (opts.align === 'center') {
+    alignClass = 'my-6 mx-auto clear-both';
+  } else if (opts.align === 'none') {
+    alignClass = 'my-6 mr-auto ml-0 clear-both';
+  }
+
+  // 画像クリック時の挙動 (link=空文字はクリック無効、link=URLはリンク遷移、未指定時は全画面Lightbox拡大)
+  const isClickDisabled = opts.link === '';
+  const hasCustomLink = typeof opts.link === 'string' && opts.link.length > 0;
+
+  const handleImageClick = (e: React.MouseEvent) => {
+    if (isClickDisabled) return;
+    if (hasCustomLink) {
+      e.stopPropagation();
+      const linkTarget = opts.link!;
+      if (/^https?:\/\//i.test(linkTarget) || linkTarget.startsWith('//')) {
+        window.open(linkTarget, '_blank', 'noopener,noreferrer');
+      } else {
+        window.location.href = linkTarget;
+      }
+      return;
+    }
+    e.stopPropagation();
+    setLightboxOpen(true);
+  };
+
+  // サイズスタイル計算
+  // MediaWiki で thumb 指定かつ幅未指定の場合は 260px を標準サムネイル幅とする
+  const effectiveWidth = opts.width || (opts.frame === 'thumb' ? '260px' : undefined);
+  const effectiveHeight = opts.height;
+
+  const figureStyle: React.CSSProperties = {
+    maxWidth: '100%',
+  };
+  const imgStyle: React.CSSProperties = {
+    maxWidth: '100%',
+    verticalAlign: opts.valign,
+  };
+
+  if (isThumbOrFrame) {
+    if (effectiveWidth) {
+      figureStyle.width = effectiveWidth;
+    }
+    if (effectiveHeight) {
+      imgStyle.maxHeight = effectiveHeight;
+      imgStyle.width = 'auto';
+    } else {
+      imgStyle.width = '100%';
+    }
+  } else {
+    if (effectiveWidth) {
+      if (effectiveWidth.endsWith('%')) {
+        figureStyle.width = effectiveWidth;
+        imgStyle.width = '100%';
+      } else {
+        imgStyle.width = effectiveWidth;
+      }
+    }
+    if (effectiveHeight) {
+      imgStyle.maxHeight = effectiveHeight;
+      if (!effectiveWidth) imgStyle.width = 'auto';
+    }
+  }
+
+  const displayCaption = isFrameless ? undefined : opts.caption;
+
   return (
-    <figure className="my-6">
-      <img
-        src={triedFallback ? rawSrc : src}
-        alt={alt || 'image'}
-        className="rounded-xl shadow-md max-w-full h-auto mx-auto border border-border transition-transform hover:scale-[1.01]"
-        loading="lazy"
-        onError={handleError}
-        {...props}
-      />
-      {alt && (
-        <figcaption className="text-center text-xs text-muted-foreground mt-2 italic">
-          {alt}
-        </figcaption>
+    <>
+      {isThumbOrFrame ? (
+        /* MediaWiki サムネイル (thumb / frame) ボックス表示 */
+        <figure
+          style={figureStyle}
+          className={`${alignClass} w-fit bg-muted/35 dark:bg-slate-900/60 border border-border rounded-xl p-2.5 shadow-xs transition-shadow hover:shadow-md ${
+            opts.className || ''
+          }`}
+        >
+          <div className="relative group/mwimg overflow-hidden rounded-lg bg-background/60 border border-border/60 flex items-center justify-center">
+            <img
+              src={activeSrc}
+              alt={opts.alt || opts.caption || 'image'}
+              style={imgStyle}
+              className={`h-auto object-contain transition-transform duration-200 group-hover/mwimg:scale-[1.01] ${
+                isClickDisabled
+                  ? 'cursor-default'
+                  : hasCustomLink
+                  ? 'cursor-pointer'
+                  : 'cursor-zoom-in'
+              }`}
+              loading="lazy"
+              onError={handleError}
+              onClick={handleImageClick}
+              {...props}
+            />
+            {!isClickDisabled && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setLightboxOpen(true);
+                }}
+                className="opacity-0 group-hover/mwimg:opacity-100 transition-opacity absolute top-2 right-2 p-1.5 rounded-lg bg-black/65 hover:bg-black/85 text-white shadow-md cursor-pointer backdrop-blur-xs"
+                title="クリックして画面いっぱいに拡大表示"
+              >
+                <Maximize2 className="size-3.5" />
+              </button>
+            )}
+          </div>
+
+          <figcaption className="mt-2 px-1 text-xs text-muted-foreground leading-relaxed flex items-start justify-between gap-2">
+            <div className="flex-1 min-w-0 break-words">
+              {displayCaption ? (
+                renderInlineCaption(displayCaption)
+              ) : (
+                <span className="text-[11px] text-muted-foreground/60 select-none">
+                  クリックして拡大
+                </span>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setLightboxOpen(true);
+              }}
+              className="shrink-0 p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+              title="画面いっぱいに拡大表示"
+              aria-label="画像を拡大表示"
+            >
+              <Maximize2 className="size-3.5" />
+            </button>
+          </figcaption>
+        </figure>
+      ) : (
+        /* 標準 / frameless / border 表示 */
+        <figure
+          style={figureStyle}
+          className={`${alignClass} w-fit ${opts.className || ''}`}
+        >
+          <div className="relative group/mwimg inline-block max-w-full">
+            <img
+              src={activeSrc}
+              alt={opts.alt || opts.caption || 'image'}
+              style={imgStyle}
+              className={`rounded-xl h-auto mx-auto transition-transform duration-200 hover:scale-[1.01] ${
+                hasBorder
+                  ? 'border-2 border-foreground/30 shadow-xs'
+                  : isFrameless
+                  ? ''
+                  : 'shadow-md border border-border'
+              } ${
+                isClickDisabled
+                  ? 'cursor-default'
+                  : hasCustomLink
+                  ? 'cursor-pointer'
+                  : 'cursor-zoom-in'
+              }`}
+              loading="lazy"
+              onError={handleError}
+              onClick={handleImageClick}
+              {...props}
+            />
+            {!isClickDisabled && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setLightboxOpen(true);
+                }}
+                className="opacity-0 group-hover/mwimg:opacity-100 transition-opacity absolute bottom-2.5 right-2.5 px-2 py-1 rounded-lg bg-black/65 hover:bg-black/85 text-white text-[11px] font-medium shadow-md flex items-center gap-1 cursor-pointer backdrop-blur-xs"
+                title="クリックして画面いっぱいに拡大表示"
+              >
+                <Maximize2 className="size-3" />
+                <span>拡大</span>
+              </button>
+            )}
+          </div>
+          {displayCaption && (
+            <figcaption className="text-center text-xs text-muted-foreground mt-2 italic">
+              {renderInlineCaption(displayCaption)}
+            </figcaption>
+          )}
+        </figure>
       )}
-    </figure>
+
+      {lightboxOpen && (
+        <ImageLightboxModal
+          src={activeSrc}
+          alt={opts.alt}
+          caption={opts.caption}
+          onClose={() => setLightboxOpen(false)}
+        />
+      )}
+    </>
   );
 }
 
@@ -370,7 +1135,7 @@ export function MarkdownRenderer({ content, className = '', siteSlug }: Markdown
   };
 
   return (
-    <div className={`markdown-body max-w-none ${className}`}>
+    <div className={`markdown-body flow-root max-w-none ${className}`}>
       <ReactMarkdown
         urlTransform={(url) => {
           const trimmed = (url || '').trim().toLowerCase();
@@ -630,18 +1395,34 @@ export function MarkdownRenderer({ content, className = '', siteSlug }: Markdown
           },
           p({ children, ...props }) {
             // HTML仕様: <p> の直下に <figure> などのブロック要素を配置することはできないため、
-            // 子要素に画像やブロックが含まれる場合は <div> としてレンダリングし Hydration エラーを防ぐ
-            const hasBlockOrImage = React.Children.toArray(children).some((child) => {
+            // 子要素に画像やブロックが含まれる場合は <div> またはフラグメントとしてレンダリングし Hydration エラーを防ぐ
+            const childArray = React.Children.toArray(children);
+            const nonEmptyChildren = childArray.filter(
+              (c) => !(typeof c === 'string' && c.trim() === '')
+            );
+
+            const isImageElement = (child: React.ReactNode) => {
               if (!React.isValidElement(child)) return false;
               const childProps = child.props as any;
               return (
                 childProps?.node?.tagName === 'img' ||
                 childProps?.src !== undefined ||
                 child.type === 'img' ||
-                child.type === 'figure' ||
-                child.type === 'div'
+                child.type === 'figure'
               );
-            });
+            };
+
+            // 段落の中身が画像のみの場合は余分なラッパー div を挟まず直接展開し、
+            // float-right / float-left 指定時の後続テキスト回り込みを自然に行う
+            if (nonEmptyChildren.length > 0 && nonEmptyChildren.every(isImageElement)) {
+              return <>{children}</>;
+            }
+
+            const hasBlockOrImage = childArray.some(
+              (child) =>
+                isImageElement(child) ||
+                (React.isValidElement(child) && child.type === 'div')
+            );
 
             if (hasBlockOrImage) {
               return (
@@ -656,7 +1437,7 @@ export function MarkdownRenderer({ content, className = '', siteSlug }: Markdown
               </p>
             );
           },
-          img({ src, alt, ...props }) {
+          img({ src, alt, title, ...props }) {
             const rawSrc = typeof src === 'string' ? src : '';
             const resolvedSrc = resolveMediaUrl(rawSrc);
             return (
@@ -664,6 +1445,7 @@ export function MarkdownRenderer({ content, className = '', siteSlug }: Markdown
                 src={resolvedSrc}
                 rawSrc={rawSrc}
                 alt={alt}
+                title={typeof title === 'string' ? title : undefined}
                 {...props}
               />
             );

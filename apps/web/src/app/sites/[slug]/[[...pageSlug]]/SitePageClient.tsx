@@ -46,7 +46,7 @@ import { CreatePageModal } from '@/components/wiki/create-page-modal';
 import { CategoryBox } from '@/components/wiki/category-box';
 import { CategoryView } from '@/components/wiki/category-view';
 import { SpecialCategoriesView } from '@/components/wiki/special-categories-view';
-import { extractCategoriesFromMarkdown } from '@/components/markdown-renderer';
+import { getPageCategories } from '@/components/markdown-renderer';
 import { WikiSidebarTree } from '@/components/wiki/wiki-sidebar-tree';
 import { SidebarSection, generateDefaultSidebar } from '@/types/sidebar';
 import { useAuthStore, syncAuthFromCookies } from '@/store/auth';
@@ -59,6 +59,8 @@ interface PublicPage {
   slug: string;
   title: string;
   content: string;
+  categories?: string[];
+  frontmatter?: { categories?: string[]; [key: string]: any };
   status: string;
   published_at?: string;
   created_at?: string;
@@ -243,6 +245,15 @@ Klados で使用できる代表的な記法一覧です。
 | \`remark-gfm\` | 4.x | GFM拡張 |
 | \`rehype-highlight\` | 7.x | 構文ハイライト |
 | \`rehype-katex\` | 7.x | 数式レンダリング |
+
+### 画像・メディア挿入 (MediaWiki 互換記法)
+- **サムネイル＋右寄せ回り込み＋サイズ＋キャプション**:
+  \`[[File:media:UUID|thumb|right|300px|図1: キャプション説明文]]\`
+- **中央揃え＋幅指定**:
+  \`[[File:media:UUID|center|450px|中央配置の図]]\`
+- **Markdown拡張パイプ記法**:
+  \`![thumb|left|250px|左回り込みの図](media:UUID)\`
+- 画像をクリックすると**画面いっぱいのライトボックス表示**（ズーム・ドラッグ移動・回転対応）に拡大されます。
 
 [[Category:ドキュメント|記法]]
 [[Category:リファレンス]]
@@ -705,11 +716,10 @@ export default function SitePageClient() {
     );
   }, [pageData, targetSlug, pages]);
 
-  // ページに付与されたカテゴリの抽出
+  // ページに付与されたカテゴリの抽出 (Frontmatterカテゴリ + Markdown内カテゴリ)
   const pageCategories = useMemo(() => {
-    if (!activePage?.content) return [];
-    return extractCategoriesFromMarkdown(activePage.content);
-  }, [activePage?.content]);
+    return getPageCategories(activePage);
+  }, [activePage]);
 
   // コメント数取得
   const { data: comments = [] } = useQuery({
@@ -1066,7 +1076,7 @@ export default function SitePageClient() {
             {isGuest ? (
               <div className="hidden sm:flex items-center gap-2">
                 <PortalLink
-                  href="/login"
+                  href={`/login?site=${encodeURIComponent(siteSlug)}`}
                   className={`inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-xl border transition-colors ${
                     isDark
                       ? 'border-slate-800 text-slate-300 hover:text-white hover:bg-slate-800'
@@ -1077,7 +1087,7 @@ export default function SitePageClient() {
                   <span>ログイン</span>
                 </PortalLink>
                 <PortalLink
-                  href="/register"
+                  href={`/register?site=${encodeURIComponent(siteSlug)}`}
                   className="inline-flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-xl text-white shadow-2xs hover:opacity-90 transition-opacity"
                   style={{ backgroundColor: brandPrimaryColor }}
                 >
@@ -1375,7 +1385,7 @@ export default function SitePageClient() {
                   {isGuest ? (
                     <div className="space-y-1.5 pt-1">
                       <PortalLink
-                        href="/login"
+                        href={`/login?site=${encodeURIComponent(siteSlug)}`}
                         onClick={() => setMobileMenuOpen(false)}
                         className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium border border-border text-foreground hover:bg-muted transition-colors"
                       >
@@ -1383,7 +1393,7 @@ export default function SitePageClient() {
                         <span>ログイン</span>
                       </PortalLink>
                       <PortalLink
-                        href="/register"
+                        href={`/register?site=${encodeURIComponent(siteSlug)}`}
                         onClick={() => setMobileMenuOpen(false)}
                         className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium text-white shadow-xs transition-opacity hover:opacity-90"
                         style={{ backgroundColor: brandPrimaryColor }}

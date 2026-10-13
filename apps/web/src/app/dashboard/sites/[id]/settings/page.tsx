@@ -1,7 +1,7 @@
 'use client';
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { sitesApi, pagesApi, downloadSiteZip, SiteSettingsData } from '@/lib/api';
+import { sitesApi, pagesApi, authApi, AuthRoutingRule, downloadSiteZip, SiteSettingsData } from '@/lib/api';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useState, useEffect } from 'react';
@@ -12,6 +12,11 @@ import {
   Globe,
   Settings,
   ShieldAlert,
+  ShieldCheck,
+  Lock,
+  KeyRound,
+  Plus,
+  Building,
   Save,
   Check,
   Loader2,
@@ -161,6 +166,33 @@ export default function SiteSettingsPage() {
   // サイドバー編集モーダル
   const [sidebarEditorOpen, setSidebarEditorOpen] = useState(false);
 
+  // サイト別ログイン・認証設定ステート
+  const [siteAuthForm, setSiteAuthForm] = useState({
+    enable_email_login: true,
+    allow_email_registration: true,
+    require_email_verification: false,
+    enable_github_login: true,
+    enable_discord_login: true,
+    enable_google_login: true,
+    enable_demo_login: true,
+    allowed_domains: '',
+    restrict_to_rules: false,
+    github_client_id: '',
+    github_client_secret: '',
+    discord_client_id: '',
+    discord_client_secret: '',
+  });
+  const [siteAuthInitialized, setSiteAuthInitialized] = useState(false);
+  const [sitePasswordInput, setSitePasswordInput] = useState('');
+
+  // サイト専用ルーティングルール追加モーダル
+  const [ruleModalOpen, setRuleModalOpen] = useState(false);
+  const [newRuleName, setNewRuleName] = useState('');
+  const [newRuleProvider, setNewRuleProvider] = useState<'all' | 'github' | 'discord' | 'google' | 'email'>('github');
+  const [newRuleType, setNewRuleType] = useState<'github_org' | 'discord_guild' | 'email_domain' | 'email_list'>('github_org');
+  const [newRuleMatchValue, setNewRuleMatchValue] = useState('');
+  const [newRuleTargetRole, setNewRuleTargetRole] = useState<'admin' | 'editor' | 'viewer'>('editor');
+
   const { data: site, isLoading } = useQuery<SiteDetails>({
     queryKey: ['site', id],
     queryFn: () => sitesApi.get(id).then((r) => r.data.data),
@@ -169,6 +201,129 @@ export default function SiteSettingsPage() {
   const { data: pages = [] } = useQuery({
     queryKey: ['pages', id],
     queryFn: () => pagesApi.list(id).then((r) => r.data.data),
+  });
+
+  // サイト別認証設定の取得
+  const { data: siteAuthData } = useQuery({
+    queryKey: ['site-auth-config', id],
+    queryFn: () => authApi.getAuthConfig(id).then((r) => r.data.data),
+    enabled: !!id,
+  });
+
+  // このサイト向けの自動振り分けルール一覧
+  const { data: siteRules = [] } = useQuery<AuthRoutingRule[]>({
+    queryKey: ['site-routing-rules', id],
+    queryFn: () => authApi.getRoutingRules(id).then((r) => r.data.data),
+    enabled: !!id,
+  });
+
+  useEffect(() => {
+    if (siteAuthData?.config && !siteAuthInitialized) {
+      const cfg = siteAuthData.config;
+      const siteOvr = siteAuthData.site_auth_config || {};
+      setSiteAuthForm({
+        enable_email_login: cfg.enable_email_login ?? true,
+        allow_email_registration: cfg.allow_email_registration ?? true,
+        require_email_verification: cfg.require_email_verification ?? false,
+        enable_github_login: cfg.enable_github_login ?? true,
+        enable_discord_login: cfg.enable_discord_login ?? true,
+        enable_google_login: cfg.enable_google_login ?? true,
+        enable_demo_login: cfg.enable_demo_login ?? true,
+        allowed_domains: cfg.allowed_domains || '',
+        restrict_to_rules: cfg.restrict_to_rules ?? false,
+        github_client_id: siteOvr.github_client_id || cfg.github_client_id || '',
+        github_client_secret: '',
+        discord_client_id: siteOvr.discord_client_id || cfg.discord_client_id || '',
+        discord_client_secret: '',
+      });
+      setSiteAuthInitialized(true);
+    }
+  }, [siteAuthData, siteAuthInitialized]);
+
+  const updateSiteAuthMutation = useMutation({
+    mutationFn: () =>
+      authApi.updateAuthConfig({
+        site_id: id,
+        enable_email_login: siteAuthForm.enable_email_login,
+        allow_email_registration: siteAuthForm.allow_email_registration,
+        require_email_verification: siteAuthForm.require_email_verification,
+        enable_github_login: siteAuthForm.enable_github_login,
+        enable_discord_login: siteAuthForm.enable_discord_login,
+        enable_google_login: siteAuthForm.enable_google_login,
+        enable_demo_login: siteAuthForm.enable_demo_login,
+        allowed_domains: siteAuthForm.allowed_domains,
+        restrict_to_rules: siteAuthForm.restrict_to_rules,
+        github_client_id: siteAuthForm.github_client_id || undefined,
+        github_client_secret: siteAuthForm.github_client_secret || undefined,
+        discord_client_id: siteAuthForm.discord_client_id || undefined,
+        discord_client_secret: siteAuthForm.discord_client_secret || undefined,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['site-auth-config', id] });
+      queryClient.invalidateQueries({ queryKey: ['site', id] });
+      setSaveSuccessMsg('このサイトのログイン・認証設定を保存しました');
+      setTimeout(() => setSaveSuccessMsg(null), 3000);
+    },
+    onError: (err: any) => {
+      alert('ログイン設定の保存に失敗しました: ' + (err?.response?.data?.error || err.message));
+    },
+  });
+
+  const setSitePasswordMutation = useMutation({
+    mutationFn: (pwd: string) => sitesApi.setPassword(id, pwd),
+    onSuccess: (_, pwd) => {
+      queryClient.invalidateQueries({ queryKey: ['site', id] });
+      setSitePasswordInput('');
+      setSaveSuccessMsg(pwd ? 'サイトの閲覧パスワードを設定しました' : 'サイトの閲覧パスワードを解除しました');
+      setTimeout(() => setSaveSuccessMsg(null), 3000);
+    },
+    onError: (err: any) => {
+      alert('パスワード設定に失敗しました: ' + (err?.response?.data?.error || err.message));
+    },
+  });
+
+  const createSiteRuleMutation = useMutation({
+    mutationFn: () =>
+      authApi.createRoutingRule({
+        name: newRuleName.trim(),
+        provider: newRuleProvider,
+        rule_type: newRuleType,
+        match_value: newRuleMatchValue.trim(),
+        action_type: 'assign_site_role',
+        target_site_id: id,
+        target_role: newRuleTargetRole,
+        auto_verify: true,
+        enabled: true,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['site-routing-rules', id] });
+      queryClient.invalidateQueries({ queryKey: ['auth-routing-rules'] });
+      setRuleModalOpen(false);
+      setNewRuleName('');
+      setNewRuleMatchValue('');
+      setSaveSuccessMsg('自動権限振り分けルールを追加しました');
+      setTimeout(() => setSaveSuccessMsg(null), 3000);
+    },
+    onError: (err: any) => {
+      alert('ルールの作成に失敗しました: ' + (err?.response?.data?.error || err.message));
+    },
+  });
+
+  const deleteSiteRuleMutation = useMutation({
+    mutationFn: (ruleId: string) => authApi.deleteRoutingRule(ruleId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['site-routing-rules', id] });
+      queryClient.invalidateQueries({ queryKey: ['auth-routing-rules'] });
+    },
+  });
+
+  const toggleSiteRuleMutation = useMutation({
+    mutationFn: ({ ruleId, enabled }: { ruleId: string; enabled: boolean }) =>
+      authApi.updateRoutingRule(ruleId, { enabled }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['site-routing-rules', id] });
+      queryClient.invalidateQueries({ queryKey: ['auth-routing-rules'] });
+    },
   });
 
   // フォームの初期値ロード
@@ -219,7 +374,7 @@ export default function SiteSettingsPage() {
 
   const handleSave = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    // settings 内にも同期（既存の sidebar_sections など他項目を上書き消去しないようマージ）
+    // settings 内にも同期（既存の sidebar_sections や auth_config など他項目を上書き消去しないようマージ）
     const payload: SiteSettingsData = {
       ...form,
       settings: {
@@ -228,6 +383,22 @@ export default function SiteSettingsPage() {
         custom_font: form.custom_font,
         primary_color: form.primary_color,
         custom_css: form.custom_css,
+        auth_config: {
+          ...(site?.settings?.auth_config || {}),
+          enable_email_login: siteAuthForm.enable_email_login,
+          allow_email_registration: siteAuthForm.allow_email_registration,
+          require_email_verification: siteAuthForm.require_email_verification,
+          enable_github_login: siteAuthForm.enable_github_login,
+          enable_discord_login: siteAuthForm.enable_discord_login,
+          enable_google_login: siteAuthForm.enable_google_login,
+          enable_demo_login: siteAuthForm.enable_demo_login,
+          allowed_domains: siteAuthForm.allowed_domains,
+          restrict_to_rules: siteAuthForm.restrict_to_rules,
+          ...(siteAuthForm.github_client_id ? { github_client_id: siteAuthForm.github_client_id } : {}),
+          ...(siteAuthForm.github_client_secret ? { github_client_secret: siteAuthForm.github_client_secret } : {}),
+          ...(siteAuthForm.discord_client_id ? { discord_client_id: siteAuthForm.discord_client_id } : {}),
+          ...(siteAuthForm.discord_client_secret ? { discord_client_secret: siteAuthForm.discord_client_secret } : {}),
+        },
       },
     };
     updateMutation.mutate(payload);
@@ -817,7 +988,295 @@ export default function SiteSettingsPage() {
           </div>
         </div>
 
-        {/* 6. SEO & OGP 設定 */}
+        {/* 6. サイト別ログイン・認証・自動権限振り分け設定 */}
+        <div className="bg-card border border-border rounded-2xl p-6 shadow-xs space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-border">
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="size-5 text-blue-600" />
+              <div>
+                <h2 className="text-base font-bold">サイト単位のログイン・認証設定</h2>
+                <p className="text-xs text-muted-foreground">
+                  root管理者でなくても、このサイトのオーナー・管理者としてログイン方法やメンバー自動振り分けを設定できます
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Link
+                href={`/dashboard/settings/auth?site_id=${id}`}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-border hover:bg-muted text-xs font-medium text-foreground transition-colors"
+              >
+                <ExternalLink className="size-3.5" />
+                <span>詳細認証・シミュレーター画面へ</span>
+              </Link>
+              <button
+                type="button"
+                onClick={() => updateSiteAuthMutation.mutate()}
+                disabled={updateSiteAuthMutation.isPending}
+                className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+              >
+                {updateSiteAuthMutation.isPending ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <Check className="size-3.5" />
+                )}
+                <span>ログイン設定のみ保存</span>
+              </button>
+            </div>
+          </div>
+
+          {/* 許可するログインプロバイダ */}
+          <div className="space-y-3">
+            <h3 className="text-xs font-bold text-foreground flex items-center gap-1.5">
+              <Lock className="size-3.5 text-primary" />
+              <span>このサイトで許可するログイン方法</span>
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {/* GitHub */}
+              <label className="p-3.5 rounded-xl border border-border bg-muted/20 flex items-center justify-between cursor-pointer hover:bg-muted/40 transition-colors">
+                <div>
+                  <span className="text-xs font-bold block">GitHub OAuth ログイン</span>
+                  <span className="text-[11px] text-muted-foreground">GitHub組織による自動権限付与に対応</span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={siteAuthForm.enable_github_login}
+                  onChange={(e) => setSiteAuthForm({ ...siteAuthForm, enable_github_login: e.target.checked })}
+                  className="size-4 rounded border-border text-primary focus:ring-primary"
+                />
+              </label>
+
+              {/* Discord */}
+              <label className="p-3.5 rounded-xl border border-border bg-muted/20 flex items-center justify-between cursor-pointer hover:bg-muted/40 transition-colors">
+                <div>
+                  <span className="text-xs font-bold block">Discord OAuth ログイン</span>
+                  <span className="text-[11px] text-muted-foreground">Discordサーバー所属による自動権限付与に対応</span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={siteAuthForm.enable_discord_login}
+                  onChange={(e) => setSiteAuthForm({ ...siteAuthForm, enable_discord_login: e.target.checked })}
+                  className="size-4 rounded border-border text-primary focus:ring-primary"
+                />
+              </label>
+
+              {/* Google */}
+              <label className="p-3.5 rounded-xl border border-border bg-muted/20 flex items-center justify-between cursor-pointer hover:bg-muted/40 transition-colors">
+                <div>
+                  <span className="text-xs font-bold block">Google OAuth ログイン</span>
+                  <span className="text-[11px] text-muted-foreground">Googleアカウントでのログイン</span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={siteAuthForm.enable_google_login}
+                  onChange={(e) => setSiteAuthForm({ ...siteAuthForm, enable_google_login: e.target.checked })}
+                  className="size-4 rounded border-border text-primary focus:ring-primary"
+                />
+              </label>
+
+              {/* デモログイン */}
+              <label className="p-3.5 rounded-xl border border-border bg-muted/20 flex items-center justify-between cursor-pointer hover:bg-muted/40 transition-colors">
+                <div>
+                  <span className="text-xs font-bold block">ワンクリック簡単ログイン (デモ)</span>
+                  <span className="text-[11px] text-muted-foreground">ゲスト体験用ログインボタンの表示</span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={siteAuthForm.enable_demo_login}
+                  onChange={(e) => setSiteAuthForm({ ...siteAuthForm, enable_demo_login: e.target.checked })}
+                  className="size-4 rounded border-border text-primary focus:ring-primary"
+                />
+              </label>
+
+              {/* メールアドレスログイン */}
+              <div className="p-3.5 rounded-xl border border-border bg-muted/20 space-y-3 sm:col-span-2">
+                <label className="flex items-center justify-between cursor-pointer">
+                  <div>
+                    <span className="text-xs font-bold block">メールアドレス / パスワードログイン</span>
+                    <span className="text-[11px] text-muted-foreground">
+                      オフにすると、このサイトからのログイン画面ではSNS/OAuthログインのみが表示されます
+                    </span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={siteAuthForm.enable_email_login}
+                    onChange={(e) => setSiteAuthForm({ ...siteAuthForm, enable_email_login: e.target.checked })}
+                    className="size-4 rounded border-border text-primary focus:ring-primary"
+                  />
+                </label>
+
+                {siteAuthForm.enable_email_login && (
+                  <div className="pt-2.5 border-t border-border/60 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <label className="flex items-center justify-between cursor-pointer">
+                      <div>
+                        <span className="text-xs font-semibold block">新規メール登録（/register）を許可</span>
+                        <span className="text-[10px] text-muted-foreground">オフで招待・既存メンバーのみに制限</span>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={siteAuthForm.allow_email_registration}
+                        onChange={(e) =>
+                          setSiteAuthForm({ ...siteAuthForm, allow_email_registration: e.target.checked })
+                        }
+                        className="size-4 rounded border-border text-primary focus:ring-primary"
+                      />
+                    </label>
+                    <label className="flex items-center justify-between cursor-pointer">
+                      <div>
+                        <span className="text-xs font-semibold block">メール確認を必須にする</span>
+                        <span className="text-[10px] text-muted-foreground">オフで登録直後から即時利用可能</span>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={siteAuthForm.require_email_verification}
+                        onChange={(e) =>
+                          setSiteAuthForm({ ...siteAuthForm, require_email_verification: e.target.checked })
+                        }
+                        className="size-4 rounded border-border text-primary focus:ring-primary"
+                      />
+                    </label>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* ドメイン制限 & ルール限定ログイン */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-3 border-t border-border">
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold">許可メールドメイン制限（任意）</label>
+              <input
+                type="text"
+                placeholder="例: @example.com, @corp.jp (空欄で制限なし)"
+                value={siteAuthForm.allowed_domains}
+                onChange={(e) => setSiteAuthForm({ ...siteAuthForm, allowed_domains: e.target.value })}
+                className="w-full px-3.5 py-2 text-xs bg-background border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary font-mono"
+              />
+            </div>
+
+            <div className="flex items-center justify-between p-3.5 rounded-xl bg-muted/20 border border-border">
+              <div>
+                <span className="text-xs font-bold block">振り分けルール一致ユーザーのみ許可</span>
+                <span className="text-[11px] text-muted-foreground">
+                  下の自動振り分けルールに合致するメンバーのみログインを許可
+                </span>
+              </div>
+              <input
+                type="checkbox"
+                checked={siteAuthForm.restrict_to_rules}
+                onChange={(e) => setSiteAuthForm({ ...siteAuthForm, restrict_to_rules: e.target.checked })}
+                className="size-4 rounded border-border text-primary focus:ring-primary cursor-pointer"
+              />
+            </div>
+          </div>
+
+          {/* サイト閲覧合言葉パスワード保護 */}
+          <div className="pt-3 border-t border-border space-y-2">
+            <label className="text-xs font-bold flex items-center gap-1.5">
+              <KeyRound className="size-3.5 text-amber-500" />
+              <span>サイト全体の閲覧パスワード（合言葉）保護</span>
+            </label>
+            <p className="text-[11px] text-muted-foreground">
+              設定すると、未ログインの閲覧者がサイトを開く際にパスワード入力を求めることができます（空欄で保存すると解除されます）。
+            </p>
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+              <input
+                type="password"
+                placeholder="新しい閲覧パスワードを入力（解除する場合は空欄のままボタンをクリック）"
+                value={sitePasswordInput}
+                onChange={(e) => setSitePasswordInput(e.target.value)}
+                className="flex-1 px-3.5 py-2 text-xs bg-background border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary"
+              />
+              <button
+                type="button"
+                onClick={() => setSitePasswordMutation.mutate(sitePasswordInput)}
+                disabled={setSitePasswordMutation.isPending}
+                className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-secondary hover:bg-secondary/80 text-secondary-foreground text-xs font-semibold cursor-pointer disabled:opacity-50 transition-colors"
+              >
+                {setSitePasswordMutation.isPending ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <Lock className="size-3.5" />
+                )}
+                <span>{sitePasswordInput ? '閲覧パスワードを設定' : 'パスワード保護を解除'}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* このサイトへの自動権限振り分けルール */}
+          <div className="pt-4 border-t border-border space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-xs font-bold flex items-center gap-1.5">
+                  <Building className="size-3.5 text-blue-600" />
+                  <span>このサイトへの自動メンバー振り分けルール ({siteRules.length}件)</span>
+                </h3>
+                <p className="text-[11px] text-muted-foreground">
+                  GitHub組織やDiscordサーバー、メールドメインに応じて、ログイン時にこのサイトの権限（Admin / Editor / Viewer）を自動付与します
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRuleModalOpen(true)}
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-semibold cursor-pointer transition-colors"
+              >
+                <Plus className="size-3.5" />
+                <span>ルールを追加</span>
+              </button>
+            </div>
+
+            {siteRules.length === 0 ? (
+              <div className="p-4 rounded-xl border border-dashed border-border bg-muted/20 text-center text-xs text-muted-foreground">
+                このサイト専用の自動振り分けルールはまだありません。「ルールを追加」からDiscordサーバーやGitHub Orgの自動権限付与を設定できます。
+              </div>
+            ) : (
+              <div className="divide-y divide-border rounded-xl border border-border overflow-hidden bg-background">
+                {siteRules.map((rule) => (
+                  <div key={rule.id} className="p-3 flex items-center justify-between gap-3 text-xs">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <input
+                        type="checkbox"
+                        checked={rule.enabled}
+                        onChange={(e) =>
+                          toggleSiteRuleMutation.mutate({ ruleId: rule.id, enabled: e.target.checked })
+                        }
+                        className="size-4 rounded border-border text-primary cursor-pointer"
+                        title="ルールの有効/無効"
+                      />
+                      <div className="min-w-0">
+                        <div className="font-bold text-foreground truncate flex items-center gap-2">
+                          <span>{rule.name}</span>
+                          <span className="px-2 py-0.5 rounded-full text-[10px] bg-muted text-muted-foreground uppercase font-mono">
+                            {rule.provider}
+                          </span>
+                          <span className="px-2 py-0.5 rounded text-[10px] bg-blue-500/10 text-blue-600 dark:text-blue-400 font-bold uppercase">
+                            {rule.target_role}
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-muted-foreground font-mono truncate">
+                          {rule.rule_type}: {rule.match_value}
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (confirm(`ルール「${rule.name}」を削除しますか？`)) {
+                          deleteSiteRuleMutation.mutate(rule.id);
+                        }
+                      }}
+                      className="p-1.5 text-rose-500 hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer shrink-0"
+                      title="ルールを削除"
+                    >
+                      <Trash2 className="size-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* 7. SEO & OGP 設定 */}
         <div className="bg-card border border-border rounded-2xl p-6 shadow-xs space-y-5">
           <div className="flex items-center gap-2 pb-3 border-b border-border">
             <Share2 className="size-5 text-indigo-500" />
@@ -943,7 +1402,7 @@ export default function SiteSettingsPage() {
           </div>
         </div>
 
-        {/* 6. 危険な操作 (Danger Zone) */}
+        {/* 8. 危険な操作 (Danger Zone) */}
         <div className="bg-rose-50/50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900/40 rounded-2xl p-6 shadow-xs space-y-4">
           <div className="flex items-center gap-2 pb-3 border-b border-rose-200 dark:border-rose-900/40 text-rose-600 dark:text-rose-400">
             <ShieldAlert className="size-5" />
@@ -990,6 +1449,120 @@ export default function SiteSettingsPage() {
           </button>
         </div>
       </form>
+
+      {/* サイト専用ルーティングルール追加モーダル */}
+      {ruleModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4"
+          onClick={() => setRuleModalOpen(false)}
+        >
+          <div
+            className="bg-card text-card-foreground w-full max-w-md rounded-2xl shadow-2xl border border-border p-6 space-y-4 animate-in fade-in-0 zoom-in-95 duration-150"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div>
+              <h3 className="text-base font-bold text-foreground">自動権限振り分けルールを追加</h3>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                条件に合致したユーザーに「{site?.title}」の権限を自動付与します
+              </p>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="block font-semibold mb-1">ルール名 *</label>
+                <input
+                  type="text"
+                  placeholder="例: Discord公式サーバーメンバー自動編集権限"
+                  value={newRuleName}
+                  onChange={(e) => setNewRuleName(e.target.value)}
+                  className="w-full px-3 py-2 bg-background border border-border rounded-xl"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block font-semibold mb-1">対象ログイン</label>
+                  <select
+                    value={newRuleProvider}
+                    onChange={(e: any) => setNewRuleProvider(e.target.value)}
+                    className="w-full px-3 py-2 bg-background border border-border rounded-xl"
+                  >
+                    <option value="all">すべて (All)</option>
+                    <option value="github">GitHub</option>
+                    <option value="discord">Discord</option>
+                    <option value="google">Google</option>
+                    <option value="email">Email</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block font-semibold mb-1">判定タイプ *</label>
+                  <select
+                    value={newRuleType}
+                    onChange={(e: any) => setNewRuleType(e.target.value)}
+                    className="w-full px-3 py-2 bg-background border border-border rounded-xl"
+                  >
+                    <option value="github_org">GitHub 組織名 (Org)</option>
+                    <option value="discord_guild">Discord サーバー (名/ID)</option>
+                    <option value="email_domain">メールドメイン (@corp.com)</option>
+                    <option value="email_list">指定メール一覧</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-semibold mb-1">一致させる値 (Match Value) *</label>
+                <input
+                  type="text"
+                  placeholder={
+                    newRuleType === 'github_org'
+                      ? '例: my-org-name'
+                      : newRuleType === 'discord_guild'
+                      ? '例: サーバー名 または Guild ID'
+                      : newRuleType === 'email_domain'
+                      ? '例: @example.com'
+                      : '例: user1@example.com, user2@example.com'
+                  }
+                  value={newRuleMatchValue}
+                  onChange={(e) => setNewRuleMatchValue(e.target.value)}
+                  className="w-full px-3 py-2 bg-background border border-border rounded-xl font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold mb-1">自動付与するサイトロール</label>
+                <select
+                  value={newRuleTargetRole}
+                  onChange={(e: any) => setNewRuleTargetRole(e.target.value)}
+                  className="w-full px-3 py-2 bg-background border border-border rounded-xl"
+                >
+                  <option value="viewer">Viewer (閲覧者)</option>
+                  <option value="editor">Editor (編集者)</option>
+                  <option value="admin">Admin (サイト管理者)</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setRuleModalOpen(false)}
+                className="px-4 py-2 text-xs rounded-xl border border-border bg-background hover:bg-muted text-foreground cursor-pointer"
+              >
+                キャンセル
+              </button>
+              <button
+                type="button"
+                disabled={!newRuleName.trim() || !newRuleMatchValue.trim() || createSiteRuleMutation.isPending}
+                onClick={() => createSiteRuleMutation.mutate()}
+                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground font-semibold cursor-pointer disabled:opacity-40"
+              >
+                {createSiteRuleMutation.isPending && <Loader2 className="size-3.5 animate-spin" />}
+                <span>ルールを追加する</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 削除確認モーダル */}
       {showDeleteModal && (

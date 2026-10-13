@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"net/http"
 	"os"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/klados/api/internal/model"
+	"gorm.io/datatypes"
 )
 
 type AppliedRuleResult struct {
@@ -33,6 +35,52 @@ func (h *AuthHandler) requireRootUser(c *gin.Context) bool {
 		return false
 	}
 	return true
+}
+
+// canManageSiteAuth checks whether the user is root, owns the site, or is an admin/settings-manager of the site.
+func (h *AuthHandler) canManageSiteAuth(userID string, siteID *uuid.UUID) bool {
+	if userID == "" || h.DB == nil {
+		return false
+	}
+	uid, err := uuid.Parse(userID)
+	if err != nil {
+		return false
+	}
+	var user model.User
+	if err := h.DB.Where("id = ?", uid).First(&user).Error; err == nil && user.IsRoot {
+		return true
+	}
+	if siteID == nil || *siteID == uuid.Nil {
+		// Check if user owns at least one site or is admin of at least one site
+		var ownedCount int64
+		h.DB.Model(&model.Site{}).Where("user_id = ?", uid).Count(&ownedCount)
+		if ownedCount > 0 {
+			return true
+		}
+		var adminCount int64
+		h.DB.Model(&model.SiteMember{}).Where("user_id = ? AND role IN ?", uid, []model.SiteRole{model.RoleOwner, model.RoleAdmin}).Count(&adminCount)
+		return adminCount > 0
+	}
+	var site model.Site
+	if err := h.DB.Where("id = ?", *siteID).First(&site).Error; err != nil {
+		return false
+	}
+	if site.UserID == uid {
+		return true
+	}
+	var member model.SiteMember
+	if err := h.DB.Where("site_id = ? AND user_id = ?", *siteID, uid).First(&member).Error; err == nil {
+		if member.Role == model.RoleOwner || member.Role == model.RoleAdmin {
+			return true
+		}
+		if member.Role == model.RoleCustom && len(member.Permissions) > 0 {
+			var perms model.SitePermissions
+			if json.Unmarshal(member.Permissions, &perms) == nil && (perms.CanManageSettings || perms.CanInviteMembers) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (h *AuthHandler) getOrCreateAuthConfig() *model.AuthConfig {
@@ -62,14 +110,104 @@ func (h *AuthHandler) getOrCreateAuthConfig() *model.AuthConfig {
 	return &cfg
 }
 
-// GET /v1/auth/config (公開・認証設定の取得)
+// applySiteAuthOverrides overlays site.Settings["auth_config"] onto a copy of AuthConfig.
+func applySiteAuthOverrides(base model.AuthConfig, site *model.Site) (model.AuthConfig, map[string]interface{}) {
+	cfg := base
+	var siteAuthMap map[string]interface{}
+	if site == nil || len(site.Settings) == 0 {
+		return cfg, nil
+	}
+	var settings map[string]interface{}
+	if err := json.Unmarshal(site.Settings, &settings); err != nil {
+		return cfg, nil
+	}
+	rawAuth, ok := settings["auth_config"].(map[string]interface{})
+	if !ok || rawAuth == nil {
+		return cfg, nil
+	}
+	siteAuthMap = rawAuth
+	if v, ok := rawAuth["require_email_verification"].(bool); ok {
+		cfg.RequireEmailVerification = v
+	}
+	if v, ok := rawAuth["allow_email_registration"].(bool); ok {
+		cfg.AllowEmailRegistration = v
+	}
+	if v, ok := rawAuth["enable_email_login"].(bool); ok {
+		cfg.EnableEmailLogin = v
+	}
+	if v, ok := rawAuth["enable_github_login"].(bool); ok {
+		cfg.EnableGithubLogin = v
+	}
+	if v, ok := rawAuth["enable_discord_login"].(bool); ok {
+		cfg.EnableDiscordLogin = v
+	}
+	if v, ok := rawAuth["enable_google_login"].(bool); ok {
+		cfg.EnableGoogleLogin = v
+	}
+	if v, ok := rawAuth["enable_demo_login"].(bool); ok {
+		cfg.EnableDemoLogin = v
+	}
+	if v, ok := rawAuth["default_role"].(string); ok && v != "" {
+		cfg.DefaultRole = v
+	}
+	if v, ok := rawAuth["allowed_domains"].(string); ok {
+		cfg.AllowedDomains = v
+	}
+	if v, ok := rawAuth["restrict_to_rules"].(bool); ok {
+		cfg.RestrictToRules = v
+	}
+	if v, ok := rawAuth["github_client_id"].(string); ok && strings.TrimSpace(v) != "" {
+		cfg.GithubClientID = strings.TrimSpace(v)
+	}
+	if v, ok := rawAuth["discord_client_id"].(string); ok && strings.TrimSpace(v) != "" {
+		cfg.DiscordClientID = strings.TrimSpace(v)
+	}
+	return cfg, siteAuthMap
+}
+
+// GET /v1/auth/config (公開・認証設定の取得。?site=<slug_or_id> でサイト別設定を反映)
 func (h *AuthHandler) GetAuthConfig(c *gin.Context) {
-	cfg := h.getOrCreateAuthConfig()
+	baseCfg := h.getOrCreateAuthConfig()
+	cfg := *baseCfg
+
+	siteParam := strings.TrimSpace(c.Query("site"))
+	if siteParam == "" {
+		siteParam = strings.TrimSpace(c.Query("site_id"))
+	}
+
+	var targetSite *model.Site
+	var siteAuthMap map[string]interface{}
+	if siteParam != "" && h.DB != nil {
+		var s model.Site
+		if uid, err := uuid.Parse(siteParam); err == nil {
+			if err := h.DB.Where("id = ?", uid).First(&s).Error; err == nil {
+				targetSite = &s
+			}
+		} else {
+			if err := h.DB.Where("slug = ?", siteParam).First(&s).Error; err == nil {
+				targetSite = &s
+			}
+		}
+		if targetSite != nil {
+			cfg, siteAuthMap = applySiteAuthOverrides(cfg, targetSite)
+		}
+	}
+
 	var ruleCount int64
-	h.DB.Model(&model.AuthRoutingRule{}).Where("enabled = ?", true).Count(&ruleCount)
+	if targetSite != nil {
+		h.DB.Model(&model.AuthRoutingRule{}).Where("enabled = ? AND (target_site_id = ? OR target_site_id IS NULL)", true, targetSite.ID).Count(&ruleCount)
+	} else {
+		h.DB.Model(&model.AuthRoutingRule{}).Where("enabled = ?", true).Count(&ruleCount)
+	}
 
 	ghID, ghSecret := h.getGithubCredentials()
 	dcID, dcSecret := h.getDiscordCredentials()
+	if cfg.GithubClientID != "" {
+		ghID = cfg.GithubClientID
+	}
+	if cfg.DiscordClientID != "" {
+		dcID = cfg.DiscordClientID
+	}
 
 	providers := make([]string, 0)
 	if cfg.EnableGoogleLogin {
@@ -82,21 +220,30 @@ func (h *AuthHandler) GetAuthConfig(c *gin.Context) {
 		providers = append(providers, "discord")
 	}
 
+	respData := gin.H{
+		"config":             cfg,
+		"active_rules_count": ruleCount,
+		"oauth_providers":    providers,
+		"github_configured":  ghID != "" && (ghSecret != "" || cfg.GithubClientID != ""),
+		"discord_configured": dcID != "" && (dcSecret != "" || cfg.DiscordClientID != ""),
+		"github_client_id":   ghID,
+		"discord_client_id":  dcID,
+	}
+	if targetSite != nil {
+		respData["site_id"] = targetSite.ID
+		respData["site_slug"] = targetSite.Slug
+		respData["site_title"] = targetSite.Title
+		respData["site_auth_config"] = siteAuthMap
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data": gin.H{
-			"config":             cfg,
-			"active_rules_count": ruleCount,
-			"oauth_providers":    providers,
-			"github_configured":  ghID != "" && ghSecret != "",
-			"discord_configured": dcID != "" && dcSecret != "",
-			"github_client_id":   ghID,
-			"discord_client_id":  dcID,
-		},
+		"data":    respData,
 	})
 }
 
 type updateAuthConfigRequest struct {
+	SiteID                   *string `json:"site_id"`
 	RequireEmailVerification *bool   `json:"require_email_verification"`
 	AllowEmailRegistration   *bool   `json:"allow_email_registration"`
 	EnableEmailLogin         *bool   `json:"enable_email_login"`
@@ -115,15 +262,105 @@ type updateAuthConfigRequest struct {
 	MainDomains              *string `json:"main_domains"`
 }
 
-// PUT /v1/auth/config (要root認証・認証設定の更新)
+// PUT /v1/auth/config (認証設定の更新: site_id指定時はサイト管理者権限、未指定時はrootまたはサイト管理者権限)
 func (h *AuthHandler) UpdateAuthConfig(c *gin.Context) {
-	if !h.requireRootUser(c) {
+	userID := c.GetString("user_id")
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "認証が必要です"})
 		return
 	}
 
 	var req updateAuthConfigRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// サイト単位の認証設定更新の場合
+	if req.SiteID != nil && strings.TrimSpace(*req.SiteID) != "" {
+		siteUUID, err := uuid.Parse(strings.TrimSpace(*req.SiteID))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "無効なサイトIDです"})
+			return
+		}
+		if !h.canManageSiteAuth(userID, &siteUUID) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "このサイトのログイン設定を変更する権限がありません"})
+			return
+		}
+		var site model.Site
+		if err := h.DB.Where("id = ?", siteUUID).First(&site).Error; err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "サイトが見つかりません"})
+			return
+		}
+		settings := make(map[string]interface{})
+		if len(site.Settings) > 0 {
+			_ = json.Unmarshal(site.Settings, &settings)
+		}
+		authCfg, ok := settings["auth_config"].(map[string]interface{})
+		if !ok || authCfg == nil {
+			authCfg = make(map[string]interface{})
+		}
+		if req.RequireEmailVerification != nil {
+			authCfg["require_email_verification"] = *req.RequireEmailVerification
+		}
+		if req.AllowEmailRegistration != nil {
+			authCfg["allow_email_registration"] = *req.AllowEmailRegistration
+		}
+		if req.EnableEmailLogin != nil {
+			authCfg["enable_email_login"] = *req.EnableEmailLogin
+		}
+		if req.EnableGithubLogin != nil {
+			authCfg["enable_github_login"] = *req.EnableGithubLogin
+		}
+		if req.EnableDiscordLogin != nil {
+			authCfg["enable_discord_login"] = *req.EnableDiscordLogin
+		}
+		if req.EnableGoogleLogin != nil {
+			authCfg["enable_google_login"] = *req.EnableGoogleLogin
+		}
+		if req.EnableDemoLogin != nil {
+			authCfg["enable_demo_login"] = *req.EnableDemoLogin
+		}
+		if req.DefaultRole != nil {
+			authCfg["default_role"] = *req.DefaultRole
+		}
+		if req.AllowedDomains != nil {
+			authCfg["allowed_domains"] = *req.AllowedDomains
+		}
+		if req.RestrictToRules != nil {
+			authCfg["restrict_to_rules"] = *req.RestrictToRules
+		}
+		if req.GithubClientID != nil {
+			authCfg["github_client_id"] = strings.TrimSpace(*req.GithubClientID)
+		}
+		if req.GithubClientSecret != nil && strings.TrimSpace(*req.GithubClientSecret) != "" {
+			authCfg["github_client_secret"] = strings.TrimSpace(*req.GithubClientSecret)
+		}
+		if req.DiscordClientID != nil {
+			authCfg["discord_client_id"] = strings.TrimSpace(*req.DiscordClientID)
+		}
+		if req.DiscordClientSecret != nil && strings.TrimSpace(*req.DiscordClientSecret) != "" {
+			authCfg["discord_client_secret"] = strings.TrimSpace(*req.DiscordClientSecret)
+		}
+		settings["auth_config"] = authCfg
+		if encoded, err := json.Marshal(settings); err == nil {
+			site.Settings = datatypes.JSON(encoded)
+		}
+		if err := h.DB.Save(&site).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "サイト認証設定の保存に失敗しました"})
+			return
+		}
+		mergedCfg, _ := applySiteAuthOverrides(*h.getOrCreateAuthConfig(), &site)
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"message": "サイトのログイン・認証設定を更新しました",
+			"data":    mergedCfg,
+		})
+		return
+	}
+
+	if !h.canManageSiteAuth(userID, nil) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "管理者権限が必要です"})
 		return
 	}
 
@@ -265,7 +502,13 @@ func (h *AuthHandler) QuickVerify(c *gin.Context) {
 // GET /v1/auth/routing-rules (振り分けルール一覧)
 func (h *AuthHandler) ListRoutingRules(c *gin.Context) {
 	var rules []model.AuthRoutingRule
-	h.DB.Preload("TargetSite").Order("created_at desc").Find(&rules)
+	query := h.DB.Preload("TargetSite")
+	if siteIDStr := strings.TrimSpace(c.Query("site_id")); siteIDStr != "" {
+		if siteUUID, err := uuid.Parse(siteIDStr); err == nil {
+			query = query.Where("target_site_id = ?", siteUUID)
+		}
+	}
+	query.Order("created_at desc").Find(&rules)
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": rules})
 }
 
@@ -283,13 +526,20 @@ type createRoutingRuleRequest struct {
 
 // POST /v1/auth/routing-rules (振り分けルールの作成)
 func (h *AuthHandler) CreateRoutingRule(c *gin.Context) {
-	if !h.requireRootUser(c) {
+	userID := c.GetString("user_id")
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "認証が必要です"})
 		return
 	}
 
 	var req createRoutingRuleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if !h.canManageSiteAuth(userID, req.TargetSiteID) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "このサイトの振り分けルールを作成する権限がありません"})
 		return
 	}
 
@@ -348,7 +598,9 @@ func (h *AuthHandler) CreateRoutingRule(c *gin.Context) {
 
 // PUT /v1/auth/routing-rules/:id (振り分けルールの更新)
 func (h *AuthHandler) UpdateRoutingRule(c *gin.Context) {
-	if !h.requireRootUser(c) {
+	userID := c.GetString("user_id")
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "認証が必要です"})
 		return
 	}
 
@@ -359,9 +611,19 @@ func (h *AuthHandler) UpdateRoutingRule(c *gin.Context) {
 		return
 	}
 
+	if !h.canManageSiteAuth(userID, rule.TargetSiteID) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "このルールを変更する権限がありません"})
+		return
+	}
+
 	var req createRoutingRuleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if req.TargetSiteID != nil && !h.canManageSiteAuth(userID, req.TargetSiteID) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "指定されたサイトのルールを設定する権限がありません"})
 		return
 	}
 
@@ -403,11 +665,24 @@ func (h *AuthHandler) UpdateRoutingRule(c *gin.Context) {
 
 // DELETE /v1/auth/routing-rules/:id (振り分けルールの削除)
 func (h *AuthHandler) DeleteRoutingRule(c *gin.Context) {
-	if !h.requireRootUser(c) {
+	userID := c.GetString("user_id")
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "認証が必要です"})
 		return
 	}
 
 	id := c.Param("id")
+	var rule model.AuthRoutingRule
+	if err := h.DB.Where("id = ?", id).First(&rule).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "ルールが見つかりません"})
+		return
+	}
+
+	if !h.canManageSiteAuth(userID, rule.TargetSiteID) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "このルールを削除する権限がありません"})
+		return
+	}
+
 	if err := h.DB.Where("id = ?", id).Delete(&model.AuthRoutingRule{}).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "ルールの削除に失敗しました"})
 		return

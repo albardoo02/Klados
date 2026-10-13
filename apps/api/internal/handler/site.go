@@ -353,6 +353,7 @@ func (h *SiteHandler) GetBySlug(c *gin.Context) {
 	h.DB.Where("site_id = ? AND status = ? AND deleted_at IS NULL", site.ID, model.PageStatusPublished).
 		Order("position asc, created_at asc").
 		Find(&pages)
+	PopulatePagesCategories(pages)
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,

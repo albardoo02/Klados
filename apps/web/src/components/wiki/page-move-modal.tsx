@@ -1,10 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Edit2, X, Loader2, ArrowRight } from 'lucide-react';
-import { pagesApi } from '@/lib/api';
+import { useQueryClient } from '@tanstack/react-query';
+import { Edit2, X, Loader2, ArrowRight, FolderTree, Plus } from 'lucide-react';
+import { pagesApi, categoriesApi, CategorySummary } from '@/lib/api';
 import { getSitePageHref } from '@/lib/site-url';
+import { getPageCategoryNames } from '@/components/markdown-renderer';
 
 interface PageMoveModalProps {
   isOpen: boolean;
@@ -13,18 +15,63 @@ interface PageMoveModalProps {
     id: string;
     slug: string;
     title: string;
+    content?: string;
+    categories?: string[];
+    frontmatter?: { categories?: string[]; [key: string]: any };
   };
   siteSlug: string;
+  siteId?: string;
 }
 
-export function PageMoveModal({ isOpen, onClose, page, siteSlug }: PageMoveModalProps) {
+export function PageMoveModal({ isOpen, onClose, page, siteSlug, siteId }: PageMoveModalProps) {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [title, setTitle] = useState(page.title);
   const [slug, setSlug] = useState(page.slug || '');
+  const [categories, setCategories] = useState<string[]>(() => getPageCategoryNames(page));
+  const [categoryInput, setCategoryInput] = useState('');
+  const [existingCategories, setExistingCategories] = useState<CategorySummary[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (isOpen) {
+      setTitle(page.title);
+      setSlug(page.slug || '');
+      setCategories(getPageCategoryNames(page));
+      setCategoryInput('');
+      setError(null);
+
+      if (siteId && siteId !== 'demo-site') {
+        categoriesApi
+          .listForSite(siteId)
+          .then((res) => setExistingCategories(res.data?.data || []))
+          .catch(() => {});
+      } else if (siteSlug) {
+        categoriesApi
+          .listPublic(siteSlug)
+          .then((res) => setExistingCategories(res.data?.data || []))
+          .catch(() => {});
+      }
+    }
+  }, [isOpen, page, siteId, siteSlug]);
+
   if (!isOpen) return null;
+
+  const handleAddCategory = (name?: string) => {
+    const target = (name ?? categoryInput).trim().replace(/^(?:category|カテゴリ)\s*:\s*/i, '');
+    if (!target) return;
+    if (!categories.some((c) => c.toLowerCase() === target.toLowerCase())) {
+      setCategories((prev) => [...prev, target]);
+    }
+    if (name === undefined) {
+      setCategoryInput('');
+    }
+  };
+
+  const handleRemoveCategory = (name: string) => {
+    setCategories((prev) => prev.filter((c) => c !== name));
+  };
 
   const handleMove = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -34,17 +81,32 @@ export function PageMoveModal({ isOpen, onClose, page, siteSlug }: PageMoveModal
     setError(null);
 
     try {
-      const cleanSlug = slug.toLowerCase().replace(/[^a-z0-9-_]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+      const cleanSlug = slug
+        .trim()
+        .replace(/^\/+|\/+$/g, '')
+        .replace(/\s+/g, '-');
+
       await pagesApi.update(page.id, {
         title: title.trim(),
         slug: cleanSlug,
+        categories,
       });
 
+      queryClient.invalidateQueries({ queryKey: ['public-site', siteSlug] });
+      queryClient.invalidateQueries({ queryKey: ['public-page', siteSlug] });
+      queryClient.invalidateQueries({ queryKey: ['public-categories', siteSlug] });
+      if (siteId) {
+        queryClient.invalidateQueries({ queryKey: ['pages', siteId] });
+      }
+
       onClose();
-      // 新しいスラグへ遷移
-      router.push(getSitePageHref(siteSlug, cleanSlug));
+      if (cleanSlug !== page.slug) {
+        router.push(getSitePageHref(siteSlug, cleanSlug));
+      } else {
+        router.refresh();
+      }
     } catch (err: any) {
-      setError(err?.response?.data?.error || err?.message || 'ページの移動に失敗しました');
+      setError(err?.response?.data?.error || err?.message || 'ページ設定の更新に失敗しました');
     } finally {
       setLoading(false);
     }
@@ -60,8 +122,8 @@ export function PageMoveModal({ isOpen, onClose, page, siteSlug }: PageMoveModal
               <Edit2 className="size-4" />
             </div>
             <div>
-              <h3 className="font-bold text-sm text-slate-900 dark:text-white">ページの移動 (改名)</h3>
-              <p className="text-xs text-slate-400">タイトルやスラグ（URL）を変更します</p>
+              <h3 className="font-bold text-sm text-slate-900 dark:text-white">ページ設定・移動 (改名・カテゴリ)</h3>
+              <p className="text-xs text-slate-400">タイトル・スラッグ（URL）・カテゴリを設定します</p>
             </div>
           </div>
           <button
@@ -82,7 +144,7 @@ export function PageMoveModal({ isOpen, onClose, page, siteSlug }: PageMoveModal
 
           <div className="space-y-1.5">
             <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-              新しいページタイトル
+              ページタイトル
             </label>
             <input
               type="text"
@@ -95,7 +157,7 @@ export function PageMoveModal({ isOpen, onClose, page, siteSlug }: PageMoveModal
 
           <div className="space-y-1.5">
             <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-              新しいスラグ (URLパス)
+              スラッグ (URLパス)
             </label>
             <div className="flex items-center">
               <span className="px-3 py-2 bg-slate-100 dark:bg-slate-800 border border-r-0 border-slate-200 dark:border-slate-700 rounded-l-xl text-xs font-mono text-slate-400 select-none">
@@ -112,6 +174,88 @@ export function PageMoveModal({ isOpen, onClose, page, siteSlug }: PageMoveModal
             <p className="text-[11px] text-slate-400">
               変更後URL: <code className="font-mono text-[10px] text-blue-500">{getSitePageHref(siteSlug, slug || '...')}</code>
             </p>
+          </div>
+
+          {/* カテゴリ割り当て */}
+          <div className="space-y-2 pt-1 border-t border-slate-100 dark:border-slate-800">
+            <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+              <FolderTree className="size-3.5 text-amber-500" />
+              <span>カテゴリ割り当て (本文を汚さず安全に保持)</span>
+            </label>
+
+            {categories.length > 0 ? (
+              <div className="flex flex-wrap gap-1.5">
+                {categories.map((cat) => (
+                  <span
+                    key={cat}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border border-amber-200/70 dark:border-amber-800/60"
+                  >
+                    <FolderTree className="size-3 text-amber-500" />
+                    {cat}
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveCategory(cat)}
+                      className="ml-0.5 hover:text-rose-500 cursor-pointer"
+                    >
+                      <X className="size-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <p className="text-[11px] text-slate-400">カテゴリはまだ割り当てられていません</p>
+            )}
+
+            <div className="flex gap-1.5">
+              <input
+                type="text"
+                value={categoryInput}
+                onChange={(e) => setCategoryInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleAddCategory();
+                  }
+                }}
+                placeholder="カテゴリ名を入力して追加..."
+                className="flex-1 text-xs px-3 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+              <button
+                type="button"
+                onClick={() => handleAddCategory()}
+                disabled={!categoryInput.trim()}
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-xs font-medium text-slate-700 dark:text-slate-300 disabled:opacity-40 cursor-pointer"
+              >
+                <Plus className="size-3.5" />
+                追加
+              </button>
+            </div>
+
+            {existingCategories.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1 pt-0.5">
+                <span className="text-[10px] text-slate-400 mr-1">既存カテゴリ:</span>
+                {existingCategories.slice(0, 12).map((c) => {
+                  const selected = categories.some((item) => item.toLowerCase() === c.name.toLowerCase());
+                  return (
+                    <button
+                      key={c.name}
+                      type="button"
+                      onClick={() =>
+                        selected ? handleRemoveCategory(c.name) : handleAddCategory(c.name)
+                      }
+                      className={`text-[10px] px-2 py-0.5 rounded-full border transition-colors cursor-pointer ${
+                        selected
+                          ? 'bg-amber-500 text-white border-amber-500'
+                          : 'bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:border-amber-400'
+                      }`}
+                    >
+                      {selected ? '✓ ' : '+ '}
+                      {c.name}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           <div className="pt-2 flex items-center justify-end gap-2">
@@ -131,12 +275,12 @@ export function PageMoveModal({ isOpen, onClose, page, siteSlug }: PageMoveModal
               {loading ? (
                 <>
                   <Loader2 className="size-3.5 animate-spin" />
-                  <span>移動中...</span>
+                  <span>保存中...</span>
                 </>
               ) : (
                 <>
                   <ArrowRight className="size-3.5" />
-                  <span>ページを移動する</span>
+                  <span>変更を保存する</span>
                 </>
               )}
             </button>

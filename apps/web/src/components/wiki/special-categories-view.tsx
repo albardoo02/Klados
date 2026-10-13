@@ -4,7 +4,7 @@ import React, { useState, useMemo } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { categoriesApi, CategorySummary } from '@/lib/api';
-import { extractCategoriesFromMarkdown } from '@/components/markdown-renderer';
+import { getPageCategories } from '@/components/markdown-renderer';
 import {
   FolderTree,
   Folder,
@@ -26,6 +26,8 @@ interface SpecialCategoriesViewProps {
     slug: string;
     title: string;
     content: string;
+    categories?: string[];
+    frontmatter?: { categories?: string[]; [key: string]: any };
     status?: string;
   }>;
 }
@@ -60,7 +62,7 @@ export function SpecialCategoriesView({
 
     for (const p of allPages) {
       if (p.status && p.status !== 'published') continue;
-      const cats = extractCategoriesFromMarkdown(p.content);
+      const cats = getPageCategories(p);
       const isCat = p.slug.toLowerCase().startsWith('category:') || p.slug.toLowerCase().startsWith('カテゴリ:');
 
       for (const c of cats) {

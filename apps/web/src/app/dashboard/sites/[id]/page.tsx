@@ -1,7 +1,7 @@
 'use client';
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { pagesApi, sitesApi, downloadSiteZip, PageItem } from '@/lib/api';
+import { pagesApi, sitesApi, categoriesApi, downloadSiteZip, CategorySummary } from '@/lib/api';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { useState } from 'react';
@@ -19,21 +19,26 @@ import {
   RotateCcw,
   Check,
   Loader2,
-  AlertCircle,
   Users,
   Settings2,
   UploadCloud,
+  FolderTree,
+  Edit2,
+  X,
 } from 'lucide-react';
 import { SidebarEditorModal } from '@/components/wiki/sidebar-editor-modal';
 import { ImportMarkdownModal } from '@/components/import-markdown-modal';
 import { useTranslations } from 'next-intl';
 import { getSitePublicUrl } from '@/lib/site-url';
+import { getPageCategoryNames } from '@/components/markdown-renderer';
 
 interface Page {
   id: string;
   slug: string;
   title: string;
   content?: string;
+  categories?: string[];
+  frontmatter?: { categories?: string[]; [key: string]: any };
   status: string;
   updated_at: string;
   deleted_at?: string | null;
@@ -51,6 +56,14 @@ export default function SiteDetailPage() {
   const [isExporting, setIsExporting] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
+  // ページ個別設定モーダル用ステート (タイトル・スラッグ・カテゴリ変更)
+  const [editingPage, setEditingPage] = useState<Page | null>(null);
+  const [editTitle, setEditTitle] = useState('');
+  const [editSlug, setEditSlug] = useState('');
+  const [editCategories, setEditCategories] = useState<string[]>([]);
+  const [editCategoryInput, setEditCategoryInput] = useState('');
+  const [editError, setEditError] = useState<string | null>(null);
+
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3500);
@@ -64,6 +77,15 @@ export default function SiteDetailPage() {
   const { data: pages, isLoading: isPagesLoading } = useQuery<Page[]>({
     queryKey: ['pages', id],
     queryFn: () => pagesApi.list(id).then((r) => r.data.data as Page[]),
+  });
+
+  const { data: siteCategories = [] } = useQuery<CategorySummary[]>({
+    queryKey: ['site-categories', id],
+    queryFn: () =>
+      categoriesApi
+        .listForSite(id)
+        .then((r) => (r.data?.data as CategorySummary[]) || [])
+        .catch(() => []),
   });
 
   // ゴミ箱のページ取得
@@ -83,31 +105,78 @@ export default function SiteDetailPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState({ slug: '', title: '', category: '' });
 
-  // ページ新規作成
+  // ページ新規作成 (カテゴリはFrontmatter/オプションとして安全に保存)
   const createMutation = useMutation({
     mutationFn: () => {
-      const payload: { slug: string; title: string; content?: string } = {
+      const cats = form.category
+        ? form.category
+            .split(',')
+            .map((c) => c.trim())
+            .filter(Boolean)
+        : [];
+      return pagesApi.create(id, {
         slug: form.slug,
         title: form.title,
-      };
-      if (form.category?.trim()) {
-        const cats = form.category
-          .split(',')
-          .map((c) => c.trim())
-          .filter(Boolean);
-        if (cats.length > 0) {
-          payload.content = cats.map((c) => `[[Category:${c}]]`).join('\n') + '\n';
-        }
-      }
-      return pagesApi.create(id, payload);
+        categories: cats.length > 0 ? cats : undefined,
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['pages', id] });
+      queryClient.invalidateQueries({ queryKey: ['site-categories', id] });
       setShowCreate(false);
       setForm({ slug: '', title: '', category: '' });
       showToast('ページを作成しました');
     },
   });
+
+  // ページ設定変更 (タイトル・スラッグ・カテゴリ)
+  const updatePageSettingsMutation = useMutation({
+    mutationFn: async () => {
+      if (!editingPage) return;
+      const cleanSlug = editSlug
+        .trim()
+        .replace(/^\/+|\/+$/g, '')
+        .replace(/\s+/g, '-');
+      return pagesApi.update(editingPage.id, {
+        title: editTitle.trim(),
+        slug: cleanSlug,
+        categories: editCategories,
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['pages', id] });
+      queryClient.invalidateQueries({ queryKey: ['site-categories', id] });
+      setEditingPage(null);
+      showToast('ページ設定（タイトル・スラッグ・カテゴリ）を更新しました');
+    },
+    onError: (err: any) => {
+      setEditError(err?.response?.data?.error || err?.message || '設定の保存に失敗しました');
+    },
+  });
+
+  const openPageSettingsModal = (page: Page) => {
+    setEditingPage(page);
+    setEditTitle(page.title);
+    setEditSlug(page.slug);
+    setEditCategories(getPageCategoryNames(page));
+    setEditCategoryInput('');
+    setEditError(null);
+  };
+
+  const handleAddEditCategory = (name?: string) => {
+    const target = (name ?? editCategoryInput).trim().replace(/^(?:category|カテゴリ)\s*:\s*/i, '');
+    if (!target) return;
+    if (!editCategories.some((c) => c.toLowerCase() === target.toLowerCase())) {
+      setEditCategories((prev) => [...prev, target]);
+    }
+    if (name === undefined) {
+      setEditCategoryInput('');
+    }
+  };
+
+  const handleRemoveEditCategory = (name: string) => {
+    setEditCategories((prev) => prev.filter((c) => c !== name));
+  };
 
   // ページをゴミ箱へ移動 (ソフトデリート)
   const deleteMutation = useMutation({
@@ -406,66 +475,89 @@ export default function SiteDetailPage() {
             <div className="py-20 text-center text-slate-400 text-sm">読み込み中...</div>
           ) : (
             <div className="space-y-2.5">
-              {activePages.map((page) => (
-                <div
-                  key={page.id}
-                  className="flex items-center justify-between bg-white rounded-2xl border px-5 py-4 hover:shadow-sm transition-all group"
-                >
-                  <Link
-                    href={`/dashboard/pages/${page.id}/edit`}
-                    className="flex-1 min-w-0"
+              {activePages.map((page) => {
+                const pageCats = getPageCategoryNames(page);
+                return (
+                  <div
+                    key={page.id}
+                    className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white rounded-2xl border px-5 py-4 hover:shadow-sm transition-all group"
                   >
-                    <div className="flex items-center gap-2">
-                      <span className="font-semibold text-slate-900 group-hover:text-blue-600 transition-colors">
-                        {page.title}
-                      </span>
-                      <span className="text-xs text-slate-400 font-mono">/{page.slug}</span>
-                    </div>
-                    {page.updated_at && (
-                      <span className="text-[11px] text-slate-400 block mt-0.5">
-                        最終更新: {new Date(page.updated_at).toLocaleDateString('ja-JP')}
-                      </span>
-                    )}
-                  </Link>
+                    <Link
+                      href={`/dashboard/pages/${page.id}/edit`}
+                      className="flex-1 min-w-0"
+                    >
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-semibold text-slate-900 group-hover:text-blue-600 transition-colors">
+                          {page.title}
+                        </span>
+                        <span className="text-xs text-slate-400 font-mono">/{page.slug}</span>
+                        {pageCats.map((cat) => (
+                          <span
+                            key={cat}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-50 text-amber-700 border border-amber-200/80"
+                          >
+                            <FolderTree className="size-2.5 text-amber-500" />
+                            {cat}
+                          </span>
+                        ))}
+                      </div>
+                      {page.updated_at && (
+                        <span className="text-[11px] text-slate-400 block mt-0.5">
+                          最終更新: {new Date(page.updated_at).toLocaleDateString('ja-JP')}
+                        </span>
+                      )}
+                    </Link>
 
-                  <div className="flex items-center gap-3">
-                    {page.status === 'published' && site?.slug && (
-                      <Link
-                        href={`/sites/${site.slug}/${page.slug === 'index' ? '' : page.slug}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
-                        title="公開ページを表示"
+                    <div className="flex items-center gap-2 shrink-0">
+                      {/* ページ設定変更ボタン (タイトル・スラッグ・カテゴリ) */}
+                      <button
+                        type="button"
+                        onClick={() => openPageSettingsModal(page)}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-medium text-slate-600 hover:text-blue-600 bg-slate-50 hover:bg-blue-50 border border-slate-200 hover:border-blue-200 transition-colors cursor-pointer"
+                        title="タイトル・スラッグ・カテゴリ割り当てを変更"
                       >
-                        <ExternalLink className="size-4" />
-                      </Link>
-                    )}
-                    <span
-                      className={`text-xs font-semibold px-2.5 py-1 rounded-full ${
-                        page.status === 'published'
-                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                          : 'bg-amber-50 text-amber-700 border border-amber-200'
-                      }`}
-                    >
-                      {page.status === 'published' ? '公開中' : '下書き'}
-                    </span>
+                        <Edit2 className="size-3.5" />
+                        <span>設定変更</span>
+                      </button>
 
-                    {/* ゴミ箱へ移動ボタン */}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (confirm(`ページ「${page.title}」をゴミ箱に移動しますか？`)) {
-                          deleteMutation.mutate(page.id);
-                        }
-                      }}
-                      className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
-                      title="ゴミ箱へ移動"
-                    >
-                      <Trash2 className="size-4" />
-                    </button>
+                      {page.status === 'published' && site?.slug && (
+                        <Link
+                          href={`/sites/${site.slug}/${page.slug === 'index' ? '' : page.slug}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+                          title="公開ページを表示"
+                        >
+                          <ExternalLink className="size-4" />
+                        </Link>
+                      )}
+                      <span
+                        className={`text-xs font-semibold px-2.5 py-1 rounded-full ${
+                          page.status === 'published'
+                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                            : 'bg-amber-50 text-amber-700 border border-amber-200'
+                        }`}
+                      >
+                        {page.status === 'published' ? '公開中' : '下書き'}
+                      </span>
+
+                      {/* ゴミ箱へ移動ボタン */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (confirm(`ページ「${page.title}」をゴミ箱に移動しますか？`)) {
+                            deleteMutation.mutate(page.id);
+                          }
+                        }}
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                        title="ゴミ箱へ移動"
+                      >
+                        <Trash2 className="size-4" />
+                      </button>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
               {activePages.length === 0 && (
                 <div className="text-center py-16 text-slate-400 text-sm border-2 border-dashed rounded-2xl">
                   ページがまだありません。「新規ページ作成」から最初のページを作成してください
@@ -541,6 +633,199 @@ export default function SiteDetailPage() {
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* ページ設定変更モーダル (スラッグ・タイトル・カテゴリ割り当て) */}
+      {editingPage && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in-0 duration-150">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full border border-slate-200 overflow-hidden animate-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-blue-50 text-blue-600 border border-blue-200/60">
+                  <Edit2 className="size-4" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm text-slate-900">ページ設定の変更</h3>
+                  <p className="text-xs text-slate-400">
+                    ページタイトル・スラッグ・カテゴリ割り当てを変更します
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingPage(null)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 cursor-pointer"
+              >
+                <X className="size-5" />
+              </button>
+            </div>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!editTitle.trim() || !editSlug.trim()) return;
+                updatePageSettingsMutation.mutate();
+              }}
+              className="p-6 space-y-4"
+            >
+              {editError && (
+                <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-600 text-xs">
+                  {editError}
+                </div>
+              )}
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-700">ページタイトル</label>
+                <input
+                  type="text"
+                  required
+                  value={editTitle}
+                  onChange={(e) => setEditTitle(e.target.value)}
+                  placeholder="例: スタートガイド"
+                  className="w-full text-sm px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-700">スラッグ (URLパス)</label>
+                <div className="flex items-center">
+                  <span className="px-3 py-2 bg-slate-100 border border-r-0 border-slate-200 rounded-l-xl text-xs font-mono text-slate-500 select-none">
+                    /
+                  </span>
+                  <input
+                    type="text"
+                    required
+                    value={editSlug}
+                    onChange={(e) => setEditSlug(e.target.value)}
+                    placeholder="例: guide, index"
+                    className="w-full text-sm font-mono px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-r-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+
+              {/* カテゴリ割り当て */}
+              <div className="space-y-2 pt-2 border-t border-slate-100">
+                <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
+                  <FolderTree className="size-3.5 text-amber-500" />
+                  <span>カテゴリの割り当て</span>
+                </label>
+                <p className="text-[11px] text-slate-400">
+                  本文内に <code className="font-mono">[[Category:...]]</code> を書かなくても安全にカテゴリを保持できます。
+                </p>
+
+                {editCategories.length > 0 ? (
+                  <div className="flex flex-wrap gap-1.5">
+                    {editCategories.map((cat) => (
+                      <span
+                        key={cat}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200"
+                      >
+                        <FolderTree className="size-3 text-amber-500" />
+                        {cat}
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveEditCategory(cat)}
+                          className="ml-0.5 hover:text-rose-600 cursor-pointer"
+                        >
+                          <X className="size-3" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-slate-400 italic">カテゴリ未設定</p>
+                )}
+
+                <div className="flex gap-1.5">
+                  <input
+                    type="text"
+                    value={editCategoryInput}
+                    onChange={(e) => setEditCategoryInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddEditCategory();
+                      }
+                    }}
+                    placeholder="新しいカテゴリ名を入力..."
+                    className="flex-1 text-xs px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleAddEditCategory()}
+                    disabled={!editCategoryInput.trim()}
+                    className="inline-flex items-center gap-1 px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-xs font-semibold text-slate-700 disabled:opacity-40 cursor-pointer"
+                  >
+                    <Plus className="size-3.5" />
+                    追加
+                  </button>
+                </div>
+
+                {siteCategories.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-1 pt-1">
+                    <span className="text-[10px] text-slate-400 mr-1">サイト内の既存カテゴリ:</span>
+                    {siteCategories.slice(0, 15).map((c) => {
+                      const isSelected = editCategories.some(
+                        (item) => item.toLowerCase() === c.name.toLowerCase()
+                      );
+                      return (
+                        <button
+                          key={c.name}
+                          type="button"
+                          onClick={() =>
+                            isSelected
+                              ? handleRemoveEditCategory(c.name)
+                              : handleAddEditCategory(c.name)
+                          }
+                          className={`text-[10px] px-2 py-0.5 rounded-full border transition-colors cursor-pointer ${
+                            isSelected
+                              ? 'bg-amber-500 text-white border-amber-500'
+                              : 'bg-slate-50 text-slate-600 border-slate-200 hover:border-amber-400'
+                          }`}
+                        >
+                          {isSelected ? '✓ ' : '+ '}
+                          {c.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <div className="pt-3 flex items-center justify-end gap-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setEditingPage(null)}
+                  disabled={updatePageSettingsMutation.isPending}
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
+                >
+                  キャンセル
+                </button>
+                <button
+                  type="submit"
+                  disabled={
+                    updatePageSettingsMutation.isPending ||
+                    !editTitle.trim() ||
+                    !editSlug.trim()
+                  }
+                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl shadow-xs transition-colors disabled:opacity-50 cursor-pointer"
+                >
+                  {updatePageSettingsMutation.isPending ? (
+                    <>
+                      <Loader2 className="size-3.5 animate-spin" />
+                      <span>保存中...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="size-3.5" />
+                      <span>変更を保存</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 

@@ -46,22 +46,47 @@ export default function AuthSettingsPage() {
   const queryClient = useQueryClient();
   const { user } = useAuthStore();
 
-  // 認証設定の取得
+  // ユーザーのサイト一覧の取得（対象サイト選択 & 振り分け先選択用）
+  const { data: sites = [], isLoading: isSitesLoading } = useQuery<SiteItem[]>({
+    queryKey: ['user-sites-list'],
+    queryFn: () => sitesApi.list().then((res) => res.data.data),
+  });
+
+  // 対象サイトID ("" = システム全体設定 (rootのみ), それ以外 = サイト個別設定)
+  const [selectedSiteId, setSelectedSiteId] = useState<string>('');
+  const [siteSelectionInitialized, setSiteSelectionInitialized] = useState(false);
+
+  React.useEffect(() => {
+    if (siteSelectionInitialized) return;
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const paramSiteId = params.get('site_id');
+      if (paramSiteId) {
+        setSelectedSiteId(paramSiteId);
+        setSiteSelectionInitialized(true);
+        return;
+      }
+    }
+    if (!isSitesLoading && user) {
+      if (!user.is_root && sites.length > 0) {
+        setSelectedSiteId(sites[0].id);
+      }
+      setSiteSelectionInitialized(true);
+    }
+  }, [isSitesLoading, sites, user, siteSelectionInitialized]);
+
+  // 認証設定の取得 (対象サイトまたは全体)
   const { data: configData, isLoading: isConfigLoading } = useQuery({
-    queryKey: ['auth-config'],
-    queryFn: () => authApi.getAuthConfig().then((res) => res.data.data),
+    queryKey: ['auth-config', selectedSiteId],
+    queryFn: () => authApi.getAuthConfig(selectedSiteId || undefined).then((res) => res.data.data),
+    enabled: siteSelectionInitialized && (Boolean(user?.is_root) || Boolean(selectedSiteId)),
   });
 
   // 振り分けルール一覧の取得
   const { data: rules = [], isLoading: isRulesLoading } = useQuery<AuthRoutingRule[]>({
-    queryKey: ['auth-routing-rules'],
-    queryFn: () => authApi.getRoutingRules().then((res) => res.data.data),
-  });
-
-  // ユーザーのサイト一覧の取得（振り分け先選択用）
-  const { data: sites = [] } = useQuery<SiteItem[]>({
-    queryKey: ['user-sites-list'],
-    queryFn: () => sitesApi.list().then((res) => res.data.data),
+    queryKey: ['auth-routing-rules', selectedSiteId],
+    queryFn: () => authApi.getRoutingRules(selectedSiteId || undefined).then((res) => res.data.data),
+    enabled: siteSelectionInitialized && (Boolean(user?.is_root) || Boolean(selectedSiteId)),
   });
 
   // 設定フォーム状態
@@ -84,27 +109,25 @@ export default function AuthSettingsPage() {
   const [copiedCallback, setCopiedCallback] = useState<string | null>(null);
   const [configSuccessMsg, setConfigSuccessMsg] = useState<string | null>(null);
 
-  // 初期値反映
+  // 対象サイト変更時または初期ロード時に設定値を反映
   React.useEffect(() => {
     if (configData?.config) {
-      if (requireEmail === null) {
-        setRequireEmail(configData.config.require_email_verification);
-        setAllowEmailRegistration(configData.config.allow_email_registration ?? true);
-        setEnableEmailLogin(configData.config.enable_email_login ?? true);
-        setEnableGithubLogin(configData.config.enable_github_login ?? true);
-        setEnableDiscordLogin(configData.config.enable_discord_login ?? true);
-        setEnableGoogleLogin(configData.config.enable_google_login ?? true);
-        setEnableDemoLogin(configData.config.enable_demo_login ?? true);
-        setOnlyRootCanCreateSites(configData.config.only_root_can_create_sites ?? true);
-        setDefaultRole(configData.config.default_role || 'viewer');
-        setAllowedDomains(configData.config.allowed_domains || '');
-        setRestrictToRules(configData.config.restrict_to_rules || false);
-        setGithubClientId(configData.config.github_client_id || '');
-        setDiscordClientId(configData.config.discord_client_id || '');
-        setMainDomains(configData.config.main_domains || 'klados.azisaba.net, cms.azisaba.net');
-      }
+      setRequireEmail(configData.config.require_email_verification);
+      setAllowEmailRegistration(configData.config.allow_email_registration ?? true);
+      setEnableEmailLogin(configData.config.enable_email_login ?? true);
+      setEnableGithubLogin(configData.config.enable_github_login ?? true);
+      setEnableDiscordLogin(configData.config.enable_discord_login ?? true);
+      setEnableGoogleLogin(configData.config.enable_google_login ?? true);
+      setEnableDemoLogin(configData.config.enable_demo_login ?? true);
+      setOnlyRootCanCreateSites(configData.config.only_root_can_create_sites ?? true);
+      setDefaultRole(configData.config.default_role || 'viewer');
+      setAllowedDomains(configData.config.allowed_domains || '');
+      setRestrictToRules(configData.config.restrict_to_rules || false);
+      setGithubClientId(configData.config.github_client_id || '');
+      setDiscordClientId(configData.config.discord_client_id || '');
+      setMainDomains(configData.config.main_domains || 'klados.azisaba.net, cms.azisaba.net');
     }
-  }, [configData, requireEmail]);
+  }, [configData, selectedSiteId]);
 
   const handleCopy = (text: string, key: string) => {
     navigator.clipboard.writeText(text);
@@ -114,17 +137,24 @@ export default function AuthSettingsPage() {
 
   // 設定更新ミューテーション
   const updateConfigMutation = useMutation({
-    mutationFn: (data: Partial<AuthConfig>) => authApi.updateAuthConfig(data),
+    mutationFn: (data: Partial<AuthConfig> & { site_id?: string }) => authApi.updateAuthConfig(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['auth-config'] });
-      setDynamicMainDomains(mainDomains);
-      setConfigSuccessMsg('認証・システム設定を正常に保存しました！');
+      if (!selectedSiteId) {
+        setDynamicMainDomains(mainDomains);
+      }
+      setConfigSuccessMsg(
+        selectedSiteId
+          ? '選択中のサイトのログイン・認証設定を保存しました！'
+          : '全体の認証・システム設定を正常に保存しました！'
+      );
       setTimeout(() => setConfigSuccessMsg(null), 3500);
     },
   });
 
   const handleSaveConfig = () => {
     updateConfigMutation.mutate({
+      site_id: selectedSiteId || undefined,
       require_email_verification: requireEmail ?? false,
       allow_email_registration: allowEmailRegistration,
       enable_email_login: enableEmailLogin,
@@ -176,7 +206,7 @@ export default function AuthSettingsPage() {
     setProvider('github');
     setRuleType('github_org');
     setMatchValue('');
-    setTargetSiteId(sites.length > 0 ? sites[0].id : '');
+    setTargetSiteId(selectedSiteId || (sites.length > 0 ? sites[0].id : ''));
     setTargetRole('editor');
     setAutoVerify(true);
     setModalOpen(true);
@@ -278,15 +308,15 @@ export default function AuthSettingsPage() {
     });
   };
 
-  if (user && !user.is_root) {
+  if (user && !user.is_root && !isSitesLoading && sites.length === 0) {
     return (
       <div className="max-w-md mx-auto py-20 text-center space-y-4">
         <div className="w-14 h-14 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center mx-auto shadow-inner">
           <Lock className="w-7 h-7" />
         </div>
-        <h2 className="text-xl font-bold text-slate-900">管理者権限（root）が必要です</h2>
+        <h2 className="text-xl font-bold text-slate-900">管理可能なサイトがありません</h2>
         <p className="text-xs text-slate-500 max-w-sm mx-auto leading-relaxed">
-          認証ポリシーや自動振り分けルールの設定は、システム管理者（root）のみアクセスできます。
+          ログイン設定を行うには、管理対象のサイトを作成するか、サイトの管理者権限が必要です。
         </p>
         <div className="pt-2">
           <Link
@@ -301,6 +331,8 @@ export default function AuthSettingsPage() {
     );
   }
 
+  const currentSelectedSite = sites.find((s) => s.id === selectedSiteId);
+
   return (
     <div className="max-w-6xl mx-auto space-y-8 pb-16">
       {/* ページヘッダー */}
@@ -308,26 +340,55 @@ export default function AuthSettingsPage() {
         <div>
           <div className="flex items-center gap-2 text-xs font-semibold text-blue-600 mb-1">
             <Link
-              href="/dashboard"
+              href={selectedSiteId ? `/dashboard/sites/${selectedSiteId}/settings` : '/dashboard'}
               className="inline-flex items-center gap-1 hover:underline text-slate-500 hover:text-slate-800 transition-colors"
             >
               <ArrowLeft className="w-3.5 h-3.5" />
-              ダッシュボードへ戻る
+              {selectedSiteId ? 'サイト設定へ戻る' : 'ダッシュボードへ戻る'}
             </Link>
           </div>
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2.5 flex-wrap">
             <h1 className="text-2xl font-bold tracking-tight text-slate-900 flex items-center gap-2.5">
               <ShieldCheck className="w-6 h-6 text-blue-600" />
               認証 & アクセス振り分け設定
             </h1>
-            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-200 shadow-2xs">
-              <Crown className="w-3.5 h-3.5 text-amber-600" />
-              root専用
-            </span>
+            {selectedSiteId && currentSelectedSite ? (
+              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-100 text-blue-800 border border-blue-200 shadow-2xs">
+                <Globe className="w-3.5 h-3.5 text-blue-600" />
+                サイト別設定: {currentSelectedSite.title}
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-200 shadow-2xs">
+                <Crown className="w-3.5 h-3.5 text-amber-600" />
+                システム全体設定 (root)
+              </span>
+            )}
           </div>
           <p className="text-sm text-slate-500 mt-1">
-            メール認証の必須/任意モード切替、サイト新規作成制限、GitHub組織・Discordサーバーに応じたサイト自動所属を設定します。
+            各サイト単位（またはシステム全体）で許可するログイン方法や、GitHub組織・Discordサーバーに応じた自動メンバー権限付与を設定できます。
           </p>
+        </div>
+
+        {/* 対象サイト切り替えセレクター */}
+        <div className="bg-white border border-slate-200 rounded-2xl p-3 shadow-xs flex flex-col gap-1 min-w-[260px]">
+          <label className="text-[11px] font-bold text-slate-600 flex items-center gap-1.5">
+            <Globe className="w-3.5 h-3.5 text-blue-600" />
+            <span>設定対象のサイトを選択</span>
+          </label>
+          <select
+            value={selectedSiteId}
+            onChange={(e) => setSelectedSiteId(e.target.value)}
+            className="w-full text-xs font-semibold px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            {user?.is_root && (
+              <option value="">🌐 システム全体デフォルト (root管理者)</option>
+            )}
+            {sites.map((s) => (
+              <option key={s.id} value={s.id}>
+                📘 サイト: {s.title} ({s.slug})
+              </option>
+            ))}
+          </select>
         </div>
       </div>
 
@@ -339,7 +400,7 @@ export default function AuthSettingsPage() {
             <span>アジ鯖公式Wiki クイック構成プリセット</span>
           </div>
           <p className="text-xs text-blue-100 max-w-xl">
-            「Discord &amp; GitHub認証のみ許可」「メール・デモログインの完全遮断」「サイト新規作成をroot限定」をワンクリックで一括セットします。
+            「Discord &amp; GitHub認証のみ許可」「メール・デモログインの完全遮断」「ルール一致メンバー限定」をワンクリックで一括セットします。
           </p>
         </div>
         <button

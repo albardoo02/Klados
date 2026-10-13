@@ -45,6 +45,8 @@ interface PageActionTabsProps {
     slug: string;
     title: string;
     content: string;
+    categories?: string[];
+    frontmatter?: { categories?: string[]; [key: string]: any };
     created_at?: string;
     updated_at?: string;
   };
@@ -426,10 +428,10 @@ export function PageActionTabs({
                         setMoveOpen(true);
                       }}
                       className="w-full flex items-center gap-2.5 px-3.5 py-2 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 transition-colors text-left cursor-pointer"
-                      title="ページタイトルやスラグ（URL）を変更"
+                      title="ページタイトル・スラッグ（URL）・カテゴリを変更"
                     >
                       <Move className="size-3.5 text-slate-400" />
-                      <span>ページの移動 (改名)</span>
+                      <span>設定・移動 (改名 / カテゴリ)</span>
                     </button>
 
                     <button
@@ -499,8 +501,16 @@ export function PageActionTabs({
         <PageMoveModal
           isOpen={moveOpen}
           onClose={() => setMoveOpen(false)}
-          page={{ id: page.id, slug: page.slug, title: page.title }}
+          page={{
+            id: page.id,
+            slug: page.slug,
+            title: page.title,
+            content: page.content,
+            categories: page.categories,
+            frontmatter: page.frontmatter,
+          }}
           siteSlug={site.slug}
+          siteId={site.id}
         />
       )}
     </>

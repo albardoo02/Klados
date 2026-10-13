@@ -185,7 +185,7 @@ export const authApi = {
     }>('/auth/oauth/relay-exchange', { ticket }),
   quickVerify: () =>
     api.post<{ success: boolean; message: string }>('/auth/quick-verify'),
-  getAuthConfig: () =>
+  getAuthConfig: (site?: string) =>
     api.get<{
       success: boolean;
       data: {
@@ -196,12 +196,18 @@ export const authApi = {
         discord_configured?: boolean;
         github_client_id?: string;
         discord_client_id?: string;
+        site_id?: string;
+        site_slug?: string;
+        site_title?: string;
+        site_auth_config?: Record<string, any>;
       };
-    }>('/auth/config'),
-  updateAuthConfig: (data: Partial<AuthConfig>) =>
+    }>(`/auth/config${site ? `?site=${encodeURIComponent(site)}` : ''}`),
+  updateAuthConfig: (data: Partial<AuthConfig> & { site_id?: string }) =>
     api.put<{ success: boolean; message: string; data: AuthConfig }>('/auth/config', data),
-  getRoutingRules: () =>
-    api.get<{ success: boolean; data: AuthRoutingRule[] }>('/auth/routing-rules'),
+  getRoutingRules: (siteId?: string) =>
+    api.get<{ success: boolean; data: AuthRoutingRule[] }>(
+      `/auth/routing-rules${siteId ? `?site_id=${encodeURIComponent(siteId)}` : ''}`
+    ),
   createRoutingRule: (data: Partial<AuthRoutingRule>) =>
     api.post<{ success: boolean; message: string; data: AuthRoutingRule }>('/auth/routing-rules', data),
   updateRoutingRule: (id: string, data: Partial<AuthRoutingRule>) =>
@@ -261,6 +267,8 @@ export const sitesApi = {
   get: (id: string) => api.get(`/sites/${id}`),
   update: (id: string, data: SiteSettingsData) =>
     api.patch(`/sites/${id}`, data),
+  setPassword: (id: string, password: string) =>
+    api.patch(`/sites/${id}/password`, { password }),
   delete: (id: string) => api.delete(`/sites/${id}`),
   checkDomain: (id: string, domain: string) =>
     api.post(`/sites/${id}/custom-domain/check`, { domain }),
@@ -326,6 +334,11 @@ export interface PageItem {
   slug: string;
   title: string;
   content: string;
+  categories?: string[];
+  frontmatter?: {
+    categories?: string[];
+    [key: string]: any;
+  };
   status: 'draft' | 'published' | 'trashed';
   position?: number;
   created_at: string;
@@ -336,10 +349,10 @@ export interface PageItem {
 export const pagesApi = {
   list: (siteId: string) => api.get(`/sites/${siteId}/pages`),
   trash: (siteId: string) => api.get(`/sites/${siteId}/trash`),
-  create: (siteId: string, data: { slug: string; title: string; content?: string; parent_id?: string }) =>
+  create: (siteId: string, data: { slug: string; title: string; content?: string; parent_id?: string; categories?: string[] }) =>
     api.post(`/sites/${siteId}/pages`, data),
   get: (id: string) => api.get(`/pages/${id}`),
-  update: (id: string, data: Partial<{ title: string; content: string; status: string; slug?: string }>) =>
+  update: (id: string, data: Partial<{ title: string; content: string; status: string; slug?: string; categories?: string[] }>) =>
     api.patch(`/pages/${id}`, data),
   delete: (id: string) => api.delete(`/pages/${id}`),
   restore: (id: string) => api.post(`/pages/${id}/restore`),

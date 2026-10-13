@@ -4,7 +4,7 @@ import React, { useMemo } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { categoriesApi, CategoryDetailData, CategoryMemberItem } from '@/lib/api';
-import { MarkdownRenderer, extractCategoriesFromMarkdown } from '@/components/markdown-renderer';
+import { MarkdownRenderer, getPageCategories } from '@/components/markdown-renderer';
 import { CategoryBox } from './category-box';
 import {
   Folder,
@@ -32,12 +32,16 @@ interface CategoryViewProps {
     slug: string;
     title: string;
     content: string;
+    categories?: string[];
+    frontmatter?: { categories?: string[]; [key: string]: any };
   } | null;
   allPages?: Array<{
     id: string;
     slug: string;
     title: string;
     content: string;
+    categories?: string[];
+    frontmatter?: { categories?: string[]; [key: string]: any };
     status?: string;
   }>;
 }
@@ -102,7 +106,7 @@ export function CategoryView({
     for (const p of allPages) {
       if (p.status && p.status !== 'published') continue;
 
-      const cats = extractCategoriesFromMarkdown(p.content);
+      const cats = getPageCategories(p);
       const matched = cats.find((c) => c.name.toLowerCase() === lowerTarget);
       if (matched) {
         const lowerSlug = p.slug.toLowerCase();
@@ -153,9 +157,9 @@ export function CategoryView({
 
   // カテゴリページ自身に付与された親カテゴリ（あれば末尾にカテゴリボックス表示）
   const parentCategories = useMemo(() => {
-    if (!activeDescPage?.content) return [];
-    return extractCategoriesFromMarkdown(activeDescPage.content);
-  }, [activeDescPage?.content]);
+    if (!activeDescPage) return [];
+    return getPageCategories(activeDescPage);
+  }, [activeDescPage]);
 
   // グループ見出し一覧（ソート済み）
   const sortedGroupKeys = useMemo(() => {
