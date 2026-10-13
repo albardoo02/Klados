@@ -142,9 +142,10 @@ func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
 	api.GET("/media/:id/content", mediaH.ServeByID)
 	api.GET("/media/file/*key", mediaH.ServeFile)
 
-	// Public comments list & creation (with optional auth)
+	// Public comments list & creation (with optional auth) & page versions
 	api.GET("/pages/:id/comments", commentH.List)
 	api.POST("/pages/:id/comments", middleware.OptionalAuth(cfg.JWTSecret, db), commentH.Create)
+	api.GET("/pages/:id/versions", pageH.GetVersions)
 
 	// 認証 (Public)
 	auth := api.Group("/auth")
@@ -155,6 +156,7 @@ func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
 		auth.POST("/google", authH.GoogleLogin)
 		auth.POST("/github", authH.GitHubLogin)
 		auth.POST("/discord", authH.DiscordLogin)
+		auth.POST("/azisaba", authH.AzisabaAuth)
 		auth.GET("/:provider/url", authH.GetOAuthURL)
 		auth.POST("/oauth/callback", authH.OAuthCallback)
 		auth.POST("/oauth/relay-exchange", authH.RelayExchange)
@@ -198,6 +200,7 @@ func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
 		protected.GET("/sites/:id/trash", pageH.ListTrash)
 		protected.GET("/sites/:id/export", siteH.Export)
 		protected.POST("/sites/:id/password", siteH.SetPassword)
+		protected.POST("/sites/:id/azisaba-test", siteH.TestAzisabaPlayer)
 		protected.GET("/sites/:id/categories", categoryH.ListForSite)
 
 		// Site Members
@@ -212,7 +215,6 @@ func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
 		protected.GET("/pages/:id", pageH.Get)
 		protected.PATCH("/pages/:id", pageH.Update)
 		protected.DELETE("/pages/:id", pageH.Delete)
-		protected.GET("/pages/:id/versions", pageH.GetVersions)
 		protected.POST("/pages/:id/revert/:ver", pageH.Revert)
 		protected.POST("/pages/:id/restore", pageH.Restore)
 

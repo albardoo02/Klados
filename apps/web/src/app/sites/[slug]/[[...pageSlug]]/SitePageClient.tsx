@@ -1,8 +1,16 @@
 'use client';
 
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { publicApi, commentsApi } from '@/lib/api';
-import { useParams } from 'next/navigation';
+import {
+  publicApi,
+  commentsApi,
+  authApi,
+  PageAuthorSummary,
+  AzisabaEditorPolicy,
+  AzisabaEvaluationResult,
+  AzisabaPlayerProfile,
+} from '@/lib/api';
+import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { MarkdownRenderer } from '@/components/markdown-renderer';
@@ -16,6 +24,7 @@ import {
   Menu,
   X,
   Calendar,
+  Clock,
   FileText,
   ArrowLeft,
   ArrowRight,
@@ -37,6 +46,12 @@ import {
   ChevronDown,
   Settings,
   FolderKanban,
+  ShieldCheck,
+  KeyRound,
+  CheckCircle2,
+  XCircle,
+  Loader2,
+  Edit3,
 } from 'lucide-react';
 import { UserAvatar } from '@/components/user-avatar';
 import { PageActionTabs } from '@/components/wiki/page-action-tabs';
@@ -65,6 +80,10 @@ interface PublicPage {
   published_at?: string;
   created_at?: string;
   updated_at?: string;
+  created_by_id?: string;
+  updated_by_id?: string;
+  created_by?: PageAuthorSummary;
+  updated_by?: PageAuthorSummary;
 }
 
 interface PublicSite {
@@ -88,6 +107,7 @@ interface PublicSite {
     custom_font?: string;
     primary_color?: string;
     custom_css?: string;
+    azisaba_editor_policy?: AzisabaEditorPolicy;
     [key: string]: any;
   };
   pages?: PublicPage[];
@@ -550,7 +570,8 @@ export default function SitePageClient() {
   const queryClient = useQueryClient();
 
   // 認証および権限判定
-  const { user, token, clearAuth } = useAuthStore();
+  const router = useRouter();
+  const { user, token, setAuth, clearAuth } = useAuthStore();
   const [isClientMounted, setIsClientMounted] = useState(false);
   useEffect(() => {
     setIsClientMounted(true);
@@ -736,7 +757,7 @@ export default function SitePageClient() {
     enabled: !!activePage?.id,
   });
 
-  // UIステート: 検索モーダル & コメントドロワー & ページ作成 & ユーザーメニュー
+  // UIステート: 検索モーダル & コメントドロワー & ページ作成 & ユーザーメニュー & アジ鯖共同編集認証
   const [searchOpen, setSearchOpen] = useState(false);
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -744,7 +765,62 @@ export default function SitePageClient() {
   const [infoModalOpen, setInfoModalOpen] = useState(false);
   const [createPageOpen, setCreatePageOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [azisabaModalOpen, setAzisabaModalOpen] = useState(false);
+  const [azisabaApiKey, setAzisabaApiKey] = useState('');
+  const [azisabaPlayerName, setAzisabaPlayerName] = useState('');
+  const [azisabaVerifying, setAzisabaVerifying] = useState(false);
+  const [azisabaError, setAzisabaError] = useState<string | null>(null);
+  const [azisabaResult, setAzisabaResult] = useState<{
+    evaluation: AzisabaEvaluationResult;
+    player?: AzisabaPlayerProfile;
+    site_approved: boolean;
+  } | null>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
+
+  const handleAzisabaVerify = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAzisabaError(null);
+    setAzisabaResult(null);
+    setAzisabaVerifying(true);
+    try {
+      const res = await authApi.azisabaAuth({
+        api_key: azisabaApiKey.trim() || undefined,
+        player_name: azisabaPlayerName.trim() || undefined,
+        site_id: site.id && site.id !== 'demo-site' ? site.id : undefined,
+        site_slug: siteSlug,
+      });
+      const data = res.data?.data;
+      if (data) {
+        if (data.token && data.user) {
+          setAuth(data.user, data.token);
+        }
+        const evalResult: AzisabaEvaluationResult = data.evaluations?.[0] ||
+          data.approved_sites?.[0] || {
+            site_id: site.id,
+            site_slug: siteSlug,
+            site_title: site.title,
+            approved: Boolean(data.approved_sites && data.approved_sites.length > 0),
+            reasons: [],
+          };
+        setAzisabaResult({
+          evaluation: evalResult,
+          player: data.player,
+          site_approved: Boolean(
+            evalResult.approved || (data.approved_sites && data.approved_sites.length > 0)
+          ),
+        });
+        await queryClient.invalidateQueries({ queryKey: ['public-site', siteSlug] });
+      }
+    } catch (err: any) {
+      setAzisabaError(
+        err?.response?.data?.error ||
+          err?.message ||
+          'アジ鯖API認証に失敗しました。APIキーまたはMCIDを確認してください。'
+      );
+    } finally {
+      setAzisabaVerifying(false);
+    }
+  };
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -1502,6 +1578,11 @@ export default function SitePageClient() {
                 commentsCount={comments.length}
                 canEdit={canEdit}
                 onOpenCreatePage={() => setCreatePageOpen(true)}
+                onOpenCollaborate={
+                  !canEdit && site.id && site.id !== 'demo-site'
+                    ? () => setAzisabaModalOpen(true)
+                    : undefined
+                }
               />
 
               {/* パンくずリスト */}
@@ -1524,25 +1605,60 @@ export default function SitePageClient() {
                 <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-slate-900 dark:text-white mb-3">
                   {activePage.title}
                 </h1>
-                <div className="flex items-center justify-between flex-wrap gap-2 text-xs text-slate-400 dark:text-slate-500">
-                  {activePage.created_at && (
-                    <div className="flex items-center gap-1.5">
-                      <Calendar className="size-3.5" />
-                      <span>
-                        公開日: {new Date(activePage.created_at).toLocaleDateString('ja-JP')}
-                      </span>
-                    </div>
-                  )}
+                <div className="flex items-center justify-between flex-wrap gap-3 text-xs text-slate-400 dark:text-slate-500">
+                  <div className="flex items-center flex-wrap gap-x-4 gap-y-2">
+                    {(activePage.updated_by || activePage.created_by) && (
+                      <div
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-100/80 dark:bg-slate-800/80 text-slate-700 dark:text-slate-200 border border-slate-200/60 dark:border-slate-700/60"
+                        title="このページの最終更新者"
+                      >
+                        <UserAvatar
+                          name={
+                            (activePage.updated_by || activePage.created_by)!.display_name ||
+                            (activePage.updated_by || activePage.created_by)!.username
+                          }
+                          src={(activePage.updated_by || activePage.created_by)!.avatar_url}
+                          size="sm"
+                          className="size-4 text-[9px]"
+                        />
+                        <span className="text-[11px] text-slate-400 dark:text-slate-400">最終更新:</span>
+                        <span className="font-semibold text-xs">
+                          {(activePage.updated_by || activePage.created_by)!.display_name ||
+                            (activePage.updated_by || activePage.created_by)!.username}
+                        </span>
+                      </div>
+                    )}
 
-                  {/* コメントを開くボタン */}
-                  <button
-                    type="button"
-                    onClick={() => setCommentsOpen(true)}
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-muted/60 hover:bg-muted text-foreground transition-colors cursor-pointer"
-                  >
-                    <MessageSquare className="size-3 text-primary" />
-                    <span>コメント ({comments.length})</span>
-                  </button>
+                    {activePage.updated_at && (
+                      <div className="flex items-center gap-1.5" title="最終更新日時">
+                        <Clock className="size-3.5" />
+                        <span>
+                          更新日: {new Date(activePage.updated_at).toLocaleDateString('ja-JP')}
+                        </span>
+                      </div>
+                    )}
+
+                    {activePage.created_at && (
+                      <div className="flex items-center gap-1.5" title="初版公開日">
+                        <Calendar className="size-3.5" />
+                        <span>
+                          公開日: {new Date(activePage.created_at).toLocaleDateString('ja-JP')}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    {/* コメントを開くボタン */}
+                    <button
+                      type="button"
+                      onClick={() => setCommentsOpen(true)}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-muted/60 hover:bg-muted text-foreground transition-colors cursor-pointer"
+                    >
+                      <MessageSquare className="size-3 text-primary" />
+                      <span>コメント ({comments.length})</span>
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -1561,8 +1677,76 @@ export default function SitePageClient() {
                 primaryColor={brandPrimaryColor}
               />
 
+              {/* 最終更新者 & 共同編集ステータスバー */}
+              <div className="pt-6 border-t border-border">
+                <div className="p-4 sm:p-5 rounded-2xl bg-slate-50/70 dark:bg-slate-900/50 border border-slate-200/70 dark:border-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    {(activePage.updated_by || activePage.created_by) ? (
+                      <UserAvatar
+                        name={
+                          (activePage.updated_by || activePage.created_by)!.display_name ||
+                          (activePage.updated_by || activePage.created_by)!.username
+                        }
+                        src={(activePage.updated_by || activePage.created_by)!.avatar_url}
+                        size="md"
+                      />
+                    ) : (
+                      <div className="size-9 rounded-full bg-slate-200 dark:bg-slate-800 flex items-center justify-center text-slate-500">
+                        <User className="size-4" />
+                      </div>
+                    )}
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                          最終更新者:{' '}
+                          {(activePage.updated_by || activePage.created_by)?.display_name ||
+                            (activePage.updated_by || activePage.created_by)?.username ||
+                            'サイト管理者'}
+                        </span>
+                        {(activePage.updated_by || activePage.created_by)?.username && (
+                          <span className="text-[11px] font-mono text-slate-400">
+                            @{(activePage.updated_by || activePage.created_by)!.username}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                        {activePage.updated_at
+                          ? `最終更新日時: ${new Date(activePage.updated_at).toLocaleString('ja-JP')}`
+                          : activePage.created_at
+                          ? `作成日時: ${new Date(activePage.created_at).toLocaleString('ja-JP')}`
+                          : '最新の公開版'}
+                      </p>
+                    </div>
+                  </div>
+
+                  {site.id && site.id !== 'demo-site' && (
+                    <div className="flex items-center gap-2">
+                      {canEdit ? (
+                        <Link
+                          href={`/dashboard/pages/${activePage.id}/edit`}
+                          className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold text-white shadow-xs transition-opacity hover:opacity-90"
+                          style={{ backgroundColor: brandPrimaryColor }}
+                        >
+                          <Edit3 className="size-3.5" />
+                          <span>このページを編集</span>
+                        </Link>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setAzisabaModalOpen(true)}
+                          className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs transition-colors cursor-pointer"
+                        >
+                          <ShieldCheck className="size-3.5" />
+                          <span>共同編集に参加 (アジ鯖API認証)</span>
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+
               {/* 記事下部コメントエリア */}
-              <div className="pt-8 border-t border-border">
+              <div className="pt-4">
                 <div className="p-6 rounded-2xl bg-muted/20 border border-border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                   <div>
                     <h3 className="font-bold text-sm flex items-center gap-2">
@@ -1740,6 +1924,172 @@ export default function SitePageClient() {
             queryClient.invalidateQueries({ queryKey: ['pages', site.id] });
           }}
         />
+      )}
+
+      {/* アジ鯖API 共同編集者 自動承認モーダル */}
+      {azisabaModalOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4"
+          onClick={() => setAzisabaModalOpen(false)}
+        >
+          <div
+            className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl max-w-lg w-full border border-slate-200 dark:border-slate-800 overflow-hidden animate-in fade-in-0 zoom-in-95 duration-150"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 dark:border-slate-800">
+              <div className="flex items-center gap-2 font-bold text-base text-slate-900 dark:text-white">
+                <ShieldCheck className="size-5 text-emerald-600 dark:text-emerald-400" />
+                <span>共同編集への参加 (アジ鯖API自動承認)</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAzisabaModalOpen(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
+              >
+                <X className="size-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleAzisabaVerify} className="p-6 space-y-4 text-sm">
+              <div className="p-3.5 rounded-xl bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200/60 dark:border-emerald-800/50 text-xs text-emerald-800 dark:text-emerald-200 space-y-1.5">
+                <p className="font-bold">✨ 招待不要で即座にWiki編集に参加できます</p>
+                <p className="leading-relaxed opacity-90">
+                  アジ鯖のAPIキーを入力して認証すると、プレイヤー情報（プレイ時間・ランク・権限・処罰状況など）からサイトの共同編集条件を自動判定し、条件を満たしていれば即座に共同編集者（Editor）として自動承認されます。
+                </p>
+              </div>
+
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    アジ鯖 APIキー (Bearer Token)
+                  </label>
+                  <div className="relative">
+                    <KeyRound className="size-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="password"
+                      value={azisabaApiKey}
+                      onChange={(e) => setAzisabaApiKey(e.target.value)}
+                      placeholder="アジ鯖のAPIキーを入力..."
+                      className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    ※ アジ鯖内で発行した個人のAPIキーを入力すると、あなたのMinecraftアカウントで自動ログイン＆共同編集承認が行われます。
+                  </p>
+                </div>
+
+                {! isGuest && (
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                      または Minecraft ID / UUID (ログイン済みでサイト側にAPIキーが設定されている場合)
+                    </label>
+                    <input
+                      type="text"
+                      value={azisabaPlayerName}
+                      onChange={(e) => setAzisabaPlayerName(e.target.value)}
+                      placeholder={user?.username || '例: Steve'}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                  </div>
+                )}
+              </div>
+
+              {azisabaError && (
+                <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-xs text-rose-600 dark:text-rose-300 flex items-start gap-2">
+                  <XCircle className="size-4 shrink-0 mt-0.5" />
+                  <span>{azisabaError}</span>
+                </div>
+              )}
+
+              {azisabaResult && (
+                <div
+                  className={`p-4 rounded-xl border text-xs space-y-2.5 ${
+                    azisabaResult.site_approved
+                      ? 'bg-emerald-50/80 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800 text-emerald-900 dark:text-emerald-200'
+                      : 'bg-amber-50/80 dark:bg-amber-950/40 border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-200'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 font-bold text-sm">
+                      {azisabaResult.site_approved ? (
+                        <CheckCircle2 className="size-4 text-emerald-600 dark:text-emerald-400" />
+                      ) : (
+                        <XCircle className="size-4 text-amber-600 dark:text-amber-400" />
+                      )}
+                      <span>
+                        {azisabaResult.site_approved
+                          ? '編集権限が自動承認されました！'
+                          : 'このサイトの自動承認条件を満たしていません'}
+                      </span>
+                    </div>
+                    {azisabaResult.player && (
+                      <span className="font-mono text-[11px] px-2 py-0.5 rounded bg-black/5 dark:bg-white/10">
+                        MCID: {azisabaResult.player.name}
+                      </span>
+                    )}
+                  </div>
+
+                  {azisabaResult.evaluation.reasons && azisabaResult.evaluation.reasons.length > 0 && (
+                    <ul className="space-y-1 pl-4 list-disc text-[11px] opacity-90">
+                      {azisabaResult.evaluation.reasons.map((d: string, i: number) => (
+                        <li key={i}>{d}</li>
+                      ))}
+                    </ul>
+                  )}
+
+                  {azisabaResult.evaluation.failed_reasons &&
+                    azisabaResult.evaluation.failed_reasons.length > 0 && (
+                      <ul className="space-y-1 pl-4 list-disc text-[11px] text-rose-600 dark:text-rose-400">
+                        {azisabaResult.evaluation.failed_reasons.map((d: string, i: number) => (
+                          <li key={i}>{d}</li>
+                        ))}
+                      </ul>
+                    )}
+
+                  {azisabaResult.site_approved && activePage && (
+                    <div className="pt-2">
+                      <Link
+                        href={`/dashboard/pages/${activePage.id}/edit`}
+                        onClick={() => setAzisabaModalOpen(false)}
+                        className="w-full inline-flex items-center justify-center gap-1.5 py-2 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-sm transition-colors"
+                      >
+                        <Edit3 className="size-3.5" />
+                        <span>今すぐ「{activePage.title}」を編集する</span>
+                      </Link>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setAzisabaModalOpen(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                >
+                  閉じる
+                </button>
+                <button
+                  type="submit"
+                  disabled={azisabaVerifying}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white shadow-xs transition-colors cursor-pointer"
+                >
+                  {azisabaVerifying ? (
+                    <>
+                      <Loader2 className="size-3.5 animate-spin" />
+                      <span>判定中...</span>
+                    </>
+                  ) : (
+                    <>
+                      <ShieldCheck className="size-3.5" />
+                      <span>認証して編集権限を取得</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </div>
   );

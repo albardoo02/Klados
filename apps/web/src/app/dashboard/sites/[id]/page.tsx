@@ -1,11 +1,12 @@
 'use client';
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { pagesApi, sitesApi, categoriesApi, downloadSiteZip, CategorySummary } from '@/lib/api';
+import { pagesApi, sitesApi, categoriesApi, downloadSiteZip, CategorySummary, PageAuthorSummary } from '@/lib/api';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { useState } from 'react';
 import { MediaLibraryModal } from '@/components/media-library-modal';
+import { UserAvatar } from '@/components/user-avatar';
 import {
   ExternalLink,
   Plus,
@@ -42,6 +43,8 @@ interface Page {
   status: string;
   updated_at: string;
   deleted_at?: string | null;
+  created_by?: PageAuthorSummary;
+  updated_by?: PageAuthorSummary;
 }
 
 export default function SiteDetailPage() {
@@ -501,11 +504,31 @@ export default function SiteDetailPage() {
                           </span>
                         ))}
                       </div>
-                      {page.updated_at && (
-                        <span className="text-[11px] text-slate-400 block mt-0.5">
-                          最終更新: {new Date(page.updated_at).toLocaleDateString('ja-JP')}
-                        </span>
-                      )}
+                      <div className="flex flex-wrap items-center gap-3 mt-1 text-[11px] text-slate-400">
+                        {page.updated_at && (
+                          <span>
+                            最終更新: {new Date(page.updated_at).toLocaleString('ja-JP')}
+                          </span>
+                        )}
+                        {(page.updated_by || page.created_by) && (
+                          <span className="inline-flex items-center gap-1.5 text-slate-600 font-medium">
+                            <UserAvatar
+                              name={
+                                (page.updated_by || page.created_by)!.display_name ||
+                                (page.updated_by || page.created_by)!.username
+                              }
+                              src={(page.updated_by || page.created_by)!.avatar_url}
+                              size="sm"
+                              className="size-3.5 text-[8px]"
+                            />
+                            <span>
+                              更新者:{' '}
+                              {(page.updated_by || page.created_by)!.display_name ||
+                                (page.updated_by || page.created_by)!.username}
+                            </span>
+                          </span>
+                        )}
+                      </div>
                     </Link>
 
                     <div className="flex items-center gap-2 shrink-0">

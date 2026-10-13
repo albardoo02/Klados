@@ -37,7 +37,7 @@ import {
 import { BacklinksModal } from './backlinks-modal';
 import { ShareModal } from './share-modal';
 import { PageMoveModal } from './page-move-modal';
-import { pagesApi } from '@/lib/api';
+import { pagesApi, PageAuthorSummary } from '@/lib/api';
 
 interface PageActionTabsProps {
   page: {
@@ -49,6 +49,8 @@ interface PageActionTabsProps {
     frontmatter?: { categories?: string[]; [key: string]: any };
     created_at?: string;
     updated_at?: string;
+    created_by?: PageAuthorSummary;
+    updated_by?: PageAuthorSummary;
   };
   site: {
     id: string;
@@ -66,6 +68,7 @@ interface PageActionTabsProps {
   commentsCount?: number;
   canEdit?: boolean;
   onOpenCreatePage?: () => void;
+  onOpenCollaborate?: () => void;
 }
 
 export function PageActionTabs({
@@ -76,6 +79,7 @@ export function PageActionTabs({
   commentsCount = 0,
   canEdit = false,
   onOpenCreatePage,
+  onOpenCollaborate,
 }: PageActionTabsProps) {
   const router = useRouter();
 
@@ -219,7 +223,7 @@ export function PageActionTabs({
           </span>
 
           {/* 編集タブ (関係者・編集権限がある場合のみ表示) */}
-          {canEdit && (
+          {canEdit ? (
             <Link
               href={`/dashboard/pages/${page.id}/edit`}
               className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/60 rounded-t-xl transition-colors cursor-pointer"
@@ -228,6 +232,18 @@ export function PageActionTabs({
               <Edit3 className="size-3.5" />
               <span>編集</span>
             </Link>
+          ) : (
+            onOpenCollaborate && (
+              <button
+                type="button"
+                onClick={onOpenCollaborate}
+                className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 rounded-t-xl transition-colors cursor-pointer"
+                title="アジ鯖API認証で共同編集権限を自動取得して編集する"
+              >
+                <Edit3 className="size-3.5" />
+                <span>共同編集に参加</span>
+              </button>
+            )
           )}
 
           {/* 新規作成タブ (関係者・編集権限がある場合のみ表示) */}

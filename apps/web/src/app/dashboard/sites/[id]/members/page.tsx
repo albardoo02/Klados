@@ -348,6 +348,39 @@ export default function SiteMembersPage() {
         </div>
       </div>
 
+      {/* アジ鯖 API 自動共同編集承認ステータスバナー */}
+      <div className="mb-4 p-4 bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/60 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+        <div className="flex items-start gap-3">
+          <ShieldCheck className="size-5 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-slate-900 dark:text-white">
+                アジ鯖 API 連携・外部共同編集者の自動承認
+              </span>
+              <span
+                className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                  site?.settings?.azisaba_editor_policy?.enabled
+                    ? 'bg-emerald-600 text-white'
+                    : 'bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
+                }`}
+              >
+                {site?.settings?.azisaba_editor_policy?.enabled ? '自動承認 ON' : '自動承認 OFF'}
+              </span>
+            </div>
+            <p className="text-slate-600 dark:text-slate-400 mt-0.5">
+              手動で1人ずつメンバー招待しなくても、アジ鯖APIからプレイ時間・ランク・所持金・権限皿・処罰履歴を判定して条件を満たすプレイヤーを自動的に共同編集者 (Editor) として承認できます。
+            </p>
+          </div>
+        </div>
+        <Link
+          href={`/dashboard/sites/${id}/settings#azisaba-auto-approval`}
+          className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shrink-0 transition-colors"
+        >
+          <Settings className="size-3.5" />
+          <span>自動承認条件を設定</span>
+        </Link>
+      </div>
+
       {/* メンバー権限の概要説明 */}
       <div className="mb-6 p-4 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 rounded-2xl flex items-start gap-3 text-xs text-slate-600 dark:text-slate-400">
         <Info className="size-4 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />

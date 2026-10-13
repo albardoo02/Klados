@@ -155,6 +155,17 @@ export const authApi = {
     api.post('/auth/github', data || {}),
   discordLogin: (data?: { email?: string; name?: string; token?: string; guild_id?: string; guild_name?: string }) =>
     api.post('/auth/discord', data || {}),
+  azisabaAuth: (data: { api_key?: string; player_name?: string; site_id?: string; site_slug?: string }) =>
+    api.post<{
+      success: boolean;
+      data: {
+        token: string;
+        user: any;
+        player?: AzisabaPlayerProfile;
+        approved_sites?: AzisabaEvaluationResult[];
+        evaluations?: AzisabaEvaluationResult[];
+      };
+    }>('/auth/azisaba', data),
   getOAuthUrl: (provider: string, redirectUri?: string, state?: string) => {
     const params = new URLSearchParams();
     if (redirectUri) params.set('redirect_uri', redirectUri);
@@ -238,6 +249,38 @@ export const systemApi = {
 };
 
 // --- Sites ---
+export interface AzisabaEditorPolicy {
+  enabled: boolean;
+  allow_any_registered_user?: boolean;
+  api_base_url?: string;
+  server_api_key?: string;
+  target_role?: 'editor' | 'admin' | 'viewer';
+  min_life_play_time_minutes?: number;
+  min_life_rank?: number;
+  min_life_balance?: number;
+  required_groups?: string[];
+  required_server_roles?: string[];
+  require_no_active_punishment?: boolean;
+}
+
+export interface AzisabaPlayerProfile {
+  uuid: string;
+  name: string;
+  groups: string[];
+  servers: Record<string, Record<string, any>>;
+}
+
+export interface AzisabaEvaluationResult {
+  site_id: string;
+  site_slug: string;
+  site_title: string;
+  approved: boolean;
+  granted_role?: string;
+  reasons: string[];
+  failed_reasons?: string[];
+  player_stats?: Record<string, any>;
+}
+
 export interface SiteSettingsData {
   title?: string;
   slug?: string;
@@ -256,6 +299,7 @@ export interface SiteSettingsData {
     custom_font?: string;
     primary_color?: string;
     custom_css?: string;
+    azisaba_editor_policy?: AzisabaEditorPolicy;
     [key: string]: any;
   };
 }
@@ -269,6 +313,14 @@ export const sitesApi = {
     api.patch(`/sites/${id}`, data),
   setPassword: (id: string, password: string) =>
     api.patch(`/sites/${id}/password`, { password }),
+  testAzisabaPlayer: (id: string, data: { identifier: string; api_key?: string; policy?: Partial<AzisabaEditorPolicy> }) =>
+    api.post<{
+      success: boolean;
+      data: {
+        player: AzisabaPlayerProfile;
+        evaluation: AzisabaEvaluationResult;
+      };
+    }>(`/sites/${id}/azisaba-test`, data),
   delete: (id: string) => api.delete(`/sites/${id}`),
   checkDomain: (id: string, domain: string) =>
     api.post(`/sites/${id}/custom-domain/check`, { domain }),
@@ -318,10 +370,18 @@ export const membersApi = {
 };
 
 // --- Pages ---
+export interface PageAuthorSummary {
+  id: string;
+  username: string;
+  display_name: string;
+  avatar_url?: string;
+}
+
 export interface PageVersion {
   id: string;
   page_id: string;
   user_id?: string;
+  user?: PageAuthorSummary;
   content: string;
   version: number;
   created_at: string;
@@ -331,6 +391,10 @@ export interface PageItem {
   id: string;
   site_id: string;
   parent_id?: string | null;
+  created_by_id?: string | null;
+  updated_by_id?: string | null;
+  created_by?: PageAuthorSummary;
+  updated_by?: PageAuthorSummary;
   slug: string;
   title: string;
   content: string;

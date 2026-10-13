@@ -1,7 +1,17 @@
 'use client';
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { sitesApi, pagesApi, authApi, AuthRoutingRule, downloadSiteZip, SiteSettingsData } from '@/lib/api';
+import {
+  sitesApi,
+  pagesApi,
+  authApi,
+  AuthRoutingRule,
+  downloadSiteZip,
+  SiteSettingsData,
+  AzisabaEditorPolicy,
+  AzisabaEvaluationResult,
+  AzisabaPlayerProfile,
+} from '@/lib/api';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useState, useEffect } from 'react';
@@ -328,12 +338,96 @@ export default function SiteSettingsPage() {
     },
   });
 
+  // アジ鯖API 共同編集者 自動承認ポリシー ステート
+  const [azisabaPolicy, setAzisabaPolicy] = useState<AzisabaEditorPolicy>({
+    enabled: false,
+    allow_any_registered_user: false,
+    min_life_play_time_minutes: 0,
+    min_life_rank: 0,
+    min_life_balance: 0,
+    required_groups: [],
+    required_server_roles: [],
+    require_no_active_punishment: true,
+    server_api_key: '',
+  });
+  const [azisabaGroupsInput, setAzisabaGroupsInput] = useState('');
+  const [azisabaTestPlayer, setAzisabaTestPlayer] = useState('');
+  const [azisabaTestLoading, setAzisabaTestLoading] = useState(false);
+  const [azisabaTestError, setAzisabaTestError] = useState<string | null>(null);
+  const [azisabaTestResult, setAzisabaTestResult] = useState<{
+    player: AzisabaPlayerProfile;
+    evaluation: AzisabaEvaluationResult;
+  } | null>(null);
+
+  const buildAzisabaPolicyPayload = (): AzisabaEditorPolicy => {
+    const parsedGroups = azisabaGroupsInput
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    return {
+      ...azisabaPolicy,
+      required_groups: parsedGroups,
+    };
+  };
+
+  const handleTestAzisabaPlayer = async () => {
+    if (!azisabaTestPlayer.trim()) return;
+    setAzisabaTestError(null);
+    setAzisabaTestResult(null);
+    setAzisabaTestLoading(true);
+    try {
+      const policyPayload = buildAzisabaPolicyPayload();
+      const res = await sitesApi.testAzisabaPlayer(id, {
+        identifier: azisabaTestPlayer.trim(),
+        api_key: policyPayload.server_api_key || undefined,
+        policy: policyPayload,
+      });
+      if (res.data?.data) {
+        setAzisabaTestResult({
+          player: res.data.data.player,
+          evaluation: res.data.data.evaluation,
+        });
+      }
+    } catch (err: any) {
+      setAzisabaTestError(
+        err?.response?.data?.error ||
+          err?.message ||
+          'プレイヤー情報の取得に失敗しました。APIキーやMCID/UUIDを確認してください。'
+      );
+    } finally {
+      setAzisabaTestLoading(false);
+    }
+  };
+
   // フォームの初期値ロード
   useEffect(() => {
     if (site) {
       const customFont = site.settings?.custom_font || site.custom_font || 'Inter';
       const primaryColor = site.settings?.primary_color || site.primary_color || '#3b82f6';
       const customCss = site.settings?.custom_css || site.custom_css || '';
+      const rawPolicy = site.settings?.azisaba_editor_policy as AzisabaEditorPolicy | undefined;
+
+      if (rawPolicy) {
+        setAzisabaPolicy({
+          enabled: !!rawPolicy.enabled,
+          allow_any_registered_user: !!rawPolicy.allow_any_registered_user,
+          min_life_play_time_minutes: Number(rawPolicy.min_life_play_time_minutes || 0),
+          min_life_rank: Number(rawPolicy.min_life_rank || 0),
+          min_life_balance: Number(rawPolicy.min_life_balance || 0),
+          required_groups: Array.isArray(rawPolicy.required_groups) ? rawPolicy.required_groups : [],
+          required_server_roles: Array.isArray(rawPolicy.required_server_roles)
+            ? rawPolicy.required_server_roles
+            : [],
+          require_no_active_punishment:
+            rawPolicy.require_no_active_punishment !== undefined
+              ? !!rawPolicy.require_no_active_punishment
+              : true,
+          server_api_key: rawPolicy.server_api_key || '',
+        });
+        setAzisabaGroupsInput(
+          Array.isArray(rawPolicy.required_groups) ? rawPolicy.required_groups.join(', ') : ''
+        );
+      }
 
       setForm({
         title: site.title || '',
@@ -385,6 +479,7 @@ export default function SiteSettingsPage() {
         custom_font: form.custom_font,
         primary_color: form.primary_color,
         custom_css: form.custom_css,
+        azisaba_editor_policy: buildAzisabaPolicyPayload(),
         auth_config: {
           ...(site?.settings?.auth_config || {}),
           enable_email_login: siteAuthForm.enable_email_login,
@@ -1273,6 +1368,360 @@ export default function SiteSettingsPage() {
                     </button>
                   </div>
                 ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* 6.5 アジ鯖 API 連携・外部共同編集者の自動承認設定 */}
+        <div id="azisaba-auto-approval" className="bg-card border border-border rounded-2xl p-6 shadow-xs space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-border">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                <ShieldCheck className="size-5" />
+              </div>
+              <div>
+                <h2 className="text-base font-bold">
+                  アジ鯖 API 連携・外部共同編集者の自動承認 (Azisaba Auto-Approval)
+                </h2>
+                <p className="text-xs text-muted-foreground">
+                  アジ鯖公式API (api-ktor.azisaba.net) からプレイヤー情報を自動取得し、条件を満たすプレイヤーを招待不要で共同編集者 (Editor) として自動承認します
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => handleSave()}
+              disabled={updateMutation.isPending}
+              className="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold shadow-xs transition-colors cursor-pointer disabled:opacity-50 shrink-0"
+            >
+              {updateMutation.isPending ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <Save className="size-3.5" />
+              )}
+              <span>自動承認設定を保存</span>
+            </button>
+          </div>
+
+          {/* メイントグル */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <label className="p-4 rounded-xl border border-border bg-muted/20 flex items-center justify-between cursor-pointer hover:bg-muted/40 transition-colors">
+              <div className="pr-3">
+                <span className="text-xs font-bold block text-foreground">
+                  外部共同編集者の自動承認を有効にする
+                </span>
+                <span className="text-[11px] text-muted-foreground">
+                  ONにすると、公開ページの「共同編集に参加」から条件を満たすプレイヤーが即座に編集可能になります
+                </span>
+              </div>
+              <input
+                type="checkbox"
+                checked={azisabaPolicy.enabled}
+                onChange={(e) =>
+                  setAzisabaPolicy({ ...azisabaPolicy, enabled: e.target.checked })
+                }
+                className="size-4 rounded border-border text-emerald-600 focus:ring-emerald-500 shrink-0"
+              />
+            </label>
+
+            <label className="p-4 rounded-xl border border-border bg-muted/20 flex items-center justify-between cursor-pointer hover:bg-muted/40 transition-colors">
+              <div className="pr-3">
+                <span className="text-xs font-bold block text-foreground">
+                  オープンWikiモード (ログイン済みなら誰でも編集可)
+                </span>
+                <span className="text-[11px] text-muted-foreground">
+                  ONにすると、数値条件に関わらず登録・ログイン済みの全プレイヤーが編集可能になります
+                </span>
+              </div>
+              <input
+                type="checkbox"
+                checked={!!azisabaPolicy.allow_any_registered_user}
+                onChange={(e) =>
+                  setAzisabaPolicy({
+                    ...azisabaPolicy,
+                    allow_any_registered_user: e.target.checked,
+                  })
+                }
+                className="size-4 rounded border-border text-emerald-600 focus:ring-emerald-500 shrink-0"
+              />
+            </label>
+          </div>
+
+          {/* アジ鯖プレイヤー条件設定 */}
+          <div className="space-y-4 pt-2 border-t border-border">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-bold text-foreground">
+                自動承認の判定条件（すべて満たしたプレイヤーをEditorとして承認）
+              </h3>
+              <label className="inline-flex items-center gap-2 text-xs cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={azisabaPolicy.require_no_active_punishment ?? true}
+                  onChange={(e) =>
+                    setAzisabaPolicy({
+                      ...azisabaPolicy,
+                      require_no_active_punishment: e.target.checked,
+                    })
+                  }
+                  className="size-3.5 rounded border-border text-emerald-600"
+                />
+                <span className="font-semibold text-foreground">
+                  現在有効な処罰 (Active BAN/Mute) がないことを必須にする
+                </span>
+              </label>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold block">
+                  最低 Life プレイ時間 (分)
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  value={azisabaPolicy.min_life_play_time_minutes ?? 0}
+                  onChange={(e) =>
+                    setAzisabaPolicy({
+                      ...azisabaPolicy,
+                      min_life_play_time_minutes: Math.max(0, Number(e.target.value)),
+                    })
+                  }
+                  placeholder="0 (条件なし)"
+                  className="w-full px-3 py-2 text-xs bg-background border border-border rounded-xl font-mono"
+                />
+                <p className="text-[10px] text-muted-foreground">
+                  約 {((azisabaPolicy.min_life_play_time_minutes || 0) / 60).toFixed(1)} 時間（0で制限なし）
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold block">最低 Life ランク (Rank)</label>
+                <input
+                  type="number"
+                  min={0}
+                  value={azisabaPolicy.min_life_rank ?? 0}
+                  onChange={(e) =>
+                    setAzisabaPolicy({
+                      ...azisabaPolicy,
+                      min_life_rank: Math.max(0, Number(e.target.value)),
+                    })
+                  }
+                  placeholder="0 (条件なし)"
+                  className="w-full px-3 py-2 text-xs bg-background border border-border rounded-xl font-mono"
+                />
+                <p className="text-[10px] text-muted-foreground">
+                  servers.life.rank の最低値（0で制限なし）
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold block">最低 Life 所持金 (Balance)</label>
+                <input
+                  type="number"
+                  min={0}
+                  value={azisabaPolicy.min_life_balance ?? 0}
+                  onChange={(e) =>
+                    setAzisabaPolicy({
+                      ...azisabaPolicy,
+                      min_life_balance: Math.max(0, Number(e.target.value)),
+                    })
+                  }
+                  placeholder="0 (条件なし)"
+                  className="w-full px-3 py-2 text-xs bg-background border border-border rounded-xl font-mono"
+                />
+                <p className="text-[10px] text-muted-foreground">
+                  servers.life.balance の最低金額（0で制限なし）
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold block">
+                  必須グループ / 皿 (いずれか1つ所持でOK・空欄で制限なし)
+                </label>
+                <input
+                  type="text"
+                  value={azisabaGroupsInput}
+                  onChange={(e) => setAzisabaGroupsInput(e.target.value)}
+                  placeholder="例: 100yen, 500yen, 1000yen, nitro, developer"
+                  className="w-full px-3 py-2 text-xs bg-background border border-border rounded-xl font-mono"
+                />
+                <p className="text-[10px] text-muted-foreground">
+                  カンマ区切りで複数指定可能（LuckPerms groups 配列と照合）
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold block">
+                  サイト照会用 アジ鯖APIキー (任意)
+                </label>
+                <input
+                  type="password"
+                  value={azisabaPolicy.server_api_key || ''}
+                  onChange={(e) =>
+                    setAzisabaPolicy({ ...azisabaPolicy, server_api_key: e.target.value })
+                  }
+                  placeholder="Bearer APIキーを設定するとMCIDのみで照会可能"
+                  className="w-full px-3 py-2 text-xs bg-background border border-border rounded-xl font-mono"
+                />
+                <p className="text-[10px] text-muted-foreground">
+                  未設定の場合でも、各プレイヤーが自分のAPIキーを入力して自己認証できます
+                </p>
+              </div>
+            </div>
+
+            {/* 必須サーバー役職 (チェックボックス) */}
+            <div className="space-y-2">
+              <label className="text-xs font-semibold block">
+                必須サーバー役職（チェックを入れた場合、いずれかの役職を持つプレイヤーのみ承認・未選択で制限なし）
+              </label>
+              <div className="flex flex-wrap gap-2">
+                {[
+                  { id: 'life:admin', label: 'Life Admin' },
+                  { id: 'life:moderator', label: 'Life Moderator' },
+                  { id: 'life:builder', label: 'Life Builder' },
+                  { id: 'tsl:admin', label: 'TSL Admin' },
+                  { id: 'tsl:moderator', label: 'TSL Moderator' },
+                  { id: 'tsl:builder', label: 'TSL Builder' },
+                  { id: 'lgw:admin', label: 'LGW Admin' },
+                  { id: 'lgw:moderator', label: 'LGW Moderator' },
+                  { id: 'lgw:builder', label: 'LGW Builder' },
+                  { id: 'lgw:vip', label: 'LGW VIP' },
+                  { id: 'afnw:admin', label: 'AFNW Admin' },
+                  { id: 'afnw:moderator', label: 'AFNW Moderator' },
+                  { id: 'afnw:builder', label: 'AFNW Builder' },
+                  { id: 'vanilife2:admin', label: 'ばにらいふ2 Admin' },
+                  { id: 'vanilife2:moderator', label: 'ばにらいふ2 Moderator' },
+                  { id: 'vanilife2:builder', label: 'ばにらいふ2 Builder' },
+                ].map((roleOpt) => {
+                  const currentRoles = azisabaPolicy.required_server_roles || [];
+                  const checked = currentRoles.includes(roleOpt.id);
+                  return (
+                    <button
+                      key={roleOpt.id}
+                      type="button"
+                      onClick={() => {
+                        const next = checked
+                          ? currentRoles.filter((r) => r !== roleOpt.id)
+                          : [...currentRoles, roleOpt.id];
+                        setAzisabaPolicy({ ...azisabaPolicy, required_server_roles: next });
+                      }}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors cursor-pointer ${
+                        checked
+                          ? 'bg-emerald-600 text-white border-emerald-600'
+                          : 'bg-background text-muted-foreground border-border hover:text-foreground'
+                      }`}
+                    >
+                      {checked ? '✓ ' : ''}
+                      {roleOpt.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          {/* プレイヤー条件テストツール */}
+          <div className="p-4 rounded-xl bg-muted/30 border border-border space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <h4 className="text-xs font-bold text-foreground">
+                  🔍 アジ鯖プレイヤー条件判定テスト
+                </h4>
+                <p className="text-[11px] text-muted-foreground">
+                  MCID または UUID を入力して、現在の設定で自動承認されるかテストできます（要: サイト照会用APIキー）
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={azisabaTestPlayer}
+                  onChange={(e) => setAzisabaTestPlayer(e.target.value)}
+                  placeholder="MCID または UUID を入力..."
+                  className="px-3 py-1.5 text-xs bg-background border border-border rounded-xl font-mono w-48"
+                />
+                <button
+                  type="button"
+                  onClick={handleTestAzisabaPlayer}
+                  disabled={azisabaTestLoading || !azisabaTestPlayer.trim()}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-secondary hover:bg-secondary/80 text-secondary-foreground text-xs font-semibold cursor-pointer disabled:opacity-50"
+                >
+                  {azisabaTestLoading ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <RefreshCw className="size-3.5" />
+                  )}
+                  <span>判定テスト</span>
+                </button>
+              </div>
+            </div>
+
+            {azisabaTestError && (
+              <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-xs text-rose-600 dark:text-rose-300">
+                {azisabaTestError}
+              </div>
+            )}
+
+            {azisabaTestResult && (
+              <div
+                className={`p-3.5 rounded-xl border text-xs space-y-2 ${
+                  azisabaTestResult.evaluation.approved
+                    ? 'bg-emerald-50/80 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800 text-emerald-900 dark:text-emerald-200'
+                    : 'bg-amber-50/80 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-200'
+                }`}
+              >
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <span className="font-bold text-sm">
+                    {azisabaTestResult.evaluation.approved
+                      ? '✅ 共同編集者として承認対象です'
+                      : '⚠️ 自動承認条件を満たしていません'}
+                  </span>
+                  <span className="font-mono text-[11px]">
+                    MCID: {azisabaTestResult.player.name} ({azisabaTestResult.player.uuid})
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-[11px]">
+                  <div className="p-2 rounded bg-background/60 border border-border/50">
+                    <span className="text-muted-foreground block">Lifeプレイ時間</span>
+                    <span className="font-bold font-mono">
+                      {((azisabaTestResult.player.servers?.life?.total_play_time || 0) / 60).toFixed(1)} 時間 (
+                      {azisabaTestResult.player.servers?.life?.total_play_time || 0} 分)
+                    </span>
+                  </div>
+                  <div className="p-2 rounded bg-background/60 border border-border/50">
+                    <span className="text-muted-foreground block">Lifeランク</span>
+                    <span className="font-bold font-mono">
+                      Rank {azisabaTestResult.player.servers?.life?.rank ?? 0}
+                    </span>
+                  </div>
+                  <div className="p-2 rounded bg-background/60 border border-border/50">
+                    <span className="text-muted-foreground block">Life所持金</span>
+                    <span className="font-bold font-mono">
+                      {(azisabaTestResult.player.servers?.life?.balance ?? 0).toLocaleString()} 円
+                    </span>
+                  </div>
+                  <div className="p-2 rounded bg-background/60 border border-border/50">
+                    <span className="text-muted-foreground block">所持グループ</span>
+                    <span className="font-mono truncate block">
+                      {(azisabaTestResult.player.groups || []).join(', ') || 'なし'}
+                    </span>
+                  </div>
+                </div>
+                {[
+                  ...(azisabaTestResult.evaluation.reasons || []),
+                  ...(azisabaTestResult.evaluation.failed_reasons || []),
+                ].length > 0 && (
+                  <ul className="list-disc pl-4 space-y-0.5 text-[11px]">
+                    {[
+                      ...(azisabaTestResult.evaluation.reasons || []),
+                      ...(azisabaTestResult.evaluation.failed_reasons || []),
+                    ].map((d: string, i: number) => (
+                      <li key={i}>{d}</li>
+                    ))}
+                  </ul>
+                )}
               </div>
             )}
           </div>

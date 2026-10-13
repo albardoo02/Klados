@@ -1,7 +1,9 @@
 'use client';
 
-import { X, FileText, Calendar, Clock, Hash, Link as LinkIcon, Check } from 'lucide-react';
+import { X, FileText, Calendar, Clock, Hash, Link as LinkIcon, Check, User } from 'lucide-react';
 import { useState } from 'react';
+import { PageAuthorSummary } from '@/lib/api';
+import { UserAvatar } from '@/components/user-avatar';
 
 interface PageInfoModalProps {
   isOpen: boolean;
@@ -13,6 +15,8 @@ interface PageInfoModalProps {
     content: string;
     created_at?: string;
     updated_at?: string;
+    created_by?: PageAuthorSummary;
+    updated_by?: PageAuthorSummary;
   };
   site: {
     title: string;
@@ -82,7 +86,41 @@ export function PageInfoModal({ isOpen, onClose, page, site }: PageInfoModalProp
             </div>
           </div>
 
-          <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+          <div className="space-y-2.5 pt-2 border-t border-slate-100 dark:border-slate-800">
+            {page.updated_by && (
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-400 flex items-center gap-1.5">
+                  <User className="size-3.5" /> 最終更新者:
+                </span>
+                <div className="flex items-center gap-1.5 font-medium text-slate-800 dark:text-slate-200">
+                  <UserAvatar
+                    name={page.updated_by.display_name || page.updated_by.username}
+                    src={page.updated_by.avatar_url}
+                    size="sm"
+                    className="size-4 text-[9px]"
+                  />
+                  <span>{page.updated_by.display_name || page.updated_by.username}</span>
+                  <span className="text-slate-400 font-mono text-[11px]">@{page.updated_by.username}</span>
+                </div>
+              </div>
+            )}
+            {page.created_by && (
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-400 flex items-center gap-1.5">
+                  <User className="size-3.5" /> 初版作成者:
+                </span>
+                <div className="flex items-center gap-1.5 font-medium text-slate-800 dark:text-slate-200">
+                  <UserAvatar
+                    name={page.created_by.display_name || page.created_by.username}
+                    src={page.created_by.avatar_url}
+                    size="sm"
+                    className="size-4 text-[9px]"
+                  />
+                  <span>{page.created_by.display_name || page.created_by.username}</span>
+                  <span className="text-slate-400 font-mono text-[11px]">@{page.created_by.username}</span>
+                </div>
+              </div>
+            )}
             {page.created_at && (
               <div className="flex items-center justify-between text-xs">
                 <span className="text-slate-400 flex items-center gap-1.5">

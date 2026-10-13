@@ -18,22 +18,33 @@ const (
 	PageStatusTrashed   PageStatus = "trashed"
 )
 
+type PageAuthorSummary struct {
+	ID          uuid.UUID `json:"id"`
+	Username    string    `json:"username"`
+	DisplayName string    `json:"display_name"`
+	AvatarURL   string    `json:"avatar_url"`
+}
+
 type Page struct {
-	ID          uuid.UUID      `gorm:"type:uuid;primaryKey" json:"id"`
-	SiteID      uuid.UUID      `gorm:"type:uuid;index" json:"site_id"`
-	ParentID    *uuid.UUID     `gorm:"type:uuid;index" json:"parent_id"`
-	Slug        string         `gorm:"not null" json:"slug"`
-	Title       string         `gorm:"not null" json:"title"`
-	Content     string         `gorm:"type:text" json:"content"`
-	Frontmatter datatypes.JSON `json:"frontmatter"`
-	Categories  []string       `gorm:"-" json:"categories"`
-	Status      PageStatus     `gorm:"default:draft" json:"status"`
-	Position    int            `gorm:"default:0" json:"position"`
-	PublishedAt *time.Time     `json:"published_at"`
-	DeletedAt   *time.Time     `json:"deleted_at"`
-	Site        Site           `gorm:"foreignKey:SiteID" json:"-"`
-	CreatedAt   time.Time      `json:"created_at"`
-	UpdatedAt   time.Time      `json:"updated_at"`
+	ID          uuid.UUID          `gorm:"type:uuid;primaryKey" json:"id"`
+	SiteID      uuid.UUID          `gorm:"type:uuid;index" json:"site_id"`
+	ParentID    *uuid.UUID         `gorm:"type:uuid;index" json:"parent_id"`
+	CreatedByID *uuid.UUID         `gorm:"type:uuid;index" json:"created_by_id,omitempty"`
+	UpdatedByID *uuid.UUID         `gorm:"type:uuid;index" json:"updated_by_id,omitempty"`
+	CreatedBy   *PageAuthorSummary `gorm:"-" json:"created_by,omitempty"`
+	UpdatedBy   *PageAuthorSummary `gorm:"-" json:"updated_by,omitempty"`
+	Slug        string             `gorm:"not null" json:"slug"`
+	Title       string             `gorm:"not null" json:"title"`
+	Content     string             `gorm:"type:text" json:"content"`
+	Frontmatter datatypes.JSON     `json:"frontmatter"`
+	Categories  []string           `gorm:"-" json:"categories"`
+	Status      PageStatus         `gorm:"default:draft" json:"status"`
+	Position    int                `gorm:"default:0" json:"position"`
+	PublishedAt *time.Time         `json:"published_at"`
+	DeletedAt   *time.Time         `json:"deleted_at"`
+	Site        Site               `gorm:"foreignKey:SiteID" json:"-"`
+	CreatedAt   time.Time          `json:"created_at"`
+	UpdatedAt   time.Time          `json:"updated_at"`
 }
 
 func (p *Page) GetFrontmatterCategories() []string {
@@ -116,12 +127,13 @@ func (p *Page) BeforeCreate(tx *gorm.DB) error {
 }
 
 type PageVersion struct {
-	ID        uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
-	PageID    uuid.UUID `gorm:"type:uuid;index" json:"page_id"`
-	UserID    uuid.UUID `gorm:"type:uuid" json:"user_id"`
-	Content   string    `gorm:"type:text" json:"content"`
-	Version   int       `json:"version"`
-	CreatedAt time.Time `json:"created_at"`
+	ID        uuid.UUID          `gorm:"type:uuid;primaryKey" json:"id"`
+	PageID    uuid.UUID          `gorm:"type:uuid;index" json:"page_id"`
+	UserID    uuid.UUID          `gorm:"type:uuid" json:"user_id"`
+	User      *PageAuthorSummary `gorm:"-" json:"user,omitempty"`
+	Content   string             `gorm:"type:text" json:"content"`
+	Version   int                `json:"version"`
+	CreatedAt time.Time          `json:"created_at"`
 }
 
 func (pv *PageVersion) BeforeCreate(tx *gorm.DB) error {

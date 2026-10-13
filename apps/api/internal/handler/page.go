@@ -34,12 +34,135 @@ type updatePageRequest struct {
 	Categories *[]string        `json:"categories"`
 }
 
+func toPageAuthorSummary(u *model.User) *model.PageAuthorSummary {
+	if u == nil || u.ID == uuid.Nil {
+		return nil
+	}
+	displayName := strings.TrimSpace(u.DisplayName)
+	if displayName == "" {
+		displayName = u.Username
+	}
+	return &model.PageAuthorSummary{
+		ID:          u.ID,
+		Username:    u.Username,
+		DisplayName: displayName,
+		AvatarURL:   u.AvatarURL,
+	}
+}
+
+// PopulateSinglePageAuthor resolves CreatedBy and UpdatedBy for a single page,
+// falling back to latest PageVersion.UserID or Site.UserID when UpdatedByID is not set.
+func PopulateSinglePageAuthor(db *gorm.DB, page *model.Page) {
+	if db == nil || page == nil {
+		return
+	}
+	PopulatePageAuthors(db, []model.Page{*page})
+}
+
+// PopulatePageAuthors batch-resolves CreatedBy and UpdatedBy for a slice of pages.
+func PopulatePageAuthors(db *gorm.DB, pages []model.Page) {
+	if db == nil || len(pages) == 0 {
+		return
+	}
+
+	userIDs := make(map[uuid.UUID]bool)
+	siteIDs := make(map[uuid.UUID]bool)
+	missingUpdaterPageIDs := make([]uuid.UUID, 0)
+
+	for i := range pages {
+		p := &pages[i]
+		if p.SiteID != uuid.Nil {
+			siteIDs[p.SiteID] = true
+		}
+		if p.CreatedByID != nil && *p.CreatedByID != uuid.Nil {
+			userIDs[*p.CreatedByID] = true
+		}
+		if p.UpdatedByID != nil && *p.UpdatedByID != uuid.Nil {
+			userIDs[*p.UpdatedByID] = true
+		} else if p.ID != uuid.Nil {
+			missingUpdaterPageIDs = append(missingUpdaterPageIDs, p.ID)
+		}
+	}
+
+	// Fallback 1: check latest PageVersion for pages without UpdatedByID
+	latestVersionUser := make(map[uuid.UUID]uuid.UUID)
+	if len(missingUpdaterPageIDs) > 0 {
+		var versions []model.PageVersion
+		db.Where("page_id IN ?", missingUpdaterPageIDs).Order("version desc").Find(&versions)
+		for _, v := range versions {
+			if _, exists := latestVersionUser[v.PageID]; !exists && v.UserID != uuid.Nil {
+				latestVersionUser[v.PageID] = v.UserID
+				userIDs[v.UserID] = true
+			}
+		}
+	}
+
+	// Fallback 2: check Site owner
+	siteOwnerMap := make(map[uuid.UUID]uuid.UUID)
+	if len(siteIDs) > 0 {
+		sList := make([]uuid.UUID, 0, len(siteIDs))
+		for id := range siteIDs {
+			sList = append(sList, id)
+		}
+		var sites []model.Site
+		db.Select("id, user_id").Where("id IN ?", sList).Find(&sites)
+		for _, s := range sites {
+			if s.UserID != uuid.Nil {
+				siteOwnerMap[s.ID] = s.UserID
+				userIDs[s.UserID] = true
+			}
+		}
+	}
+
+	if len(userIDs) == 0 {
+		return
+	}
+
+	uList := make([]uuid.UUID, 0, len(userIDs))
+	for id := range userIDs {
+		uList = append(uList, id)
+	}
+	var users []model.User
+	db.Where("id IN ?", uList).Find(&users)
+	userMap := make(map[uuid.UUID]*model.PageAuthorSummary, len(users))
+	for i := range users {
+		userMap[users[i].ID] = toPageAuthorSummary(&users[i])
+	}
+
+	for i := range pages {
+		p := &pages[i]
+		// Resolve UpdatedBy
+		var updUID uuid.UUID
+		if p.UpdatedByID != nil && *p.UpdatedByID != uuid.Nil {
+			updUID = *p.UpdatedByID
+		} else if vUID, ok := latestVersionUser[p.ID]; ok {
+			updUID = vUID
+		} else if ownerUID, ok := siteOwnerMap[p.SiteID]; ok {
+			updUID = ownerUID
+		}
+		if updUID != uuid.Nil {
+			p.UpdatedBy = userMap[updUID]
+		}
+
+		// Resolve CreatedBy
+		var crtUID uuid.UUID
+		if p.CreatedByID != nil && *p.CreatedByID != uuid.Nil {
+			crtUID = *p.CreatedByID
+		} else if ownerUID, ok := siteOwnerMap[p.SiteID]; ok {
+			crtUID = ownerUID
+		}
+		if crtUID != uuid.Nil {
+			p.CreatedBy = userMap[crtUID]
+		}
+	}
+}
+
 func (h *PageHandler) List(c *gin.Context) {
 	siteID := c.Param("id")
 	if siteID == "" {
 		siteID = c.Param("siteId")
 	}
-	var pages []model.Page
+	pages := make([]model.Page, 0)
 	if err := h.DB.Where("site_id = ? AND deleted_at IS NULL", siteID).
 		Order("position asc").Find(&pages).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -48,6 +171,7 @@ func (h *PageHandler) List(c *gin.Context) {
 	for i := range pages {
 		PopulatePageCategories(&pages[i])
 	}
+	PopulatePageAuthors(h.DB, pages)
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": pages})
 }
 
@@ -65,7 +189,7 @@ func (h *PageHandler) Create(c *gin.Context) {
 	}
 
 	sUID, _ := uuid.Parse(siteID)
-	_ = userID
+	uUID, _ := uuid.Parse(userID)
 
 	page := &model.Page{
 		SiteID:   sUID,
@@ -74,6 +198,10 @@ func (h *PageHandler) Create(c *gin.Context) {
 		Title:    strings.TrimSpace(req.Title),
 		Content:  req.Content,
 		Status:   model.PageStatusDraft,
+	}
+	if uUID != uuid.Nil {
+		page.CreatedByID = &uUID
+		page.UpdatedByID = &uUID
 	}
 	if len(req.Categories) > 0 {
 		page.SetFrontmatterCategories(req.Categories)
@@ -85,6 +213,10 @@ func (h *PageHandler) Create(c *gin.Context) {
 	}
 
 	_ = SyncPageCategories(h.DB, page)
+	tmp := []model.Page{*page}
+	PopulatePageAuthors(h.DB, tmp)
+	page.CreatedBy = tmp[0].CreatedBy
+	page.UpdatedBy = tmp[0].UpdatedBy
 
 	c.JSON(http.StatusCreated, gin.H{"success": true, "data": page})
 }
@@ -97,6 +229,10 @@ func (h *PageHandler) Get(c *gin.Context) {
 		return
 	}
 	PopulatePageCategories(&page)
+	tmp := []model.Page{page}
+	PopulatePageAuthors(h.DB, tmp)
+	page.CreatedBy = tmp[0].CreatedBy
+	page.UpdatedBy = tmp[0].UpdatedBy
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": page})
 }
 
@@ -162,8 +298,19 @@ func (h *PageHandler) Update(c *gin.Context) {
 		}
 	}
 
+	if userID != uuid.Nil {
+		page.UpdatedByID = &userID
+		if page.CreatedByID == nil || *page.CreatedByID == uuid.Nil {
+			page.CreatedByID = &userID
+		}
+	}
+
 	h.DB.Save(&page)
 	_ = SyncPageCategories(h.DB, &page)
+	tmp := []model.Page{page}
+	PopulatePageAuthors(h.DB, tmp)
+	page.CreatedBy = tmp[0].CreatedBy
+	page.UpdatedBy = tmp[0].UpdatedBy
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": page})
 }
 
@@ -184,8 +331,31 @@ func (h *PageHandler) Delete(c *gin.Context) {
 
 func (h *PageHandler) GetVersions(c *gin.Context) {
 	id := c.Param("id")
-	var versions []model.PageVersion
+	versions := make([]model.PageVersion, 0)
 	h.DB.Where("page_id = ?", id).Order("version desc").Limit(50).Find(&versions)
+
+	userIDs := make(map[uuid.UUID]bool)
+	for _, v := range versions {
+		if v.UserID != uuid.Nil {
+			userIDs[v.UserID] = true
+		}
+	}
+	if len(userIDs) > 0 {
+		uList := make([]uuid.UUID, 0, len(userIDs))
+		for uid := range userIDs {
+			uList = append(uList, uid)
+		}
+		var users []model.User
+		h.DB.Where("id IN ?", uList).Find(&users)
+		uMap := make(map[uuid.UUID]*model.PageAuthorSummary, len(users))
+		for i := range users {
+			uMap[users[i].ID] = toPageAuthorSummary(&users[i])
+		}
+		for i := range versions {
+			versions[i].User = uMap[versions[i].UserID]
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": versions})
 }
 
@@ -201,7 +371,7 @@ func (h *PageHandler) ListPublicBySlug(c *gin.Context) {
 		return
 	}
 
-	var pages []model.Page
+	pages := make([]model.Page, 0)
 	if err := h.DB.Where("site_id = ? AND status = ? AND deleted_at IS NULL", site.ID, model.PageStatusPublished).
 		Order("position asc, created_at asc").Find(&pages).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -210,6 +380,7 @@ func (h *PageHandler) ListPublicBySlug(c *gin.Context) {
 	for i := range pages {
 		PopulatePageCategories(&pages[i])
 	}
+	PopulatePageAuthors(h.DB, pages)
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": pages})
 }
 
@@ -302,6 +473,10 @@ func (h *PageHandler) GetPublicPage(c *gin.Context) {
 	}
 
 	PopulatePageCategories(&page)
+	tmp := []model.Page{page}
+	PopulatePageAuthors(h.DB, tmp)
+	page.CreatedBy = tmp[0].CreatedBy
+	page.UpdatedBy = tmp[0].UpdatedBy
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": page})
 }
 
@@ -311,12 +486,13 @@ func (h *PageHandler) ListTrash(c *gin.Context) {
 	if siteID == "" {
 		siteID = c.Param("siteId")
 	}
-	var pages []model.Page
+	pages := make([]model.Page, 0)
 	if err := h.DB.Where("site_id = ? AND deleted_at IS NOT NULL", siteID).
 		Order("deleted_at desc").Find(&pages).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	PopulatePageAuthors(h.DB, pages)
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": pages})
 }
 
@@ -340,6 +516,10 @@ func (h *PageHandler) Restore(c *gin.Context) {
 	page.DeletedAt = nil
 	page.Status = model.PageStatusDraft
 	_ = SyncPageCategories(h.DB, &page)
+	tmp := []model.Page{page}
+	PopulatePageAuthors(h.DB, tmp)
+	page.CreatedBy = tmp[0].CreatedBy
+	page.UpdatedBy = tmp[0].UpdatedBy
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": page})
 }
 
@@ -383,12 +563,19 @@ func (h *PageHandler) Revert(c *gin.Context) {
 
 	// 指定バージョンの内容にロールバック
 	page.Content = targetVersion.Content
+	if userID != uuid.Nil {
+		page.UpdatedByID = &userID
+	}
 	if err := h.DB.Save(&page).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
 	_ = SyncPageCategories(h.DB, &page)
+	tmp := []model.Page{page}
+	PopulatePageAuthors(h.DB, tmp)
+	page.CreatedBy = tmp[0].CreatedBy
+	page.UpdatedBy = tmp[0].UpdatedBy
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": page})
 }
 

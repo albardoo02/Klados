@@ -6,9 +6,9 @@ import {useParams, useRouter} from 'next/navigation';
 import {useEffect, useMemo, useRef, useState} from 'react';
 import {basicSetup, EditorView} from 'codemirror';
 import {markdown} from '@codemirror/lang-markdown';
-import { Annotation, Compartment, EditorState } from '@codemirror/state';
+import { Annotation, Compartment, EditorState, RangeSetBuilder } from '@codemirror/state';
 import { vim } from '@replit/codemirror-vim';
-import { keymap } from '@codemirror/view';
+import { Decoration, DecorationSet, keymap, ViewPlugin, ViewUpdate } from '@codemirror/view';
 import { MarkdownRenderer, getPageCategories, getPageCategoryNames } from '@/components/markdown-renderer';
 import { CategoryBox } from '@/components/wiki/category-box';
 import { DiffViewer } from '@/components/diff-viewer';
@@ -170,6 +170,104 @@ const COLLAB_COLORS = [
 
 // リモート同期による dispatch を識別するための CodeMirror アノテーション
 const remoteSyncAnnotation = Annotation.define<boolean>();
+
+function buildColorDecorations(view: EditorView): DecorationSet {
+  const specs: Array<{ from: number; to: number; deco: Decoration }> = [];
+  for (const { from, to } of view.visibleRanges) {
+    const text = view.state.doc.sliceString(from, to);
+
+    // 1. [text]{color:#hex} or [text]{bg:#hex}
+    const bracketColorRe = /\[([^\]\n]+)\]\{([^\}\n]+)\}/g;
+    let m: RegExpExecArray | null;
+    while ((m = bracketColorRe.exec(text)) !== null) {
+      const innerText = m[1];
+      const attrs = m[2];
+      const innerStart = from + m.index + 1;
+      const innerEnd = innerStart + innerText.length;
+
+      let color = '';
+      let bg = '';
+      const directHex = /^\s*#([0-9a-fA-F]{3,8})\s*$/.exec(attrs);
+      if (directHex) {
+        color = '#' + directHex[1];
+      } else {
+        const cm = /(?:^|[\s;])color\s*:\s*([^;\}]+)/i.exec(attrs);
+        if (cm) color = cm[1].trim();
+        const bm = /(?:^|[\s;])bg(?:-color)?\s*:\s*([^;\}]+)/i.exec(attrs);
+        if (bm) bg = bm[1].trim();
+      }
+
+      const styles: string[] = [];
+      if (color) styles.push(`color: ${color}; font-weight: 600`);
+      if (bg) styles.push(`background-color: ${bg}; color: #0f172a; border-radius: 3px; padding: 0 3px`);
+      if (styles.length > 0 && innerStart < innerEnd) {
+        specs.push({
+          from: innerStart,
+          to: innerEnd,
+          deco: Decoration.mark({ attributes: { style: styles.join('; ') } }),
+        });
+      }
+    }
+
+    // 2. ==highlight==
+    const markRe = /==([^=\n]+)==/g;
+    while ((m = markRe.exec(text)) !== null) {
+      const innerStart = from + m.index + 2;
+      const innerEnd = innerStart + m[1].length;
+      if (innerStart < innerEnd) {
+        specs.push({
+          from: innerStart,
+          to: innerEnd,
+          deco: Decoration.mark({
+            attributes: {
+              style: 'background-color: #fef08a; color: #0f172a; border-radius: 3px; padding: 0 3px',
+            },
+          }),
+        });
+      }
+    }
+
+    // 3. <u>underline</u>
+    const underlineRe = /<u>([^\n<]+)<\/u>/gi;
+    while ((m = underlineRe.exec(text)) !== null) {
+      const innerStart = from + m.index + 3;
+      const innerEnd = innerStart + m[1].length;
+      if (innerStart < innerEnd) {
+        specs.push({
+          from: innerStart,
+          to: innerEnd,
+          deco: Decoration.mark({
+            attributes: { style: 'text-decoration: underline; text-underline-offset: 3px' },
+          }),
+        });
+      }
+    }
+  }
+
+  specs.sort((a, b) => a.from - b.from || a.to - b.to);
+  const builder = new RangeSetBuilder<Decoration>();
+  for (const s of specs) {
+    builder.add(s.from, s.to, s.deco);
+  }
+  return builder.finish();
+}
+
+const inlineColorDecorationPlugin = ViewPlugin.fromClass(
+  class {
+    decorations: DecorationSet;
+    constructor(view: EditorView) {
+      this.decorations = buildColorDecorations(view);
+    }
+    update(update: ViewUpdate) {
+      if (update.docChanged || update.viewportChanged) {
+        this.decorations = buildColorDecorations(update.view);
+      }
+    }
+  },
+  {
+    decorations: (v) => v.decorations,
+  }
+);
 
 interface SlashCommandItem {
   id: string;
@@ -413,6 +511,7 @@ export default function PageEditPage() {
   const [colorMode, setColorMode] = useState<'text' | 'bg'>('text');
   const [customColor, setCustomColor] = useState('#ef4444');
   const [hsv, setHsv] = useState<{ h: number; s: number; v: number }>({ h: 0, s: 72, v: 94 });
+  const hsvRef = useRef<{ h: number; s: number; v: number }>({ h: 0, s: 72, v: 94 });
   const [rgbInput, setRgbInput] = useState<{ r: number; g: number; b: number }>({
     r: 239,
     g: 68,
@@ -426,6 +525,7 @@ export default function PageEditPage() {
     const h = clampNum(Math.round(nextH), 0, 360);
     const s = clampNum(Math.round(nextS), 0, 100);
     const v = clampNum(Math.round(nextV), 0, 100);
+    hsvRef.current = { h, s, v };
     setHsv({ h, s, v });
     const rgb = hsvToRgb(h, s, v);
     setRgbInput(rgb);
@@ -437,7 +537,9 @@ export default function PageEditPage() {
     const g = clampNum(Math.round(nextG || 0), 0, 255);
     const b = clampNum(Math.round(nextB || 0), 0, 255);
     setRgbInput({ r, g, b });
-    setHsv(rgbToHsv(r, g, b));
+    const nextHsv = rgbToHsv(r, g, b);
+    hsvRef.current = nextHsv;
+    setHsv(nextHsv);
     setCustomColor(rgbToHex(r, g, b));
   };
 
@@ -446,7 +548,9 @@ export default function PageEditPage() {
     const parsed = hexToRgb(hexStr);
     if (parsed) {
       setRgbInput(parsed);
-      setHsv(rgbToHsv(parsed.r, parsed.g, parsed.b));
+      const nextHsv = rgbToHsv(parsed.r, parsed.g, parsed.b);
+      hsvRef.current = nextHsv;
+      setHsv(nextHsv);
     }
   };
 
@@ -458,7 +562,7 @@ export default function PageEditPage() {
       const rect = svBoxRef.current.getBoundingClientRect();
       const nextS = clampNum(((clientX - rect.left) / rect.width) * 100, 0, 100);
       const nextV = clampNum(100 - ((clientY - rect.top) / rect.height) * 100, 0, 100);
-      updateColorFromHsv(hsv.h, nextS, nextV);
+      updateColorFromHsv(hsvRef.current.h, nextS, nextV);
     };
     updateFromClientPos(e.clientX, e.clientY);
 
@@ -478,7 +582,7 @@ export default function PageEditPage() {
       if (!hueBarRef.current) return;
       const rect = hueBarRef.current.getBoundingClientRect();
       const nextH = clampNum(((clientX - rect.left) / rect.width) * 360, 0, 360);
-      updateColorFromHsv(nextH, hsv.s, hsv.v);
+      updateColorFromHsv(nextH, hsvRef.current.s, hsvRef.current.v);
     };
     updateFromClientX(e.clientX);
 
@@ -1948,6 +2052,7 @@ export default function PageEditPage() {
         basicSetup,
         markdown(),
         EditorView.lineWrapping,
+        inlineColorDecorationPlugin,
         keybindingCompartment.of(getKeybindingExtension(keybinding)),
         EditorView.updateListener.of((update) => {
           lastSelectionRef.current = {
@@ -2260,6 +2365,16 @@ export default function PageEditPage() {
             <div className="flex items-center gap-2 text-xs text-muted-foreground truncate">
               {site && <span className="truncate">{site.title}</span>}
               {page?.slug && <span className="shrink-0">/{page.slug}</span>}
+              {(page?.updated_by || page?.created_by) && (
+                <span className="hidden md:inline-flex items-center gap-1 text-[11px] text-muted-foreground shrink-0">
+                  <span>•</span>
+                  <span>
+                    最終更新:{' '}
+                    {(page.updated_by || page.created_by)?.display_name ||
+                      (page.updated_by || page.created_by)?.username}
+                  </span>
+                </span>
+              )}
               <span className="inline-flex items-center gap-1 shrink-0">
                 {saved ? (
                   <>
@@ -2633,7 +2748,7 @@ export default function PageEditPage() {
 
       {/* Markdown 書式ツールバー */}
       {(tab === 'edit' || tab === 'split') && (
-        <div className="relative z-20 flex items-center gap-1 px-4 py-1.5 border-b border-border bg-muted/20 text-xs overflow-x-auto overflow-y-visible">
+        <div className="relative z-30 flex flex-wrap items-center gap-1 px-4 py-1.5 border-b border-border bg-muted/20 text-xs">
           {/* スラッシュコマンド トリガーヒント */}
           <button
             type="button"
@@ -3728,6 +3843,11 @@ export default function PageEditPage() {
                               <span className="size-2 rounded-full bg-primary animate-pulse" />
                             )}
                           </div>
+                          {ver.user && (
+                            <div className="flex items-center gap-1 text-[11px] font-medium text-foreground/80">
+                              <span>編集者: {ver.user.display_name || ver.user.username}</span>
+                            </div>
+                          )}
                           <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
                             <Clock className="size-3" />
                             <span>{formattedTime}</span>
@@ -3754,9 +3874,19 @@ export default function PageEditPage() {
                             バージョン v{selectedVersion.version} と現在の最新ドキュメントの差分
                           </span>
                         </div>
-                        <span className="text-xs text-muted-foreground">
-                          作成日時: {new Date(selectedVersion.created_at).toLocaleString('ja-JP')}
-                        </span>
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
+                          <span>
+                            作成日時: {new Date(selectedVersion.created_at).toLocaleString('ja-JP')}
+                          </span>
+                          {selectedVersion.user && (
+                            <>
+                              <span>•</span>
+                              <span className="font-medium text-foreground/80">
+                                編集者: {selectedVersion.user.display_name || selectedVersion.user.username}
+                              </span>
+                            </>
+                          )}
+                        </div>
                       </div>
 
                       <button

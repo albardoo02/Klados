@@ -1,10 +1,11 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { pagesApi, PageVersion } from '@/lib/api';
+import { pagesApi, PageVersion, PageAuthorSummary } from '@/lib/api';
 import { useState } from 'react';
-import { X, History, Clock, FileText, ArrowLeftRight, Check, RotateCcw, ExternalLink } from 'lucide-react';
+import { X, History, Clock, FileText, ArrowLeftRight, Check, RotateCcw, ExternalLink, User } from 'lucide-react';
 import { DiffViewer } from '@/components/diff-viewer';
+import { UserAvatar } from '@/components/user-avatar';
 import Link from 'next/link';
 
 interface PageHistoryModalProps {
@@ -16,6 +17,7 @@ interface PageHistoryModalProps {
     title: string;
     content: string;
     updated_at?: string;
+    updated_by?: PageAuthorSummary;
   };
   canEdit?: boolean;
 }
@@ -29,7 +31,7 @@ export function PageHistoryModal({ isOpen, onClose, page, canEdit = false }: Pag
     queryFn: async () => {
       try {
         const res = await pagesApi.versions(page.id);
-        if (res.data?.data && Array.isArray(res.data.data)) {
+        if (res.data?.data && Array.isArray(res.data.data) && res.data.data.length > 0) {
           return res.data.data;
         }
       } catch {
@@ -42,6 +44,7 @@ export function PageHistoryModal({ isOpen, onClose, page, canEdit = false }: Pag
           page_id: page.id,
           content: page.content,
           version: 1,
+          user: page.updated_by,
           created_at: page.updated_at || new Date().toISOString(),
         },
       ];
@@ -71,7 +74,7 @@ export function PageHistoryModal({ isOpen, onClose, page, canEdit = false }: Pag
                 </span>
               </h2>
               <p className="text-xs text-slate-400">
-                過去の編集履歴や差分を確認できます
+                過去の編集履歴・編集者や差分を確認できます
               </p>
             </div>
           </div>
@@ -111,12 +114,13 @@ export function PageHistoryModal({ isOpen, onClose, page, canEdit = false }: Pag
                 versions.map((v, idx) => {
                   const isSelected = activeVersion?.id === v.id;
                   const isLatest = idx === 0;
+                  const author = v.user || (isLatest ? page.updated_by : undefined);
 
                   return (
                     <button
                       key={v.id || idx}
                       onClick={() => setSelectedVersion(v)}
-                      className={`w-full text-left p-3 rounded-xl transition-all flex flex-col gap-1 border cursor-pointer ${
+                      className={`w-full text-left p-3 rounded-xl transition-all flex flex-col gap-1.5 border cursor-pointer ${
                         isSelected
                           ? 'bg-white dark:bg-slate-800 border-blue-500/50 shadow-xs'
                           : 'border-transparent hover:bg-white/60 dark:hover:bg-slate-800/60'
@@ -135,6 +139,19 @@ export function PageHistoryModal({ isOpen, onClose, page, canEdit = false }: Pag
                           {v.content ? `${v.content.length.toLocaleString()} 字` : ''}
                         </span>
                       </div>
+                      {author && (
+                        <div className="flex items-center gap-1.5 text-[11px] text-slate-600 dark:text-slate-300">
+                          <UserAvatar
+                            name={author.display_name || author.username}
+                            src={author.avatar_url}
+                            size="sm"
+                            className="size-4 text-[9px]"
+                          />
+                          <span className="font-medium truncate">
+                            {author.display_name || author.username}
+                          </span>
+                        </div>
+                      )}
                       <div className="flex items-center gap-1 text-[11px] text-slate-400">
                         <Clock className="size-3" />
                         <span>{new Date(v.created_at).toLocaleString('ja-JP')}</span>
@@ -150,9 +167,23 @@ export function PageHistoryModal({ isOpen, onClose, page, canEdit = false }: Pag
           <div className="flex-1 flex flex-col min-w-0 bg-white dark:bg-slate-900">
             {activeVersion ? (
               <>
-                <div className="px-6 py-2.5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs shrink-0">
-                  <div className="flex items-center gap-2 font-medium text-slate-700 dark:text-slate-200">
+                <div className="px-6 py-2.5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs shrink-0 flex-wrap gap-2">
+                  <div className="flex items-center gap-2 font-medium text-slate-700 dark:text-slate-200 flex-wrap">
                     <span>表示中: 第 {activeVersion.version} 版</span>
+                    {(activeVersion.user || page.updated_by) && (
+                      <>
+                        <span className="text-slate-400">•</span>
+                        <span className="inline-flex items-center gap-1.5 text-slate-600 dark:text-slate-300">
+                          <UserAvatar
+                            name={(activeVersion.user || page.updated_by)!.display_name || (activeVersion.user || page.updated_by)!.username}
+                            src={(activeVersion.user || page.updated_by)!.avatar_url}
+                            size="sm"
+                            className="size-4 text-[9px]"
+                          />
+                          <span>{(activeVersion.user || page.updated_by)!.display_name || (activeVersion.user || page.updated_by)!.username}</span>
+                        </span>
+                      </>
+                    )}
                     <span className="text-slate-400">•</span>
                     <span className="text-slate-400 font-normal">
                       {new Date(activeVersion.created_at).toLocaleString('ja-JP')}

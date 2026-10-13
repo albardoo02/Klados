@@ -173,10 +173,26 @@ func (h *SiteHandler) Get(c *gin.Context) {
 	if !isOwner {
 		var member model.SiteMember
 		if err := h.DB.Where("site_id = ? AND user_id = ?", site.ID, userID).First(&member).Error; err != nil {
-			c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
-			return
+			policy := ExtractSiteAzisabaPolicy(&site)
+			if policy.Enabled && policy.AllowAnyRegisteredUser && userID != uuid.Nil {
+				targetRole := model.SiteRole(policy.TargetRole)
+				if targetRole == "" {
+					targetRole = model.RoleEditor
+				}
+				newMember := model.SiteMember{
+					SiteID: site.ID,
+					UserID: userID,
+					Role:   targetRole,
+				}
+				h.DB.Create(&newMember)
+				role = targetRole
+			} else {
+				c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+				return
+			}
+		} else {
+			role = member.Role
 		}
-		role = member.Role
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -342,6 +358,12 @@ func (h *SiteHandler) GetBySlug(c *gin.Context) {
 									canEdit = true
 								}
 							}
+						} else {
+							policy := ExtractSiteAzisabaPolicy(&site)
+							if policy.Enabled && policy.AllowAnyRegisteredUser {
+								canEdit = true
+								role = string(model.RoleEditor)
+							}
 						}
 					}
 				}
@@ -349,11 +371,12 @@ func (h *SiteHandler) GetBySlug(c *gin.Context) {
 		}
 	}
 
-	var pages []model.Page
+	pages := make([]model.Page, 0)
 	h.DB.Where("site_id = ? AND status = ? AND deleted_at IS NULL", site.ID, model.PageStatusPublished).
 		Order("position asc, created_at asc").
 		Find(&pages)
 	PopulatePagesCategories(pages)
+	PopulatePageAuthors(h.DB, pages)
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
