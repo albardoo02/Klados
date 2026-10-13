@@ -43,12 +43,13 @@ export function WikiSidebarTree({
     const initial: Record<string, boolean> = { ...saved };
 
     // ツリーを探索し、未保存の項目に defaultOpen を適用 & 現在のページが含まれる親を展開
-    const traverse = (items: SidebarLink[]) => {
-      for (const item of items) {
-        const key = item.id || item.title;
-        const hasChildren = item.children && item.children.length > 0;
+    const traverse = (items: SidebarLink[], parentPathKey: string) => {
+      items.forEach((item, idx) => {
+        const pathKey = `${parentPathKey}/${idx}-${item.title}`;
+        const key = item.id || pathKey;
+        const isFolder = item.children !== undefined;
 
-        if (hasChildren) {
+        if (isFolder) {
           if (initial[key] === undefined) {
             initial[key] = item.defaultOpen ?? false;
           }
@@ -56,14 +57,16 @@ export function WikiSidebarTree({
           if (currentSlug && containsUrl(item, currentSlug)) {
             initial[key] = true;
           }
-          traverse(item.children!);
+          if (item.children && item.children.length > 0) {
+            traverse(item.children, pathKey);
+          }
         }
-      }
+      });
     };
 
-    for (const sec of sections) {
-      traverse(sec.links);
-    }
+    sections.forEach((sec, secIdx) => {
+      traverse(sec.links, sec.id || `sec-${secIdx}`);
+    });
 
     setOpenMap(initial);
   }, [sections, storageKey, currentSlug]);
@@ -107,10 +110,10 @@ export function WikiSidebarTree({
     [currentSlug]
   );
 
-  // ツリー項目の再帰レンダリング
-  const renderItem = (item: SidebarLink, depth: number = 0) => {
-    const key = item.id || item.title;
-    const hasChildren = item.children && item.children.length > 0;
+  // ツリー項目の再帰レンダリング（無限階層対応）
+  const renderItem = (item: SidebarLink, depth: number = 0, pathKey: string = '') => {
+    const key = item.id || pathKey || item.title;
+    const isFolder = item.children !== undefined;
     const isOpen = openMap[key] ?? item.defaultOpen ?? false;
     const isSelected = isItemActive(item);
 
@@ -124,9 +127,9 @@ export function WikiSidebarTree({
 
     return (
       <div key={key} className="select-none">
-        {hasChildren ? (
+        {isFolder ? (
           // ==============================
-          // フォルダ（折りたたみ可能な親項目）
+          // フォルダ（折りたたみ可能な親項目・子の中でも無限ネスト可能）
           // ==============================
           <div className="group">
             <div
@@ -188,10 +191,16 @@ export function WikiSidebarTree({
               )}
             </div>
 
-            {/* 子要素リスト（開いている場合のみインデントして表示） */}
-            {isOpen && (
+            {/* 子要素リスト（開いている場合のみインデントして再帰表示） */}
+            {isOpen && item.children && item.children.length > 0 && (
               <div className="ml-3 pl-2 border-l border-slate-200 dark:border-slate-700/60 space-y-0.5 mt-0.5">
-                {item.children!.map((child) => renderItem(child, depth + 1))}
+                {item.children.map((child, childIdx) =>
+                  renderItem(
+                    child,
+                    depth + 1,
+                    `${pathKey}/${childIdx}-${child.title}`
+                  )
+                )}
               </div>
             )}
           </div>
@@ -254,21 +263,26 @@ export function WikiSidebarTree({
 
   return (
     <div className="space-y-4 font-sans">
-      {sections.map((sec) => (
-        <div key={sec.id} className="space-y-1">
-          {/* SeesaaWiki スタイル セクション見出しグレーバー */}
-          {sec.title && (
-            <div className="bg-slate-200/90 dark:bg-slate-800 text-slate-800 dark:text-slate-200 font-bold text-xs px-2.5 py-1.5 rounded-xs border-y border-slate-300/80 dark:border-slate-700/80 tracking-wide flex items-center justify-between">
-              <span>{sec.title}</span>
-            </div>
-          )}
+      {sections.map((sec, secIdx) => {
+        const secKey = sec.id || `sec-${secIdx}`;
+        return (
+          <div key={secKey} className="space-y-1">
+            {/* SeesaaWiki スタイル セクション見出しグレーバー */}
+            {sec.title && (
+              <div className="bg-slate-200/90 dark:bg-slate-800 text-slate-800 dark:text-slate-200 font-bold text-xs px-2.5 py-1.5 rounded-xs border-y border-slate-300/80 dark:border-slate-700/80 tracking-wide flex items-center justify-between">
+                <span>{sec.title}</span>
+              </div>
+            )}
 
-          {/* セクション配下のツリーリンク */}
-          <nav className="space-y-0.5 px-0.5 pt-0.5">
-            {sec.links.map((link) => renderItem(link, 0))}
-          </nav>
-        </div>
-      ))}
+            {/* セクション配下のツリーリンク */}
+            <nav className="space-y-0.5 px-0.5 pt-0.5">
+              {sec.links.map((link, linkIdx) =>
+                renderItem(link, 0, `${secKey}/${linkIdx}-${link.title}`)
+              )}
+            </nav>
+          </div>
+        );
+      })}
     </div>
   );
 }

@@ -55,22 +55,23 @@ export function parseMediaWikiSidebarText(text: string): SidebarSection[] {
   let currentSection: SidebarSection | null = null;
 
   // スタック管理: 各階層の親リンクと深さ
-  const stack: Array<{ link: SidebarLink; depth: number }> = [];
+  const stack: Array<{ link: SidebarLink; depth: number; isSeesaaBlock?: boolean }> = [];
 
   for (const rawLine of lines) {
     const trimmed = rawLine.trim();
     if (!trimmed) continue;
 
-    // SeesaaWiki: [END] でスタックを1つポップ
+    // SeesaaWiki: [END] で直近のブロック（またはスタック末尾）をポップ
     if (trimmed.toUpperCase() === '[END]') {
-      if (stack.length > 0) {
-        stack.pop();
+      while (stack.length > 0) {
+        const popped = stack.pop();
+        if (popped?.isSeesaaBlock) break;
       }
       continue;
     }
 
     // * セクション名 (* 見出し だが ** ではない)
-    if (trimmed.startsWith('*') && !trimmed.startsWith('**')) {
+    if (trimmed.startsWith('*') && !trimmed.startsWith('**') && !stack.some((s) => s.isSeesaaBlock)) {
       const title = trimmed.substring(1).trim();
       currentSection = {
         id: `sec-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
@@ -86,20 +87,39 @@ export function parseMediaWikiSidebarText(text: string): SidebarSection[] {
     let content = trimmed;
     let defaultOpen: boolean | undefined = undefined;
     let isExplicitFolder = false;
+    let isSeesaaBlock = false;
 
     // アスタリスク階層の検出 (** => 2, *** => 3, **** => 4 ...)
-    const asteriskMatch = trimmed.match(/^(\*{2,})\s*(.*)$/);
+    const asteriskMatch = trimmed.match(/^(\*{1,})\s*(.*)$/);
     // ハイフン階層の検出 (- => 2, -- => 3 ...)
     const dashMatch = trimmed.match(/^(-+)\s*(.*)$/);
 
-    if (asteriskMatch) {
-      depth = asteriskMatch[1].length;
+    // スタック内の直近の SeesaaBlock の深さオフセット
+    let baseDepth = 0;
+    for (let i = stack.length - 1; i >= 0; i--) {
+      if (stack[i].isSeesaaBlock) {
+        baseDepth = stack[i].depth - 1;
+        break;
+      }
+    }
+
+    if (asteriskMatch && asteriskMatch[1].length >= 2) {
+      depth = baseDepth + asteriskMatch[1].length;
+      content = asteriskMatch[2].trim();
+    } else if (asteriskMatch && asteriskMatch[1].length === 1 && stack.some((s) => s.isSeesaaBlock)) {
+      depth = baseDepth + 2;
       content = asteriskMatch[2].trim();
     } else if (dashMatch) {
-      depth = dashMatch[1].length + 1;
+      depth = baseDepth + dashMatch[1].length + 1;
       content = dashMatch[2].trim();
-    } else if (trimmed.startsWith('[+]') || trimmed.startsWith('[-]')) {
+    } else if (
+      trimmed.startsWith('[+]') ||
+      trimmed.startsWith('[-]') ||
+      trimmed.startsWith('[＋]') ||
+      trimmed.startsWith('[ー]')
+    ) {
       depth = stack.length > 0 ? stack[stack.length - 1].depth + 1 : 2;
+      isSeesaaBlock = true;
     } else {
       depth = stack.length > 0 ? stack[stack.length - 1].depth + 1 : 2;
     }
@@ -109,7 +129,7 @@ export function parseMediaWikiSidebarText(text: string): SidebarSection[] {
       defaultOpen = false;
       isExplicitFolder = true;
       content = content.replace(/^\[[+＋]\]\s*/, '').trim();
-    } else if (content.startsWith('[-]') || content.startsWith('[ー]') || content.startsWith('[-]')) {
+    } else if (content.startsWith('[-]') || content.startsWith('[ー]')) {
       defaultOpen = true;
       isExplicitFolder = true;
       content = content.replace(/^\[[-ー]\]\s*/, '').trim();
@@ -147,7 +167,7 @@ export function parseMediaWikiSidebarText(text: string): SidebarSection[] {
       }
     } else {
       const cleanContent = content.replace(/^\[\[/, '').replace(/\]\]$/, '').trim();
-      url = cleanContent;
+      url = isExplicitFolder ? '' : cleanContent;
       title = cleanContent;
     }
 
@@ -178,8 +198,12 @@ export function parseMediaWikiSidebarText(text: string): SidebarSection[] {
       sections.push(currentSection);
     }
 
-    // スタックを現在の深さに合わせて巻き戻す (現在の深さ以上の親をポップ)
-    while (stack.length > 0 && stack[stack.length - 1].depth >= depth) {
+    // スタックを現在の深さに合わせて巻き戻す (SeesaaWikiの [+] ブロックは [END] まで保持)
+    while (
+      stack.length > 0 &&
+      !stack[stack.length - 1].isSeesaaBlock &&
+      stack[stack.length - 1].depth >= depth
+    ) {
       stack.pop();
     }
 
@@ -196,7 +220,7 @@ export function parseMediaWikiSidebarText(text: string): SidebarSection[] {
     }
 
     // フォルダであるか、または下位階層を持ち得る場合はスタックに積む
-    stack.push({ link, depth });
+    stack.push({ link, depth, isSeesaaBlock });
   }
 
   // 子要素を持たないリンクで、明示的なフォルダ指定もなかったものは children を整理

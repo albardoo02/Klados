@@ -26,19 +26,61 @@ import {
   stringifyMediaWikiSidebar,
   generateDefaultSidebar,
 } from '@/types/sidebar';
-import { sitesApi } from '@/lib/api';
+import { sitesApi, pagesApi } from '@/lib/api';
 
 // ドラッグ中の要素
+// - section: セクション全体
+// - item: secIdx 内のツリーパス path (例: [0], [0, 2], [0, 2, 1]) にある項目
 type DragState =
   | { type: 'section'; secIdx: number }
-  | { type: 'item'; secIdx: number; linkIdx: number; childIdx?: number; isFolder: boolean };
+  | { type: 'item'; secIdx: number; path: number[]; isFolder: boolean };
 
 // ドロップ先（挿入位置）
 // - section: セクション一覧の index の位置に挿入
-// - item: secIdx のセクション内、parentIdx 指定時はそのフォルダの子リスト内の index の位置に挿入
+// - item: secIdx のセクション内、parentPath (ルートは []、フォルダ内は [0, 1] など) の子リスト内の index の位置に挿入
 type DropTarget =
   | { type: 'section'; index: number }
-  | { type: 'item'; secIdx: number; parentIdx?: number; index: number };
+  | { type: 'item'; secIdx: number; parentPath: number[]; index: number };
+
+function isSamePath(a: number[], b: number[]): boolean {
+  return a.length === b.length && a.every((v, i) => v === b[i]);
+}
+
+// targetPath が ancestorPath 自身またはその子孫かどうか判定（自分自身の中へのドロップ防止用）
+function isPathInsideOrEqual(ancestorPath: number[], targetPath: number[]): boolean {
+  if (targetPath.length < ancestorPath.length) return false;
+  return ancestorPath.every((v, i) => targetPath[i] === v);
+}
+
+// 指定した親パス (ルートは []) のリンク配列を取得
+function getListAtPath(
+  sections: SidebarSection[],
+  secIdx: number,
+  parentPath: number[]
+): SidebarLink[] | undefined {
+  let list = sections[secIdx]?.links;
+  if (!list) return undefined;
+  for (const idx of parentPath) {
+    const item = list[idx];
+    if (!item) return undefined;
+    if (!item.children) {
+      item.children = [];
+    }
+    list = item.children;
+  }
+  return list;
+}
+
+// 指定したパスのリンク項目を取得
+function getItemAtPath(
+  sections: SidebarSection[],
+  secIdx: number,
+  path: number[]
+): SidebarLink | undefined {
+  if (path.length === 0) return undefined;
+  const parentList = getListAtPath(sections, secIdx, path.slice(0, -1));
+  return parentList?.[path[path.length - 1]];
+}
 
 function DropLine({ className = '' }: { className?: string }) {
   return (
@@ -77,7 +119,7 @@ interface SidebarEditorModalProps {
   siteSlug: string;
   currentSections?: SidebarSection[];
   showToolsSection?: boolean;
-  availablePages: Array<{ id: string; slug: string; title: string }>;
+  availablePages: Array<{ id: string; slug: string; title: string; status?: string }>;
   onSaved: (sections: SidebarSection[], showTools: boolean) => void;
 }
 
@@ -99,19 +141,57 @@ export function SidebarEditorModal({
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [drag, setDrag] = useState<DragState | null>(null);
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
+  const [wasOpen, setWasOpen] = useState(false);
+  const [fetchedPages, setFetchedPages] = useState<
+    Array<{ id: string; slug: string; title: string; status?: string }>
+  >([]);
 
-  // 初期値セット
+  // サイトIDがある場合、最新の全ページ一覧をバックグラウンド取得して補完
   useEffect(() => {
-    if (isOpen) {
+    if (isOpen && siteId && siteId !== 'demo-site') {
+      pagesApi
+        .list(siteId)
+        .then((res) => {
+          const list = res.data?.data;
+          if (Array.isArray(list)) {
+            setFetchedPages(list);
+          }
+        })
+        .catch(() => {
+          // ignore
+        });
+    }
+  }, [isOpen, siteId]);
+
+  // ゴミ箱以外の有効なページ一覧（availablePages と fetchedPages を重複なく統合）
+  const selectablePages = (() => {
+    const merged: Array<{ id: string; slug: string; title: string; status?: string }> = [];
+    const seen = new Set<string>();
+    for (const p of [...availablePages, ...fetchedPages]) {
+      if (!p || p.status === 'trashed') continue;
+      const key = p.id || p.slug;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(p);
+    }
+    return merged;
+  })();
+
+  // モーダルが開かれた瞬間のみ初期値をセット（編集中に親の再レンダーで上書きされるのを防ぐ）
+  useEffect(() => {
+    if (isOpen && !wasOpen) {
       const initial =
         currentSections && currentSections.length > 0
           ? JSON.parse(JSON.stringify(currentSections))
-          : generateDefaultSidebar(availablePages);
+          : generateDefaultSidebar(selectablePages);
       setSections(initial);
       setShowTools(showToolsSection ?? true);
       setWikitext(stringifyMediaWikiSidebar(initial));
+      setWasOpen(true);
+    } else if (!isOpen && wasOpen) {
+      setWasOpen(false);
     }
-  }, [isOpen, currentSections, showToolsSection, availablePages]);
+  }, [isOpen, wasOpen, currentSections, showToolsSection, selectablePages]);
 
   if (!isOpen) return null;
 
@@ -134,23 +214,25 @@ export function SidebarEditorModal({
   // セクション操作
   const handleAddSection = () => {
     const newSection: SidebarSection = {
-      id: `sec-${Date.now()}`,
+      id: `sec-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       title: '新しいセクション',
       links: [],
     };
-    setSections([...sections, newSection]);
+    setSections((prev) => [...prev, newSection]);
   };
 
   const handleDeleteSection = (index: number) => {
-    const next = [...sections];
-    next.splice(index, 1);
-    setSections(next);
+    setSections((prev) => {
+      const next = [...prev];
+      next.splice(index, 1);
+      return next;
+    });
   };
 
   const handleSectionTitleChange = (index: number, title: string) => {
-    const next = [...sections];
-    next[index].title = title;
-    setSections(next);
+    setSections((prev) =>
+      prev.map((sec, i) => (i === index ? { ...sec, title } : sec))
+    );
   };
 
   const handleMoveSection = (index: number, direction: 'up' | 'down') => {
@@ -160,14 +242,16 @@ export function SidebarEditorModal({
     )
       return;
     const targetIdx = direction === 'up' ? index - 1 : index + 1;
-    const next = [...sections];
-    const temp = next[index];
-    next[index] = next[targetIdx];
-    next[targetIdx] = temp;
-    setSections(next);
+    setSections((prev) => {
+      const next = [...prev];
+      const temp = next[index];
+      next[index] = next[targetIdx];
+      next[targetIdx] = temp;
+      return next;
+    });
   };
 
-  // ===== ドラッグ＆ドロップ並び替え =====
+  // ===== ドラッグ＆ドロップ並び替え（無限階層対応） =====
   const resetDrag = () => {
     setDrag(null);
     setDropTarget(null);
@@ -203,6 +287,15 @@ export function SidebarEditorModal({
     e.dataTransfer.dropEffect = 'move';
   };
 
+  // ドラッグ中のアイテムが targetParentPath 内にドロップ可能か（自分自身やその子孫の中へはドロップ不可）
+  const canDropIntoParent = (secIdx: number, targetParentPath: number[]) => {
+    if (drag?.type !== 'item') return false;
+    if (drag.secIdx === secIdx && isPathInsideOrEqual(drag.path, targetParentPath)) {
+      return false;
+    }
+    return true;
+  };
+
   // セクションカード上: セクションの並び替え / リンクをセクション末尾へ
   const handleSectionDragOver = (e: DragEvent<HTMLElement>, secIdx: number) => {
     if (!drag) return;
@@ -210,84 +303,91 @@ export function SidebarEditorModal({
     if (drag.type === 'section') {
       updateDropTarget({ type: 'section', index: isUpperHalf(e) ? secIdx : secIdx + 1 });
     } else {
-      updateDropTarget({ type: 'item', secIdx, index: sections[secIdx].links.length });
+      updateDropTarget({
+        type: 'item',
+        secIdx,
+        parentPath: [],
+        index: sections[secIdx].links.length,
+      });
     }
   };
 
-  // セクション直下のリンク/フォルダ上
-  const handleLinkDragOver = (e: DragEvent<HTMLElement>, secIdx: number, linkIdx: number) => {
-    if (drag?.type !== 'item') return;
-    acceptDrop(e);
-    // フォルダの場合は子リストを除いたヘッダー行を基準に判定する
-    const header = e.currentTarget.querySelector('[data-dnd-header]');
-    updateDropTarget({
-      type: 'item',
-      secIdx,
-      index: isUpperHalf(e, header) ? linkIdx : linkIdx + 1,
-    });
-  };
-
-  // フォルダの子リスト領域（フォルダはフォルダ内に入れない）
-  const canDropIntoFolder = drag?.type === 'item' && !drag.isFolder;
-
-  const handleChildListDragOver = (e: DragEvent<HTMLElement>, secIdx: number, linkIdx: number) => {
-    if (!canDropIntoFolder) return;
-    acceptDrop(e);
-    updateDropTarget({
-      type: 'item',
-      secIdx,
-      parentIdx: linkIdx,
-      index: sections[secIdx].links[linkIdx].children?.length ?? 0,
-    });
-  };
-
-  const handleChildDragOver = (
+  // 任意の階層にあるアイテム（リンク/フォルダ）行の上
+  const handleItemDragOver = (
     e: DragEvent<HTMLElement>,
     secIdx: number,
-    linkIdx: number,
-    childIdx: number
+    path: number[]
   ) => {
-    if (!canDropIntoFolder) return;
+    const parentPath = path.slice(0, -1);
+    const itemIdx = path[path.length - 1];
+    if (!canDropIntoParent(secIdx, parentPath)) return;
     acceptDrop(e);
+    // フォルダの場合は子リストを除いたヘッダー行を基準に判定する
+    const header = e.currentTarget.querySelector(':scope > [data-dnd-header]');
     updateDropTarget({
       type: 'item',
       secIdx,
-      parentIdx: linkIdx,
-      index: isUpperHalf(e) ? childIdx : childIdx + 1,
+      parentPath,
+      index: isUpperHalf(e, header) ? itemIdx : itemIdx + 1,
+    });
+  };
+
+  // フォルダの子リスト領域（末尾への追加）
+  const handleChildListDragOver = (
+    e: DragEvent<HTMLElement>,
+    secIdx: number,
+    folderPath: number[]
+  ) => {
+    if (!canDropIntoParent(secIdx, folderPath)) return;
+    acceptDrop(e);
+    const folder = getItemAtPath(sections, secIdx, folderPath);
+    updateDropTarget({
+      type: 'item',
+      secIdx,
+      parentPath: folderPath,
+      index: folder?.children?.length ?? 0,
     });
   };
 
   const moveSectionTo = (from: number, toIndex: number) => {
-    const next = [...sections];
-    const [moved] = next.splice(from, 1);
-    next.splice(from < toIndex ? toIndex - 1 : toIndex, 0, moved);
-    setSections(next);
+    setSections((prev) => {
+      const next = [...prev];
+      const [moved] = next.splice(from, 1);
+      next.splice(from < toIndex ? toIndex - 1 : toIndex, 0, moved);
+      return next;
+    });
   };
 
   const moveItemTo = (
-    from: { secIdx: number; linkIdx: number; childIdx?: number },
-    to: { secIdx: number; parentIdx?: number; index: number }
+    from: { secIdx: number; path: number[] },
+    to: { secIdx: number; parentPath: number[]; index: number }
   ) => {
-    const next: SidebarSection[] = JSON.parse(JSON.stringify(sections));
-    const getList = (secIdx: number, parentIdx?: number): SidebarLink[] => {
-      if (parentIdx === undefined) return next[secIdx].links;
-      const parent = next[secIdx].links[parentIdx];
-      if (!parent.children) parent.children = [];
-      return parent.children;
-    };
-    const srcList = getList(from.secIdx, from.childIdx === undefined ? undefined : from.linkIdx);
-    const srcIndex = from.childIdx ?? from.linkIdx;
-    // 削除前に移動先リストの参照を取得しておく（インデックスのずれを防ぐ）
-    const dstList = getList(to.secIdx, to.parentIdx);
-    const dstIndex = srcList === dstList && srcIndex < to.index ? to.index - 1 : to.index;
-    const [moved] = srcList.splice(srcIndex, 1);
-    if (!moved) return;
-    dstList.splice(dstIndex, 0, moved);
-    setSections(next);
+    if (from.secIdx === to.secIdx && isPathInsideOrEqual(from.path, to.parentPath)) {
+      return;
+    }
+    setSections((prev) => {
+      const next: SidebarSection[] = JSON.parse(JSON.stringify(prev));
+      const fromParentPath = from.path.slice(0, -1);
+      const fromIndex = from.path[from.path.length - 1];
+
+      const srcList = getListAtPath(next, from.secIdx, fromParentPath);
+      const dstList = getListAtPath(next, to.secIdx, to.parentPath);
+      if (!srcList || !dstList) return prev;
+
+      const dstIndex =
+        srcList === dstList && fromIndex < to.index ? to.index - 1 : to.index;
+      if (srcList === dstList && dstIndex === fromIndex) return prev;
+
+      const [moved] = srcList.splice(fromIndex, 1);
+      if (!moved) return prev;
+      dstList.splice(dstIndex, 0, moved);
+      return next;
+    });
   };
 
   const handleDrop = (e: DragEvent<HTMLElement>) => {
     e.preventDefault();
+    e.stopPropagation();
     if (drag && dropTarget) {
       if (drag.type === 'section' && dropTarget.type === 'section') {
         moveSectionTo(drag.secIdx, dropTarget.index);
@@ -298,153 +398,363 @@ export function SidebarEditorModal({
     resetDrag();
   };
 
-  const isItemDrop = (secIdx: number, parentIdx: number | undefined, index: number) =>
+  const isItemDrop = (secIdx: number, parentPath: number[], index: number) =>
     dropTarget?.type === 'item' &&
     dropTarget.secIdx === secIdx &&
-    dropTarget.parentIdx === parentIdx &&
+    isSamePath(dropTarget.parentPath, parentPath) &&
     dropTarget.index === index;
 
-  const isDraggingItem = (secIdx: number, linkIdx: number, childIdx?: number) =>
+  const isDraggingItem = (secIdx: number, path: number[]) =>
     drag?.type === 'item' &&
     drag.secIdx === secIdx &&
-    drag.linkIdx === linkIdx &&
-    drag.childIdx === childIdx;
+    isSamePath(drag.path, path);
 
-  // リンク操作
-  const handleAddLink = (secIndex: number) => {
-    const next = [...sections];
-    const newLink: SidebarLink = {
-      id: `link-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-      title: '新規リンク',
-      url: '',
-      isExternal: false,
-    };
-    next[secIndex].links.push(newLink);
-    setSections(next);
-  };
+  // ===== リンク & フォルダ操作（任意の親パス parentPath または項目パス path に対応） =====
 
-  // 開閉グループ（フォルダ）の追加
-  const handleAddFolder = (secIndex: number) => {
-    const next = [...sections];
-    const newFolder: SidebarLink = {
-      id: `folder-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-      title: '新規グループ',
-      url: '',
-      isExternal: false,
-      children: [],
-      defaultOpen: false, // 初期状態: [+] 閉じる
-    };
-    next[secIndex].links.push(newFolder);
-    setSections(next);
-  };
-
-  // フォルダに子アイテムを追加
-  const handleAddChildToItem = (secIndex: number, linkIndex: number) => {
-    const next = [...sections];
-    const target = next[secIndex].links[linkIndex];
-    if (!target.children) {
-      target.children = [];
-    }
-    target.children.push({
-      id: `link-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-      title: 'サブ項目',
-      url: '',
-      isExternal: false,
+  // リンク追加（parentPath が [] ならセクション直下、それ以外は該当フォルダの子要素として追加）
+  const handleAddLink = (secIndex: number, parentPath: number[] = []) => {
+    setSections((prev) => {
+      const next: SidebarSection[] = JSON.parse(JSON.stringify(prev));
+      const list = getListAtPath(next, secIndex, parentPath);
+      if (!list) return prev;
+      list.push({
+        id: `link-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        title: parentPath.length > 0 ? 'サブ項目' : '新規リンク',
+        url: '',
+        isExternal: false,
+      });
+      return next;
     });
-    setSections(next);
   };
 
-  // リンクをフォルダに変換、またはフォルダをリンクに変換
-  const handleToggleFolderType = (secIndex: number, linkIndex: number) => {
-    const next = [...sections];
-    const target = next[secIndex].links[linkIndex];
-    if (target.children !== undefined) {
-      delete target.children;
-      delete target.defaultOpen;
-    } else {
-      target.children = [];
-      target.defaultOpen = false;
-    }
-    setSections(next);
+  // 開閉グループ（フォルダ）の追加（セクション直下・子フォルダ内どちらでも無限に追加可能）
+  const handleAddFolder = (secIndex: number, parentPath: number[] = []) => {
+    setSections((prev) => {
+      const next: SidebarSection[] = JSON.parse(JSON.stringify(prev));
+      const list = getListAtPath(next, secIndex, parentPath);
+      if (!list) return prev;
+      list.push({
+        id: `folder-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        title: '新規グループ',
+        url: '',
+        isExternal: false,
+        children: [],
+        defaultOpen: false, // 初期状態: [+] 閉じる
+      });
+      return next;
+    });
+  };
+
+  // リンクをフォルダに変換、またはフォルダをリンクに変換（どの階層でも可能）
+  const handleToggleFolderType = (secIndex: number, path: number[]) => {
+    setSections((prev) => {
+      const next: SidebarSection[] = JSON.parse(JSON.stringify(prev));
+      const target = getItemAtPath(next, secIndex, path);
+      if (!target) return prev;
+      if (target.children !== undefined) {
+        delete target.children;
+        delete target.defaultOpen;
+      } else {
+        target.children = [];
+        target.defaultOpen = false;
+      }
+      return next;
+    });
   };
 
   // 初期開閉状態のトグル
-  const handleToggleDefaultOpen = (secIndex: number, linkIndex: number) => {
-    const next = [...sections];
-    const target = next[secIndex].links[linkIndex];
-    if (target.children !== undefined) {
-      target.defaultOpen = !target.defaultOpen;
-    }
-    setSections(next);
-  };
-
-  const handleDeleteLink = (secIndex: number, linkIndex: number) => {
-    const next = [...sections];
-    next[secIndex].links.splice(linkIndex, 1);
-    setSections(next);
-  };
-
-  const handleDeleteChild = (secIndex: number, linkIndex: number, childIndex: number) => {
-    const next = [...sections];
-    const target = next[secIndex].links[linkIndex];
-    if (target.children) {
-      target.children.splice(childIndex, 1);
-    }
-    setSections(next);
-  };
-
-  const handleLinkChange = (
-    secIndex: number,
-    linkIndex: number,
-    field: 'title' | 'url',
-    val: string
-  ) => {
-    const next = [...sections];
-    next[secIndex].links[linkIndex][field] = val;
-    if (field === 'url') {
-      next[secIndex].links[linkIndex].isExternal =
-        /^(?:https?:|\/\/|www\.|mailto:)/i.test(val);
-    }
-    setSections(next);
-  };
-
-  const handleChildChange = (
-    secIndex: number,
-    linkIndex: number,
-    childIndex: number,
-    field: 'title' | 'url',
-    val: string
-  ) => {
-    const next = [...sections];
-    const target = next[secIndex].links[linkIndex];
-    if (target.children && target.children[childIndex]) {
-      target.children[childIndex][field] = val;
-      if (field === 'url') {
-        target.children[childIndex].isExternal =
-          /^(?:https?:|\/\/|www\.|mailto:)/i.test(val);
+  const handleToggleDefaultOpen = (secIndex: number, path: number[]) => {
+    setSections((prev) => {
+      const next: SidebarSection[] = JSON.parse(JSON.stringify(prev));
+      const target = getItemAtPath(next, secIndex, path);
+      if (target && target.children !== undefined) {
+        target.defaultOpen = !target.defaultOpen;
       }
-    }
-    setSections(next);
+      return next;
+    });
   };
 
-  // 既存ページから選択して追加
-  const handleSelectExistingPage = (secIndex: number, pageSlug: string) => {
-    const page = availablePages.find((p) => p.slug === pageSlug);
-    if (!page) return;
-    const next = [...sections];
-    next[secIndex].links.push({
-      id: `link-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-      title: page.title,
-      url: page.slug === 'index' || page.slug === 'home' || page.slug === '' ? '' : page.slug,
-      isExternal: false,
+  // アイテム削除
+  const handleDeleteItem = (secIndex: number, path: number[]) => {
+    if (path.length === 0) return;
+    setSections((prev) => {
+      const next: SidebarSection[] = JSON.parse(JSON.stringify(prev));
+      const parentList = getListAtPath(next, secIndex, path.slice(0, -1));
+      if (!parentList) return prev;
+      parentList.splice(path[path.length - 1], 1);
+      return next;
     });
-    setSections(next);
+  };
+
+  // アイテムのタイトル・URL変更
+  const handleItemChange = (
+    secIndex: number,
+    path: number[],
+    field: 'title' | 'url',
+    val: string
+  ) => {
+    setSections((prev) => {
+      const next: SidebarSection[] = JSON.parse(JSON.stringify(prev));
+      const target = getItemAtPath(next, secIndex, path);
+      if (!target) return prev;
+      target[field] = val;
+      if (field === 'url') {
+        target.isExternal = /^(?:https?:|\/\/|www\.|mailto:)/i.test(val);
+      }
+      return next;
+    });
+  };
+
+  // 既存ページから選択して追加（どのセクション・どの入れ子グループにも追加可能）
+  const handleSelectExistingPage = (
+    secIndex: number,
+    pageIndexStr: string,
+    parentPath: number[] = []
+  ) => {
+    const pageIdx = Number(pageIndexStr);
+    const page = !Number.isNaN(pageIdx)
+      ? selectablePages[pageIdx]
+      : selectablePages.find((p) => p.slug === pageIndexStr || p.id === pageIndexStr);
+    if (!page) return;
+
+    setSections((prev) => {
+      const next: SidebarSection[] = JSON.parse(JSON.stringify(prev));
+      const list = getListAtPath(next, secIndex, parentPath);
+      if (!list) return prev;
+      list.push({
+        id: `link-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        title: page.title,
+        url:
+          page.slug === 'index' || page.slug === 'home' || page.slug === ''
+            ? ''
+            : page.slug,
+        isExternal: false,
+      });
+      return next;
+    });
+  };
+
+  // 既存ページ追加セレクトボックスの共通レンダリング
+  const renderExistingPageSelect = (
+    secIdx: number,
+    parentPath: number[] = [],
+    compact: boolean = false
+  ) => (
+    <select
+      value=""
+      onChange={(e) => {
+        if (e.target.value !== '') {
+          handleSelectExistingPage(secIdx, e.target.value, parentPath);
+        }
+      }}
+      className={`bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-lg border border-transparent hover:border-slate-300 dark:hover:border-slate-600 cursor-pointer ${
+        compact ? 'px-2 py-0.5 text-[11px]' : 'px-2.5 py-1 text-xs'
+      }`}
+    >
+      <option value="" disabled>
+        + 既存のページから追加...
+      </option>
+      {selectablePages.map((p, idx) => (
+        <option key={p.id || `${p.slug}-${idx}`} value={String(idx)}>
+          {p.title} ({p.slug || 'index'})
+        </option>
+      ))}
+    </select>
+  );
+
+  // ツリー項目の再帰レンダリング（無限ネスト対応）
+  const renderTreeItem = (
+    secIdx: number,
+    item: SidebarLink,
+    path: number[],
+    siblingsCount: number
+  ) => {
+    const isFolder = item.children !== undefined;
+    const isDragging = isDraggingItem(secIdx, path);
+    const parentPath = path.slice(0, -1);
+    const itemIdx = path[path.length - 1];
+    const depth = path.length - 1;
+
+    return (
+      <div
+        key={item.id || path.join('-')}
+        data-dnd-row
+        onDragOver={(e) => handleItemDragOver(e, secIdx, path)}
+        className={`relative rounded-xl border transition-all ${
+          isDragging ? 'opacity-40' : ''
+        } ${
+          isFolder
+            ? 'bg-slate-50/90 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700/80 p-2.5 space-y-2'
+            : 'border-transparent hover:border-slate-200 dark:hover:border-slate-800 p-1.5'
+        }`}
+      >
+        {isItemDrop(secIdx, parentPath, itemIdx) && <DropLine className="-top-1" />}
+        {isItemDrop(secIdx, parentPath, siblingsCount) &&
+          itemIdx === siblingsCount - 1 && <DropLine className="-bottom-1" />}
+
+        {/* アイテムヘッダー行 */}
+        <div data-dnd-header className="flex items-center gap-2 text-xs">
+          <DragHandle
+            size={depth > 0 ? 'size-3.5' : 'size-4'}
+            onDragStart={(e) =>
+              startDrag(e, {
+                type: 'item',
+                secIdx,
+                path,
+                isFolder,
+              })
+            }
+            onDragEnd={resetDrag}
+          />
+          {isFolder ? (
+            <button
+              type="button"
+              onClick={() => handleToggleDefaultOpen(secIdx, path)}
+              className="size-5 shrink-0 border border-slate-400 dark:border-slate-500 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center justify-center rounded-xs font-mono font-bold text-[11px] text-slate-700 dark:text-slate-200 cursor-pointer shadow-2xs"
+              title={
+                item.defaultOpen
+                  ? '初期状態: 開く [-] (クリックで閉じる [+] に変更)'
+                  : '初期状態: 閉じる [+] (クリックで開く [-] に変更)'
+              }
+            >
+              {item.defaultOpen ? '−' : '+'}
+            </button>
+          ) : (
+            <span className="text-slate-400 dark:text-slate-500 font-bold ml-1 mr-0.5">
+              •
+            </span>
+          )}
+
+          <input
+            type="text"
+            value={item.title}
+            onChange={(e) =>
+              handleItemChange(secIdx, path, 'title', e.target.value)
+            }
+            placeholder={
+              isFolder
+                ? 'グループ名 (例: サーバー一覧)'
+                : depth > 0
+                ? 'サブリンク名'
+                : 'リンク名 (例: 利用規約)'
+            }
+            className={`bg-white dark:bg-slate-800 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 ${
+              isFolder
+                ? 'w-48 font-semibold'
+                : depth > 0
+                ? 'w-44'
+                : 'w-48'
+            }`}
+          />
+
+          <input
+            type="text"
+            value={item.url}
+            onChange={(e) =>
+              handleItemChange(secIdx, path, 'url', e.target.value)
+            }
+            placeholder={
+              isFolder
+                ? 'URL（任意・空欄でも可）'
+                : 'URL または スラグ (例: terms)'
+            }
+            className="flex-1 min-w-[120px] font-mono text-[11px] bg-white dark:bg-slate-800 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200"
+          />
+
+          {item.isExternal && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-300 font-medium shrink-0 flex items-center gap-1">
+              <Globe className="size-2.5" /> 外部
+            </span>
+          )}
+
+          {/* フォルダ化 / リンク化 切り替え（全階層で利用可能） */}
+          <button
+            type="button"
+            onClick={() => handleToggleFolderType(secIdx, path)}
+            className="px-2 py-1 rounded-md text-[11px] font-medium text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40 border border-slate-200 dark:border-slate-700 cursor-pointer shrink-0"
+            title={
+              isFolder
+                ? '通常のリンクに戻す'
+                : '折りたたみフォルダ（開閉グループ）に変換'
+            }
+          >
+            {isFolder ? 'リンク化' : '📁 フォルダ化'}
+          </button>
+
+          {/* 削除ボタン */}
+          <button
+            type="button"
+            onClick={() => handleDeleteItem(secIdx, path)}
+            className="p-1.5 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer shrink-0"
+            title="削除"
+          >
+            <Trash2 className="size-3.5" />
+          </button>
+        </div>
+
+        {/* フォルダの場合: サブ項目（子リンク・子フォルダ）のリストを再帰表示 */}
+        {isFolder && (
+          <div
+            onDragOver={(e) => handleChildListDragOver(e, secIdx, path)}
+            onDrop={handleDrop}
+            className="ml-5 pl-3 border-l-2 border-slate-200 dark:border-slate-700 space-y-2 pt-1"
+          >
+            {item.children && item.children.length > 0 ? (
+              item.children.map((child, childIdx) =>
+                renderTreeItem(
+                  secIdx,
+                  child,
+                  [...path, childIdx],
+                  item.children!.length
+                )
+              )
+            ) : (
+              <div
+                onDragOver={(e) => handleChildListDragOver(e, secIdx, path)}
+                className={`relative text-[11px] py-1 italic rounded px-2 ${
+                  isItemDrop(secIdx, path, 0)
+                    ? 'bg-blue-50/50 dark:bg-blue-950/30 text-blue-600'
+                    : 'text-slate-400'
+                }`}
+              >
+                サブ項目がまだありません
+              </div>
+            )}
+
+            {/* フォルダ内の項目追加バー（既存ページから追加 / サブ項目追加 / 入れ子グループ追加） */}
+            <div className="pt-1 flex items-center justify-between gap-2 flex-wrap">
+              <div className="flex items-center gap-1.5">
+                {renderExistingPageSelect(secIdx, path, true)}
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleAddLink(secIdx, path)}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/50 cursor-pointer"
+                >
+                  <Plus className="size-3" />
+                  <span>サブ項目を追加</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleAddFolder(secIdx, path)}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 cursor-pointer"
+                >
+                  <Plus className="size-3" />
+                  <span>📁 入れ子グループを追加</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
   };
 
   // デフォルトにリセット
   const handleReset = () => {
     if (confirm('サイドバー構成をデフォルトのページ一覧に戻しますか？')) {
-      const def = generateDefaultSidebar(availablePages);
+      const def = generateDefaultSidebar(selectablePages);
       setSections(def);
       setWikitext(stringifyMediaWikiSidebar(def));
     }
@@ -682,218 +992,27 @@ export function SidebarEditorModal({
                       </div>
                     </div>
 
-                    {/* リンク & フォルダ一覧 */}
+                    {/* リンク & フォルダ一覧（無限ネスト対応） */}
                     <div className="space-y-2.5 pl-1" onDrop={handleDrop}>
-                      {sec.links.map((link, linkIdx) => {
-                        const isFolder = link.children !== undefined;
-                        const isDragging = isDraggingItem(secIdx, linkIdx);
-
-                        return (
-                          <div
-                            key={link.id || linkIdx}
-                            data-dnd-row
-                            onDragOver={(e) => handleLinkDragOver(e, secIdx, linkIdx)}
-                            className={`relative rounded-xl border transition-all ${
-                              isDragging ? 'opacity-40' : ''
-                            } ${
-                              isFolder
-                                ? 'bg-slate-50/90 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700/80 p-2.5 space-y-2'
-                                : 'border-transparent hover:border-slate-200 dark:hover:border-slate-800 p-1.5'
-                            }`}
-                          >
-                            {isItemDrop(secIdx, undefined, linkIdx) && (
-                              <DropLine className="-top-1" />
-                            )}
-                            {isItemDrop(secIdx, undefined, sec.links.length) &&
-                              linkIdx === sec.links.length - 1 && (
-                                <DropLine className="-bottom-1" />
-                              )}
-
-                            {/* アイテムヘッダー行 */}
-                            <div data-dnd-header className="flex items-center gap-2 text-xs">
-                              <DragHandle
-                                onDragStart={(e) =>
-                                  startDrag(e, {
-                                    type: 'item',
-                                    secIdx,
-                                    linkIdx,
-                                    isFolder,
-                                  })
-                                }
-                                onDragEnd={resetDrag}
-                              />
-                              {isFolder ? (
-                                <button
-                                  type="button"
-                                  onClick={() => handleToggleDefaultOpen(secIdx, linkIdx)}
-                                  className="size-5 shrink-0 border border-slate-400 dark:border-slate-500 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center justify-center rounded-xs font-mono font-bold text-[11px] text-slate-700 dark:text-slate-200 cursor-pointer shadow-2xs"
-                                  title={link.defaultOpen ? '初期状態: 開く [-] (クリックで閉じる [+] に変更)' : '初期状態: 閉じる [+] (クリックで開く [-] に変更)'}
-                                >
-                                  {link.defaultOpen ? '−' : '+'}
-                                </button>
-                              ) : (
-                                <span className="text-slate-400 dark:text-slate-500 font-bold ml-1 mr-0.5">•</span>
-                              )}
-
-                              <input
-                                type="text"
-                                value={link.title}
-                                onChange={(e) =>
-                                  handleLinkChange(secIdx, linkIdx, 'title', e.target.value)
-                                }
-                                placeholder={isFolder ? 'グループ名 (例: サーバー一覧)' : 'リンク名 (例: 利用規約)'}
-                                className={`bg-white dark:bg-slate-800 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 ${
-                                  isFolder ? 'w-52 font-semibold' : 'w-48'
-                                }`}
-                              />
-
-                              <input
-                                type="text"
-                                value={link.url}
-                                onChange={(e) =>
-                                  handleLinkChange(secIdx, linkIdx, 'url', e.target.value)
-                                }
-                                placeholder={isFolder ? 'URL（任意・空欄でも可）' : 'URL または スラグ (例: terms)'}
-                                className="flex-1 font-mono text-[11px] bg-white dark:bg-slate-800 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200"
-                              />
-
-                              {link.isExternal && (
-                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-300 font-medium shrink-0 flex items-center gap-1">
-                                  <Globe className="size-2.5" /> 外部
-                                </span>
-                              )}
-
-                              {/* フォルダ化 / リンク化 切り替え */}
-                              <button
-                                type="button"
-                                onClick={() => handleToggleFolderType(secIdx, linkIdx)}
-                                className="px-2 py-1 rounded-md text-[11px] font-medium text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40 border border-slate-200 dark:border-slate-700 cursor-pointer"
-                                title={isFolder ? '通常のリンクに戻す' : '折りたたみフォルダ（開閉グループ）に変換'}
-                              >
-                                {isFolder ? 'リンク化' : '📁 フォルダ化'}
-                              </button>
-
-                              {/* 削除ボタン */}
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteLink(secIdx, linkIdx)}
-                                className="p-1.5 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
-                                title="削除"
-                              >
-                                <Trash2 className="size-3.5" />
-                              </button>
-                            </div>
-
-                            {/* フォルダの場合: サブ項目（子リンク）のリスト */}
-                            {isFolder && (
-                              <div
-                                onDragOver={(e) => handleChildListDragOver(e, secIdx, linkIdx)}
-                                onDrop={handleDrop}
-                                className="ml-6 pl-3 border-l-2 border-slate-200 dark:border-slate-700 space-y-2 pt-1"
-                              >
-                                {link.children && link.children.length > 0 ? (
-                                  link.children.map((child, childIdx) => {
-                                    const isChildDragging = isDraggingItem(secIdx, linkIdx, childIdx);
-
-                                    return (
-                                      <div
-                                        key={child.id || childIdx}
-                                        data-dnd-row
-                                        onDragOver={(e) =>
-                                          handleChildDragOver(e, secIdx, linkIdx, childIdx)
-                                        }
-                                        className={`relative flex items-center gap-2 text-xs transition-opacity ${
-                                          isChildDragging ? 'opacity-40' : ''
-                                        }`}
-                                      >
-                                        {isItemDrop(secIdx, linkIdx, childIdx) && (
-                                          <DropLine className="-top-1" />
-                                        )}
-                                        {isItemDrop(secIdx, linkIdx, link.children!.length) &&
-                                          childIdx === link.children!.length - 1 && (
-                                            <DropLine className="-bottom-1" />
-                                          )}
-
-                                        <DragHandle
-                                          size="size-3.5"
-                                          onDragStart={(e) =>
-                                            startDrag(e, {
-                                              type: 'item',
-                                              secIdx,
-                                              linkIdx,
-                                              childIdx,
-                                              isFolder: false,
-                                            })
-                                          }
-                                          onDragEnd={resetDrag}
-                                        />
-                                        <span className="text-slate-400 dark:text-slate-500">•</span>
-                                        <input
-                                          type="text"
-                                          value={child.title}
-                                          onChange={(e) =>
-                                            handleChildChange(secIdx, linkIdx, childIdx, 'title', e.target.value)
-                                          }
-                                          placeholder="サブリンク名"
-                                          className="w-44 bg-white dark:bg-slate-800 px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200"
-                                        />
-                                        <input
-                                          type="text"
-                                          value={child.url}
-                                          onChange={(e) =>
-                                            handleChildChange(secIdx, linkIdx, childIdx, 'url', e.target.value)
-                                          }
-                                          placeholder="スラグ または URL"
-                                          className="flex-1 font-mono text-[11px] bg-white dark:bg-slate-800 px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200"
-                                        />
-                                        <button
-                                          type="button"
-                                          onClick={() => handleDeleteChild(secIdx, linkIdx, childIdx)}
-                                          className="p-1 rounded text-slate-400 hover:text-rose-500 cursor-pointer"
-                                          title="サブ項目を削除"
-                                        >
-                                          <Trash2 className="size-3" />
-                                        </button>
-                                      </div>
-                                    );
-                                  })
-                                ) : (
-                                  <div
-                                    onDragOver={(e) => handleChildListDragOver(e, secIdx, linkIdx)}
-                                    className={`relative text-[11px] py-1 italic rounded px-2 ${
-                                      isItemDrop(secIdx, linkIdx, 0)
-                                        ? 'bg-blue-50/50 dark:bg-blue-950/30 text-blue-600'
-                                        : 'text-slate-400'
-                                    }`}
-                                  >
-                                    サブ項目がまだありません
-                                  </div>
-                                )}
-
-                                <button
-                                  type="button"
-                                  onClick={() => handleAddChildToItem(secIdx, linkIdx)}
-                                  className="inline-flex items-center gap-1 text-[11px] font-medium text-blue-600 dark:text-blue-400 hover:underline cursor-pointer pt-0.5"
-                                >
-                                  <Plus className="size-3" />
-                                  <span>サブ項目を追加</span>
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
+                      {sec.links.map((link, linkIdx) =>
+                        renderTreeItem(secIdx, link, [linkIdx], sec.links.length)
+                      )}
 
                       {sec.links.length === 0 && (
                         <div
                           onDragOver={(e) => {
                             if (drag?.type === 'item') {
                               acceptDrop(e);
-                              updateDropTarget({ type: 'item', secIdx, index: 0 });
+                              updateDropTarget({
+                                type: 'item',
+                                secIdx,
+                                parentPath: [],
+                                index: 0,
+                              });
                             }
                           }}
                           className={`relative text-center py-4 text-xs rounded-xl border border-dashed ${
-                            isItemDrop(secIdx, undefined, 0)
+                            isItemDrop(secIdx, [], 0)
                               ? 'border-blue-500 bg-blue-50/50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400'
                               : 'border-slate-200 dark:border-slate-800 text-slate-400'
                           }`}
@@ -903,34 +1022,16 @@ export function SidebarEditorModal({
                       )}
                     </div>
 
-                    {/* 項目追加バー */}
+                    {/* セクション直下の項目追加バー */}
                     <div className="pt-2 flex items-center justify-between gap-3 text-xs border-t border-slate-100 dark:border-slate-800/60 flex-wrap">
                       <div className="flex items-center gap-2">
-                        <select
-                          onChange={(e) => {
-                            if (e.target.value) {
-                              handleSelectExistingPage(secIdx, e.target.value);
-                              e.target.value = '';
-                            }
-                          }}
-                          defaultValue=""
-                          className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-lg px-2.5 py-1 text-xs border border-transparent hover:border-slate-300 cursor-pointer"
-                        >
-                          <option value="" disabled>
-                            + 既存のページから追加...
-                          </option>
-                          {availablePages.map((p) => (
-                            <option key={p.id || p.slug} value={p.slug}>
-                              {p.title} ({p.slug || 'index'})
-                            </option>
-                          ))}
-                        </select>
+                        {renderExistingPageSelect(secIdx, [], false)}
                       </div>
 
                       <div className="flex items-center gap-2">
                         <button
                           type="button"
-                          onClick={() => handleAddLink(secIdx)}
+                          onClick={() => handleAddLink(secIdx, [])}
                           className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/50 cursor-pointer"
                         >
                           <Plus className="size-3.5" />
@@ -938,7 +1039,7 @@ export function SidebarEditorModal({
                         </button>
                         <button
                           type="button"
-                          onClick={() => handleAddFolder(secIdx)}
+                          onClick={() => handleAddFolder(secIdx, [])}
                           className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 cursor-pointer"
                         >
                           <Plus className="size-3.5" />
