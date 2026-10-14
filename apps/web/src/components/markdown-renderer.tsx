@@ -341,7 +341,7 @@ function preprocessMarkdown(content: string, siteSlug?: string): string {
           options,
         })
       );
-      return `![__mw_img__${metaPayload}](${safeUrl})`;
+      return `![MW_IMG_DATA:${metaPayload}](${safeUrl})`;
     }
   );
 
@@ -789,10 +789,27 @@ function MarkdownImage({
 
     const rawAlt = typeof alt === 'string' ? alt : '';
 
-    if (rawAlt.startsWith('__mw_img__')) {
+    const isEncodedPayload =
+      rawAlt.startsWith('MW_IMG_DATA:') ||
+      rawAlt.startsWith('__mw_img__') ||
+      rawAlt.startsWith('mw_img') ||
+      rawAlt.includes('%22rawTarget%22') ||
+      rawAlt.includes('"rawTarget"');
+
+    if (isEncodedPayload) {
       isMediaWikiSyntax = true;
       try {
-        const jsonStr = decodeURIComponent(rawAlt.slice('__mw_img__'.length));
+        let payloadStr = rawAlt;
+        if (rawAlt.startsWith('MW_IMG_DATA:')) {
+          payloadStr = rawAlt.slice('MW_IMG_DATA:'.length);
+        } else if (rawAlt.startsWith('__mw_img__')) {
+          payloadStr = rawAlt.slice('__mw_img__'.length);
+        } else if (rawAlt.startsWith('mw_img')) {
+          payloadStr = rawAlt.slice('mw_img'.length);
+        } else if (rawAlt.includes('%7B')) {
+          payloadStr = rawAlt.slice(rawAlt.indexOf('%7B'));
+        }
+        const jsonStr = decodeURIComponent(payloadStr);
         const decoded = JSON.parse(jsonStr);
         if (decoded && typeof decoded === 'object') {
           if (decoded.rawTarget) resolvedRawTarget = decoded.rawTarget;
@@ -857,11 +874,27 @@ function MarkdownImage({
   };
 
   if (error) {
+    const errorLabel = (() => {
+      const cleanVal = (v?: string) => {
+        if (!v) return '';
+        if (v.includes('rawTarget') || v.startsWith('mw_img') || v.startsWith('MW_IMG_DATA:')) {
+          return '';
+        }
+        return v.trim();
+      };
+      return (
+        cleanVal(opts.caption) ||
+        cleanVal(opts.alt) ||
+        cleanVal(resolvedRawTarget?.replace(/^media:/, '')) ||
+        '画像'
+      );
+    })();
+
     return (
       <div className="my-6 p-4 rounded-xl border border-dashed border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/30 flex items-center justify-center gap-2.5 text-xs text-slate-400 select-none clear-both">
         <ImageIcon className="size-4 text-slate-400 shrink-0" />
         <span className="font-mono text-[11px] truncate max-w-xs">
-          {opts.caption || opts.alt || resolvedRawTarget || '画像'}
+          {errorLabel}
         </span>
         <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-800 text-slate-500 font-medium">
           読み込み失敗 (404)

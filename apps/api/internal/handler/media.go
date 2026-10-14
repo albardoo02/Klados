@@ -298,7 +298,9 @@ func (h *MediaHandler) ServeFile(c *gin.Context) {
 
 func (h *MediaHandler) ServeByID(c *gin.Context) {
 	idStr := strings.TrimPrefix(c.Param("id"), "/")
+	idStr = strings.TrimPrefix(strings.TrimPrefix(idStr, "media:"), "klados-media:")
 	cleanID := strings.TrimSuffix(idStr, filepath.Ext(idStr))
+	cleanID = strings.TrimPrefix(strings.TrimPrefix(cleanID, "media:"), "klados-media:")
 
 	var media model.MediaFile
 	var found bool
