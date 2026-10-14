@@ -330,6 +330,7 @@ func (h *MediaHandler) ServeByID(c *gin.Context) {
 	}
 
 	if !found {
+		log.Printf("[MediaHandler.ServeByID] Media record not found in DB for id: '%s' (cleanID: '%s', idStr: '%s')", c.Param("id"), cleanID, idStr)
 		c.JSON(http.StatusNotFound, gin.H{"error": "media not found"})
 		return
 	}
@@ -341,32 +342,58 @@ func (h *MediaHandler) ServeByID(c *gin.Context) {
 
 	// 3. MinIO から直接ストリーミング配信
 	if h.Minio != nil && h.Bucket != "" && media.StorageKey != "" {
-		obj, err := h.Minio.GetObject(c.Request.Context(), h.Bucket, media.StorageKey, minio.GetObjectOptions{})
-		if err == nil {
-			defer obj.Close()
-			stat, err := obj.Stat()
-			if err == nil {
-				contentType := media.MimeType
-				if contentType == "" {
-					contentType = stat.ContentType
-				}
-				if contentType == "" {
-					contentType = "application/octet-stream"
-				}
-				c.Header("Cache-Control", "public, max-age=86400")
-				c.Header("Content-Disposition", "inline")
-				if strings.Contains(strings.ToLower(contentType), "svg") {
-					c.Header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox")
-				}
-				c.DataFromReader(http.StatusOK, stat.Size, contentType, obj, nil)
-				return
-			} else {
-				log.Printf("[MediaHandler.ServeByID] MinIO Stat error for key '%s' in bucket '%s': %v", media.StorageKey, h.Bucket, err)
+		cleanKey := strings.TrimPrefix(media.StorageKey, "/")
+		keysToTry := []string{
+			media.StorageKey,
+			cleanKey,
+			strings.TrimPrefix(cleanKey, h.Bucket+"/"),
+		}
+		if idx := strings.Index(cleanKey, "/media/"); idx != -1 {
+			keysToTry = append(keysToTry, cleanKey[idx+1:], cleanKey[idx+7:])
+		}
+		if media.Filename != "" && media.Filename != media.StorageKey {
+			keysToTry = append(keysToTry, media.Filename)
+		}
+
+		var foundObj *minio.Object
+		var stat minio.ObjectInfo
+		for _, key := range keysToTry {
+			if key == "" {
+				continue
 			}
+			obj, err := h.Minio.GetObject(c.Request.Context(), h.Bucket, key, minio.GetObjectOptions{})
+			if err == nil {
+				st, sErr := obj.Stat()
+				if sErr == nil {
+					foundObj = obj
+					stat = st
+					break
+				}
+				obj.Close()
+			}
+		}
+
+		if foundObj != nil {
+			defer foundObj.Close()
+			contentType := media.MimeType
+			if contentType == "" {
+				contentType = stat.ContentType
+			}
+			if contentType == "" {
+				contentType = "application/octet-stream"
+			}
+			c.Header("Cache-Control", "public, max-age=86400")
+			c.Header("Content-Disposition", "inline")
+			if strings.Contains(strings.ToLower(contentType), "svg") {
+				c.Header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox")
+			}
+			c.DataFromReader(http.StatusOK, stat.Size, contentType, foundObj, nil)
+			return
 		} else {
-			log.Printf("[MediaHandler.ServeByID] MinIO GetObject error for key '%s' in bucket '%s': %v", media.StorageKey, h.Bucket, err)
+			log.Printf("[MediaHandler.ServeByID] MinIO object not found for media ID %s across keys %v in bucket '%s'", media.ID, keysToTry, h.Bucket)
 		}
 	}
 
+	log.Printf("[MediaHandler.ServeByID] Media content not found in storage for media ID: %s", media.ID)
 	c.JSON(http.StatusNotFound, gin.H{"error": "media content not found in storage"})
 }
