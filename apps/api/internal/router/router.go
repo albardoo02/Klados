@@ -25,6 +25,13 @@ func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
 	r.Use(gin.Logger())
 	r.Use(gin.Recovery())
 
+	// Security Headers & Request Body Size Limit (2MB max for standard JSON requests)
+	r.Use(middleware.SecurityHeaders())
+	r.Use(middleware.MaxBodySize(2 * 1024 * 1024))
+
+	// Global General Rate Limiting (180 requests/min, burst 40 per IP)
+	r.Use(middleware.RateLimit(180, 40))
+
 	// CORS
 	origins := strings.Split(cfg.AllowOrigins, ",")
 	r.Use(cors.New(cors.Config{
@@ -36,18 +43,21 @@ func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
 					return true
 				}
 			}
-			// ローカルおよびCloudflare Tunnel等のトンネルアクセスを許容
-			if strings.HasSuffix(origin, ".trycloudflare.com") ||
-				strings.HasSuffix(origin, "klados.app") ||
-				strings.Contains(origin, "localhost") ||
-				strings.Contains(origin, "127.0.0.1") {
+			// ローカルおよび正規ドメイン、Cloudflare Tunnel等のアクセスを安全に検証
+			lower := strings.ToLower(origin)
+			if lower == "https://klados.app" || strings.HasSuffix(lower, ".klados.app") ||
+				lower == "https://klados.azisaba.net" || strings.HasSuffix(lower, ".klados.azisaba.net") ||
+				lower == "https://cms.azisaba.net" || strings.HasSuffix(lower, ".cms.azisaba.net") ||
+				strings.HasSuffix(lower, ".trycloudflare.com") ||
+				strings.HasPrefix(lower, "http://localhost:") || lower == "http://localhost" ||
+				strings.HasPrefix(lower, "http://127.0.0.1:") || lower == "http://127.0.0.1" {
 				return true
 			}
 			return false
 		},
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization", "Accept", "X-Requested-With"},
-		ExposeHeaders:    []string{"Content-Length"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization", "Accept", "X-Requested-With", "X-API-Key"},
+		ExposeHeaders:    []string{"Content-Length", "Retry-After"},
 		AllowCredentials: true,
 	}))
 
@@ -111,11 +121,14 @@ func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
 	// WebSocket Collaborative Editing
 	api.GET("/ws/pages/:id", wsH.HandlePageWS)
 
+	// Strict Rate Limiter for authentication & password attempts (25 requests/min, burst 10 per IP)
+	authLimiter := middleware.RateLimit(25, 10)
+
 	// パブリック閲覧 (Public)
 	public := api.Group("/public")
 	{
 		public.GET("/sites/:slug", siteH.GetBySlug)
-		public.POST("/sites/:slug/verify-password", siteH.VerifyPassword)
+		public.POST("/sites/:slug/verify-password", authLimiter, siteH.VerifyPassword)
 		public.GET("/sites/:slug/sitemap.xml", siteH.GetSitemap)
 		public.GET("/sites/:slug/robots.txt", siteH.GetRobotsTxt)
 		public.POST("/sites/:slug/view", analyticsH.RecordView)
@@ -147,8 +160,9 @@ func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
 	api.POST("/pages/:id/comments", middleware.OptionalAuth(cfg.JWTSecret, db), commentH.Create)
 	api.GET("/pages/:id/versions", pageH.GetVersions)
 
-	// 認証 (Public)
+	// 認証 (Public with strict brute-force rate limit)
 	auth := api.Group("/auth")
+	auth.Use(authLimiter)
 	{
 		auth.POST("/register", authH.Register)
 		auth.POST("/login", authH.Login)
@@ -177,7 +191,7 @@ func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
 	{
 		protected.GET("/auth/me", authH.Me)
 		protected.PATCH("/auth/profile", authH.UpdateProfile)
-		protected.PATCH("/auth/password", authH.ChangePassword)
+		protected.PATCH("/auth/password", authLimiter, authH.ChangePassword)
 		protected.POST("/auth/avatar", mediaH.UploadAvatar)
 		protected.PUT("/auth/config", authH.UpdateAuthConfig)
 		protected.POST("/auth/quick-verify", authH.QuickVerify)

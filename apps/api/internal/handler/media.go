@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"path/filepath"
@@ -21,6 +22,34 @@ type MediaHandler struct {
 	Minio    *minio.Client
 	Bucket   string
 	Endpoint string
+}
+
+func isDangerousSVG(r io.Reader) bool {
+	buf := make([]byte, 512*1024) // inspect up to 512KB
+	n, _ := r.Read(buf)
+	content := strings.ToLower(string(buf[:n]))
+
+	dangerousPatterns := []string{
+		"<script",
+		"javascript:",
+		"vbscript:",
+		"onload=",
+		"onerror=",
+		"onclick=",
+		"onmouseover=",
+		"onunload=",
+		"<iframe",
+		"<object",
+		"<embed",
+		"<foreignobject",
+	}
+
+	for _, pattern := range dangerousPatterns {
+		if strings.Contains(content, pattern) {
+			return true
+		}
+	}
+	return false
 }
 
 var allowedMimeTypes = map[string]bool{
@@ -53,6 +82,18 @@ func (h *MediaHandler) Upload(c *gin.Context) {
 	if header.Size > 10*1024*1024 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "file too large (max 10MB)"})
 		return
+	}
+
+	// SVG XSS 対策: スクリプトや埋め込みオブジェクトを含む危険なSVGを拒否
+	if mimeType == "image/svg+xml" || strings.EqualFold(filepath.Ext(header.Filename), ".svg") {
+		if isDangerousSVG(file) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "セキュリティエラー: 危険なスクリプトまたはタグが含まれているためアップロードできません"})
+			return
+		}
+		if _, err := file.Seek(0, io.SeekStart); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "ファイルの読み取り位置のリセットに失敗しました"})
+			return
+		}
 	}
 
 	sUID, err := uuid.Parse(siteID)
@@ -177,7 +218,8 @@ func (h *MediaHandler) UploadAvatar(c *gin.Context) {
 	defer file.Close()
 
 	mimeType := header.Header.Get("Content-Type")
-	if !strings.HasPrefix(mimeType, "image/") {
+	ext := strings.ToLower(filepath.Ext(header.Filename))
+	if !strings.HasPrefix(mimeType, "image/") || mimeType == "image/svg+xml" || ext == ".svg" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "画像ファイル (JPEG, PNG, WebP, GIF) を指定してください"})
 		return
 	}
@@ -187,7 +229,6 @@ func (h *MediaHandler) UploadAvatar(c *gin.Context) {
 		return
 	}
 
-	ext := filepath.Ext(header.Filename)
 	if ext == "" {
 		ext = ".png"
 	}
@@ -249,6 +290,9 @@ func (h *MediaHandler) ServeFile(c *gin.Context) {
 
 	c.Header("Cache-Control", "public, max-age=86400")
 	c.Header("Content-Disposition", "inline")
+	if strings.Contains(strings.ToLower(stat.ContentType), "svg") {
+		c.Header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox")
+	}
 	c.DataFromReader(http.StatusOK, stat.Size, stat.ContentType, obj, nil)
 }
 
@@ -309,6 +353,9 @@ func (h *MediaHandler) ServeByID(c *gin.Context) {
 				}
 				c.Header("Cache-Control", "public, max-age=86400")
 				c.Header("Content-Disposition", "inline")
+				if strings.Contains(strings.ToLower(contentType), "svg") {
+					c.Header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox")
+				}
 				c.DataFromReader(http.StatusOK, stat.Size, contentType, obj, nil)
 				return
 			} else {
