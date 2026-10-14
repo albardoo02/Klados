@@ -4275,7 +4275,7 @@ export default function PageEditPage() {
                 : 'w-full h-full'
             } overflow-auto p-4 sm:p-6 md:p-8 bg-card/40`}
           >
-            <div className="max-w-3xl mx-auto">
+            <div className="max-w-5xl xl:max-w-6xl mx-auto">
               {preview || pageCategories.length > 0 ? (
                 <>
                   {preview && <MarkdownRenderer content={preview} siteSlug={site?.slug} />}

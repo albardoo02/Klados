@@ -1055,7 +1055,7 @@ export default function SitePageClient() {
             : 'bg-white/80 border-slate-200'
         }`}
       >
-        <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-2 sm:gap-4">
+        <div className="max-w-[1600px] mx-auto px-3 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-2 sm:gap-4">
           <div className="flex items-center gap-1.5 sm:gap-3 min-w-0 flex-1 sm:flex-initial">
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
@@ -1297,7 +1297,7 @@ export default function SitePageClient() {
       </header>
 
       {/* メインレイアウト */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex gap-8">
+      <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-8 flex gap-8">
         {/* デスクトップ用サイドバー (SeesaaWiki風 開閉ツリーメニュー) */}
         <aside className="hidden md:block w-64 shrink-0">
           <div className="sticky top-24 space-y-4">
@@ -1543,7 +1543,7 @@ export default function SitePageClient() {
         )}
 
         {/* メインコンテンツ記事領域 */}
-        <main className="flex-1 min-w-0 max-w-4xl mx-auto">
+        <main className="flex-1 min-w-0">
           {isPageLoading ? (
             <div className="py-20 flex flex-col items-center justify-center text-slate-400 space-y-3">
               <div
@@ -1779,7 +1779,7 @@ export default function SitePageClient() {
           isDark ? 'border-slate-800 bg-[#0c0d12]' : 'border-slate-200 bg-slate-50'
         }`}
       >
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-500 dark:text-slate-400">
+        <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-500 dark:text-slate-400">
           <div className="flex items-center gap-2">
             <span>
               © {new Date().getFullYear()} {site.title}. All rights reserved.
