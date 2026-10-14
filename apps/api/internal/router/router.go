@@ -3,6 +3,11 @@ package router
 import (
 	"context"
 	"fmt"
+	"log"
+	"net/http"
+	"strings"
+	"time"
+
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/klados/api/internal/config"
@@ -11,9 +16,6 @@ import (
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"gorm.io/gorm"
-	"log"
-	"net/http"
-	"strings"
 )
 
 func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
