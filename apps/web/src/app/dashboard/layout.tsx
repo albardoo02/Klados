@@ -26,6 +26,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const t = useTranslations();
   const router = useRouter();
   const pathname = usePathname();
+  const isEditPage = Boolean(pathname?.includes('/pages/') && pathname?.endsWith('/edit'));
   const { user, token, clearAuth, updateUser } = useAuthStore();
   const [authReady, setAuthReady] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -142,8 +143,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900">
-      <nav className="bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between sticky top-0 z-30">
+    <div className={`min-h-screen ${isEditPage ? 'h-screen overflow-hidden flex flex-col' : 'bg-slate-50 text-slate-900'}`}>
+      {!isEditPage && (
+        <nav className="bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between sticky top-0 z-30">
         <div className="flex items-center gap-6">
           <Link href="/dashboard" className="text-xl font-bold tracking-tight">
             Kla<span className="text-blue-600">dos</span>
@@ -321,9 +323,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </div>
         </div>
       </nav>
+      )}
 
       {/* メールアドレス未確認バナー */}
-      {user && user.email_verified === false && (
+      {user && user.email_verified === false && !isEditPage && (
         <div className="bg-amber-50 border-b border-amber-200 px-6 py-2.5 text-xs text-amber-900 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <AlertTriangle className="size-4 text-amber-600 shrink-0" />
@@ -371,7 +374,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </div>
       )}
 
-      <main className="container mx-auto px-6 py-8">{children}</main>
+      {isEditPage ? (
+        <main className="w-full flex-1 flex flex-col overflow-hidden">{children}</main>
+      ) : (
+        <main className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-8">{children}</main>
+      )}
 
       {/* グローバル コマンドパレット */}
       <CommandPalette isOpen={searchOpen} onClose={() => setSearchOpen(false)} />

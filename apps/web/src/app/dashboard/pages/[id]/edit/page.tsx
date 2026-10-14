@@ -4271,11 +4271,11 @@ export default function PageEditPage() {
             ref={previewContainerRef}
             className={`${
               tab === 'split'
-                ? 'w-full md:w-1/2 h-1/2 md:h-full'
-                : 'w-full h-full'
-            } overflow-auto p-4 sm:p-6 md:p-8 bg-card/40`}
+                ? 'w-full md:w-1/2 h-1/2 md:h-full p-4 sm:p-6'
+                : 'w-full h-full p-4 sm:p-6 md:p-8'
+            } overflow-auto bg-card/40`}
           >
-            <div className="max-w-5xl xl:max-w-6xl mx-auto">
+            <div className={tab === 'split' ? 'w-full max-w-none' : 'max-w-[1600px] mx-auto'}>
               {preview || pageCategories.length > 0 ? (
                 <>
                   {preview && <MarkdownRenderer content={preview} siteSlug={site?.slug} />}
