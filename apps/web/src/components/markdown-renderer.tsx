@@ -349,7 +349,7 @@ function preprocessMarkdown(content: string, siteSlug?: string): string {
 }
 
 function extractText(node: React.ReactNode): string {
-  if (typeof node === 'string') return node;
+  if (typeof node === 'string') return node.replace(/<br\s*\/?>/gi, ' ');
   if (typeof node === 'number') return String(node);
   if (!node) return '';
   if (Array.isArray(node)) return node.map(extractText).join('');
@@ -357,6 +357,42 @@ function extractText(node: React.ReactNode): string {
     return extractText((node.props as any).children);
   }
   return '';
+}
+
+/**
+ * 文字列ノード内の <br>, <br/>, <br /> タグを実際の <br /> React要素に変換し、
+ * Markdownテーブル内やテキスト内の改行を安全かつ正確に反映する
+ */
+function renderWithBr(node: React.ReactNode): React.ReactNode {
+  if (typeof node === 'string') {
+    if (!/<br\s*\/?>/i.test(node)) return node;
+    const parts = node.split(/(<br\s*\/?>)/i);
+    return parts.map((part, i) => {
+      if (/<br\s*\/?>/i.test(part)) {
+        return <br key={`br-${i}`} />;
+      }
+      return part;
+    });
+  }
+  if (Array.isArray(node)) {
+    return node.map((child, i) => {
+      const res = renderWithBr(child);
+      if (React.isValidElement(res) && !res.key) {
+        return React.cloneElement(res, { key: `item-${i}` });
+      }
+      return res;
+    });
+  }
+  if (React.isValidElement(node)) {
+    if (node.type === 'code' || node.type === 'pre') {
+      return node;
+    }
+    const children = (node.props as any)?.children;
+    if (children) {
+      return React.cloneElement(node, undefined, renderWithBr(children));
+    }
+  }
+  return node;
 }
 
 /**
@@ -1161,7 +1197,7 @@ export function MarkdownRenderer({ content, className = '', siteSlug }: Markdown
           >
             #
           </a>
-          {children}
+          {renderWithBr(children)}
         </Tag>
       );
     };
@@ -1236,6 +1272,20 @@ export function MarkdownRenderer({ content, className = '', siteSlug }: Markdown
                   {children}
                 </table>
               </div>
+            );
+          },
+          th({ node, children, ...props }: any) {
+            return (
+              <th {...props}>
+                {renderWithBr(children)}
+              </th>
+            );
+          },
+          td({ node, children, ...props }: any) {
+            return (
+              <td {...props}>
+                {renderWithBr(children)}
+              </td>
             );
           },
           a({ href, children, ...props }) {
@@ -1460,14 +1510,28 @@ export function MarkdownRenderer({ content, className = '', siteSlug }: Markdown
             if (hasBlockOrImage) {
               return (
                 <div className="my-4 leading-relaxed" {...props}>
-                  {children}
+                  {renderWithBr(children)}
                 </div>
               );
             }
             return (
               <p className="my-4 leading-relaxed" {...props}>
-                {children}
+                {renderWithBr(children)}
               </p>
+            );
+          },
+          li({ node, children, ...props }: any) {
+            return (
+              <li {...props}>
+                {renderWithBr(children)}
+              </li>
+            );
+          },
+          blockquote({ node, children, ...props }: any) {
+            return (
+              <blockquote {...props}>
+                {renderWithBr(children)}
+              </blockquote>
             );
           },
           img({ src, alt, title, ...props }) {

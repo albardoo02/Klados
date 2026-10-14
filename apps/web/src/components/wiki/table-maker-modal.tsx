@@ -1357,7 +1357,7 @@ export function TableMakerModal({
                             style={{ textAlign: alignments[cIdx] || 'left' }}
                             className="border border-border px-3 py-1.5 text-foreground/90"
                           >
-                            {cell.split('<br>').map((line, lIdx) => (
+                            {cell.split(/<br\s*\/?>/i).map((line, lIdx) => (
                               <React.Fragment key={lIdx}>
                                 {lIdx > 0 && <br />}
                                 {line}
