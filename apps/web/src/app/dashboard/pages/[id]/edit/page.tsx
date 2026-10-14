@@ -10,7 +10,7 @@ import {markdown} from '@codemirror/lang-markdown';
 import { Annotation, Compartment, EditorState, RangeSetBuilder } from '@codemirror/state';
 import { vim } from '@replit/codemirror-vim';
 import { Decoration, DecorationSet, keymap, ViewPlugin, ViewUpdate } from '@codemirror/view';
-import { MarkdownRenderer, getPageCategories, getPageCategoryNames } from '@/components/markdown-renderer';
+import { MarkdownRenderer, getPageCategories, getPageCategoryNames, slugifyHeading } from '@/components/markdown-renderer';
 import { CategoryBox } from '@/components/wiki/category-box';
 import { DiffViewer } from '@/components/diff-viewer';
 import { MediaLibraryModal } from '@/components/media-library-modal';
@@ -38,6 +38,7 @@ import {
   AlignLeft,
   AlignRight,
   ArrowLeft,
+  ArrowUpDown,
   Bold,
   Check,
   CheckSquare,
@@ -543,6 +544,108 @@ export default function PageEditPage() {
   const svBoxRef = useRef<HTMLDivElement>(null);
   const hueBarRef = useRef<HTMLDivElement>(null);
 
+  // スクロール & カーソル現在位置 同期設定 (デフォルトON)
+  const [syncScroll, setSyncScroll] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('klados_sync_scroll');
+      return stored === null ? true : stored === 'true';
+    }
+    return true;
+  });
+  const syncScrollRef = useRef(syncScroll);
+  syncScrollRef.current = syncScroll;
+
+  const toggleSyncScroll = () => {
+    setSyncScroll((prev) => {
+      const next = !prev;
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('klados_sync_scroll', String(next));
+      }
+      return next;
+    });
+  };
+
+  const previewContainerRef = useRef<HTMLDivElement>(null);
+  const scrollingSourceRef = useRef<'editor' | 'preview' | null>(null);
+  const scrollLockTimerRef = useRef<any>(null);
+  const lastCursorLineRef = useRef<number>(1);
+
+  // エディタの行番号に対応するプレビューの垂直スクロール位置を、見出しアンカーおよびセクション補間で精密計算
+  const getPreviewTopForLine = useCallback(
+    (lineNum: number, doc: { lines: number; line: (n: number) => { text: string } }) => {
+      const previewContainer = previewContainerRef.current;
+      if (!previewContainer) return 0;
+
+      const totalLines = doc.lines;
+      const maxScroll = Math.max(0, previewContainer.scrollHeight - previewContainer.clientHeight);
+      if (maxScroll <= 0) return 0;
+
+      interface HeadingMark {
+        line: number;
+        id: string;
+      }
+      const headings: HeadingMark[] = [];
+      const slugCounts = new Map<string, number>();
+
+      for (let i = 1; i <= totalLines; i++) {
+        const text = doc.line(i).text;
+        const match = /^(#{1,6})\s+(.+)$/.exec(text);
+        if (match) {
+          const baseSlug = slugifyHeading(match[2].trim());
+          const count = slugCounts.get(baseSlug) || 0;
+          slugCounts.set(baseSlug, count + 1);
+          const id = count === 0 ? baseSlug : `${baseSlug}-${count}`;
+          headings.push({ line: i, id });
+        }
+      }
+
+      const getRelTop = (el: HTMLElement) => {
+        const elRect = el.getBoundingClientRect();
+        const cRect = previewContainer.getBoundingClientRect();
+        return elRect.top - cRect.top + previewContainer.scrollTop;
+      };
+
+      if (headings.length === 0) {
+        const progress = Math.max(0, Math.min(1, (lineNum - 1) / Math.max(1, totalLines - 1)));
+        return progress * maxScroll;
+      }
+
+      // 最初の見出しより前
+      if (lineNum <= headings[0].line) {
+        const firstEl = document.getElementById(headings[0].id);
+        const firstTop = firstEl ? getRelTop(firstEl) : 0;
+        const progress = Math.max(0, Math.min(1, (lineNum - 1) / Math.max(1, headings[0].line - 1)));
+        return progress * firstTop;
+      }
+
+      // 最後の見出しより後
+      const lastH = headings[headings.length - 1];
+      if (lineNum >= lastH.line) {
+        const lastEl = document.getElementById(lastH.id);
+        const lastTop = lastEl ? getRelTop(lastEl) : 0;
+        const progress = Math.max(0, Math.min(1, (lineNum - lastH.line) / Math.max(1, totalLines - lastH.line)));
+        return lastTop + progress * Math.max(0, maxScroll - lastTop);
+      }
+
+      // 途中の見出し間
+      for (let i = 0; i < headings.length - 1; i++) {
+        const hA = headings[i];
+        const hB = headings[i + 1];
+        if (lineNum >= hA.line && lineNum <= hB.line) {
+          const elA = document.getElementById(hA.id);
+          const elB = document.getElementById(hB.id);
+          const topA = elA ? getRelTop(elA) : 0;
+          const topB = elB ? getRelTop(elB) : topA + 100;
+          const progress = Math.max(0, Math.min(1, (lineNum - hA.line) / Math.max(1, hB.line - hA.line)));
+          return topA + progress * (topB - topA);
+        }
+      }
+
+      return 0;
+    },
+    []
+  );
+
   const updateColorFromHsv = (nextH: number, nextS: number, nextV: number) => {
     const h = clampNum(Math.round(nextH), 0, 360);
     const s = clampNum(Math.round(nextS), 0, 100);
@@ -644,6 +747,56 @@ export default function PageEditPage() {
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, [colorPickerOpen, updateColorPickerPos]);
+
+  // プレビュー側のスクロールを検知してエディタを同期スクロール
+  useEffect(() => {
+    const previewContainer = previewContainerRef.current;
+    if (!previewContainer) return;
+
+    const handlePreviewScroll = () => {
+      if (!syncScrollRef.current) return;
+      if (scrollingSourceRef.current === 'editor') return;
+      if (!viewRef.current) return;
+
+      scrollingSourceRef.current = 'preview';
+      clearTimeout(scrollLockTimerRef.current);
+      scrollLockTimerRef.current = setTimeout(() => {
+        scrollingSourceRef.current = null;
+      }, 120);
+
+      const view = viewRef.current;
+      const maxPreview = previewContainer.scrollHeight - previewContainer.clientHeight;
+      if (maxPreview <= 0) return;
+
+      const progress = previewContainer.scrollTop / maxPreview;
+      const maxEditor = view.scrollDOM.scrollHeight - view.scrollDOM.clientHeight;
+      view.scrollDOM.scrollTop = progress * maxEditor;
+    };
+
+    previewContainer.addEventListener('scroll', handlePreviewScroll, { passive: true });
+    return () => {
+      previewContainer.removeEventListener('scroll', handlePreviewScroll);
+    };
+  }, [tab]);
+
+  // タブ切り替え時（編集→分割またはプレビュー）に現在カーソル位置へプレビューを自動追従
+  useEffect(() => {
+    if ((tab === 'split' || tab === 'preview') && syncScrollRef.current && viewRef.current) {
+      const view = viewRef.current;
+      const headPos = view.state.selection.main.head;
+      const cursorLine = view.state.doc.lineAt(headPos).number;
+      const timer = setTimeout(() => {
+        if (previewContainerRef.current) {
+          const targetTop = getPreviewTopForLine(cursorLine, view.state.doc);
+          previewContainerRef.current.scrollTo({
+            top: Math.max(0, targetTop - 60),
+            behavior: 'smooth',
+          });
+        }
+      }, 60);
+      return () => clearTimeout(timer);
+    }
+  }, [tab, getPreviewTopForLine]);
 
   // リアルタイム協調編集 & Presence ステート
   const [collaborators, setCollaborators] = useState<Collaborator[]>([]);
@@ -2094,6 +2247,24 @@ export default function PageEditPage() {
             from: update.state.selection.main.from,
             to: update.state.selection.main.to,
           };
+
+          // カーソル位置の変更検知 & プレビュー同期 (現在位置に連動)
+          if (syncScrollRef.current && scrollingSourceRef.current === null) {
+            const headPos = update.state.selection.main.head;
+            const cursorLine = update.state.doc.lineAt(headPos).number;
+            if (cursorLine !== lastCursorLineRef.current) {
+              lastCursorLineRef.current = cursorLine;
+              const previewEl = previewContainerRef.current;
+              if (previewEl) {
+                const targetTop = getPreviewTopForLine(cursorLine, update.state.doc);
+                previewEl.scrollTo({
+                  top: Math.max(0, targetTop - 60),
+                  behavior: 'smooth',
+                });
+              }
+            }
+          }
+
           if (update.docChanged) {
             const content = update.state.doc.toString();
             setPreview(content);
@@ -2128,6 +2299,26 @@ export default function PageEditPage() {
     const view = new EditorView({ state: startState, parent: editorRef.current });
     viewRef.current = view;
 
+    // エディタ側スクロール → プレビュー同期
+    const scrollHandler = () => {
+      if (!syncScrollRef.current) return;
+      if (scrollingSourceRef.current === 'preview') return;
+      scrollingSourceRef.current = 'editor';
+      clearTimeout(scrollLockTimerRef.current);
+      scrollLockTimerRef.current = setTimeout(() => {
+        scrollingSourceRef.current = null;
+      }, 120);
+
+      const previewContainer = previewContainerRef.current;
+      if (!previewContainer) return;
+
+      const topBlock = view.lineBlockAtHeight(view.scrollDOM.scrollTop);
+      const topDocLine = view.state.doc.lineAt(topBlock.from).number;
+      const targetTop = getPreviewTopForLine(topDocLine, view.state.doc);
+      previewContainer.scrollTop = targetTop;
+    };
+    view.scrollDOM.addEventListener('scroll', scrollHandler, { passive: true });
+
     // 初期カーソル位置を安全に末尾に設定
     const docLength = view.state.doc.length;
     view.dispatch({
@@ -2137,10 +2328,11 @@ export default function PageEditPage() {
     lastSelectionRef.current = { from: docLength, to: docLength };
 
     return () => {
+      view.scrollDOM.removeEventListener('scroll', scrollHandler);
       view.destroy();
       viewRef.current = null;
     };
-  }, [id, Boolean(page)]);
+  }, [id, Boolean(page), getPreviewTopForLine]);
 
   // キーバインドの動的切り替え
   const handleToggleKeybinding = (newMode: 'standard' | 'vim' | 'nano') => {
@@ -2745,6 +2937,31 @@ export default function PageEditPage() {
               </button>
             </div>
 
+            {/* スクロール同期トグル (分割ビュー時) */}
+            {tab === 'split' && (
+              <button
+                type="button"
+                onClick={toggleSyncScroll}
+                className={`hidden sm:inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-lg border transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                  syncScroll
+                    ? 'bg-primary/10 border-primary text-primary font-semibold'
+                    : 'bg-muted/40 border-border text-muted-foreground hover:text-foreground hover:border-foreground/30'
+                }`}
+                title={
+                  syncScroll
+                    ? 'プレビュー同期: ON (エディタの現在位置・スクロールとプレビューを自動連動。クリックでOFF)'
+                    : 'プレビュー同期: OFF (クリックで連動開始)'
+                }
+              >
+                <ArrowUpDown className="size-3.5 shrink-0" />
+                <span className="hidden md:inline">プレビュー同期</span>
+                <span className="md:hidden">同期</span>
+                <span className={`text-[10px] px-1 py-0.2 rounded font-mono ${syncScroll ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>
+                  {syncScroll ? 'ON' : 'OFF'}
+                </span>
+              </button>
+            )}
+
             {/* ビュー切り替えタブ (スマホ小画面用: 超コンパクト2択) */}
             <div className="sm:hidden flex border border-border rounded-lg overflow-hidden text-xs bg-muted/30 p-0.5 whitespace-nowrap shrink-0">
               <button
@@ -3074,6 +3291,28 @@ export default function PageEditPage() {
               <Sparkles className="size-3.5 shrink-0" />
               <span>/ コマンド</span>
             </button>
+
+            {/* 分割表示時のスクロール・カーソル同期トグル */}
+            {tab === 'split' && (
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={toggleSyncScroll}
+                className={`flex items-center gap-1 px-2 py-1 rounded transition-colors font-medium cursor-pointer shrink-0 text-xs ${
+                  syncScroll
+                    ? 'bg-primary/15 text-primary border border-primary/30 font-semibold'
+                    : 'bg-muted/50 text-muted-foreground hover:text-foreground border border-border'
+                }`}
+                title={
+                  syncScroll
+                    ? 'プレビュー同期: ON (カーソル位置・スクロール連動中。クリックでOFF)'
+                    : 'プレビュー同期: OFF (クリックで連動開始)'
+                }
+              >
+                <ArrowUpDown className="size-3.5 shrink-0" />
+                <span>同期 {syncScroll ? 'ON' : 'OFF'}</span>
+              </button>
+            )}
 
             <div className="h-4 w-px bg-border mx-1 shrink-0" />
 
@@ -4029,6 +4268,7 @@ export default function PageEditPage() {
         {/* プレビュー領域 (小画面では上下分割の下半分、大画面では左右分割の右半分) */}
         {(tab === 'preview' || tab === 'split') && (
           <div
+            ref={previewContainerRef}
             className={`${
               tab === 'split'
                 ? 'w-full md:w-1/2 h-1/2 md:h-full'
