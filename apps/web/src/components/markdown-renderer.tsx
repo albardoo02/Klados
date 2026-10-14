@@ -10,6 +10,7 @@ import rehypeHighlight from 'rehype-highlight';
 import rehypeKatex from 'rehype-katex';
 import {
   Check,
+  ChevronRight,
   Copy,
   Download,
   ExternalLink,
@@ -456,6 +457,113 @@ function renderInlineCaption(text?: string): React.ReactNode {
   }
 
   return nodes.length > 0 ? nodes : text;
+}
+
+/**
+ * rehype plugin to transform <details> and <summary> raw HTML nodes into real HAST elements
+ */
+function rehypeDetails() {
+  return function transformer(tree: any) {
+    function transformNodes(nodes: any[]): any[] {
+      const result: any[] = [];
+      const stack: any[] = [];
+
+      for (let i = 0; i < nodes.length; i++) {
+        const node = nodes[i];
+
+        if (node.type === 'raw' || node.type === 'html') {
+          const val = String(node.value || '');
+
+          if (/<details(\s+[^>]*)?>/i.test(val)) {
+            const isOpen = /<details\s+[^>]*open/i.test(val);
+            const detailsNode: any = {
+              type: 'element',
+              tagName: 'details',
+              properties: isOpen ? { open: true } : {},
+              children: [],
+            };
+
+            const summaryMatch = /<summary(?:\s+[^>]*)?>([\s\S]*?)<\/summary>/i.exec(val);
+            if (summaryMatch) {
+              detailsNode.children.push({
+                type: 'element',
+                tagName: 'summary',
+                properties: {},
+                children: [{ type: 'text', value: summaryMatch[1].trim() }],
+              });
+            }
+
+            stack.push(detailsNode);
+            continue;
+          }
+
+          if (stack.length > 0 && /<summary(?:\s+[^>]*)?>([\s\S]*?)<\/summary>/i.test(val)) {
+            const current = stack[stack.length - 1];
+            const hasSummary = current.children.some((c: any) => c.tagName === 'summary');
+            if (!hasSummary) {
+              const summaryMatch = /<summary(?:\s+[^>]*)?>([\s\S]*?)<\/summary>/i.exec(val);
+              current.children.push({
+                type: 'element',
+                tagName: 'summary',
+                properties: {},
+                children: [{ type: 'text', value: summaryMatch ? summaryMatch[1].trim() : '詳細' }],
+              });
+              continue;
+            }
+          }
+
+          if (/<\/details>/i.test(val)) {
+            if (stack.length > 0) {
+              const finished = stack.pop();
+              const hasSummary = finished.children.some((c: any) => c.tagName === 'summary');
+              if (!hasSummary) {
+                finished.children.unshift({
+                  type: 'element',
+                  tagName: 'summary',
+                  properties: {},
+                  children: [{ type: 'text', value: '詳細' }],
+                });
+              }
+
+              if (stack.length > 0) {
+                stack[stack.length - 1].children.push(finished);
+              } else {
+                result.push(finished);
+              }
+            }
+            continue;
+          }
+        }
+
+        if (stack.length > 0) {
+          if (node.children) {
+            node.children = transformNodes(node.children);
+          }
+          stack[stack.length - 1].children.push(node);
+        } else {
+          if (node.children) {
+            node.children = transformNodes(node.children);
+          }
+          result.push(node);
+        }
+      }
+
+      while (stack.length > 0) {
+        const unclosed = stack.pop();
+        if (stack.length > 0) {
+          stack[stack.length - 1].children.push(unclosed);
+        } else {
+          result.push(unclosed);
+        }
+      }
+
+      return result;
+    }
+
+    if (tree && Array.isArray(tree.children)) {
+      tree.children = transformNodes(tree.children);
+    }
+  };
 }
 
 /**
@@ -1218,7 +1326,7 @@ export function MarkdownRenderer({ content, className = '', siteSlug }: Markdown
           return url;
         }}
         remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[rehypeHighlight, rehypeKatex]}
+        rehypePlugins={[rehypeHighlight, rehypeKatex, rehypeDetails]}
         components={{
           h1: renderHeading('h1'),
           h2: renderHeading('h2'),
@@ -1286,6 +1394,29 @@ export function MarkdownRenderer({ content, className = '', siteSlug }: Markdown
               <td {...props}>
                 {renderWithBr(children)}
               </td>
+            );
+          },
+          details({ node, children, ...props }: any) {
+            return (
+              <details
+                className="my-3 rounded-xl border border-border bg-card/40 overflow-hidden shadow-2xs group transition-all [&>*:not(summary)]:px-4 [&>*:not(summary):first-of-type]:pt-3 [&>*:not(summary):last-child]:pb-3"
+                {...props}
+              >
+                {children}
+              </details>
+            );
+          },
+          summary({ node, children, ...props }: any) {
+            const rawText = extractText(children);
+            const formatted = renderInlineCaption(rawText) || children;
+            return (
+              <summary
+                className="px-4 py-2.5 font-semibold text-sm cursor-pointer select-none bg-muted/40 hover:bg-muted/70 transition-colors flex items-center gap-2 border-b border-border/40 group-not-open:border-transparent list-none marker:content-none [&::-webkit-details-marker]:hidden"
+                {...props}
+              >
+                <ChevronRight className="size-4 text-muted-foreground group-open:rotate-90 transition-transform duration-150 shrink-0" />
+                <span className="flex-1">{renderWithBr(formatted)}</span>
+              </summary>
             );
           },
           a({ href, children, ...props }) {

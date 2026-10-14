@@ -246,6 +246,31 @@
   border-top: 1px solid var(--border);
 }
 
+.markdown-body details {
+  margin: 1rem 0;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  overflow: hidden;
+  background-color: color-mix(in oklch, var(--muted) 25%, transparent);
+}
+
+.markdown-body details summary {
+  padding: 0.65rem 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  background-color: var(--muted);
+  user-select: none;
+}
+
+.markdown-body details[open] summary {
+  border-bottom: 1px solid var(--border);
+}
+
+.markdown-body details > *:not(summary) {
+  padding-left: 1rem;
+  padding-right: 1rem;
+}
+
 .markdown-body ul {
   list-style-type: disc;
   padding-left: 1.5rem;
