@@ -70,30 +70,35 @@ func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
 		log.Fatalf("failed to init minio: %v", err)
 	}
 
-	// バケット作成（存在しない場合）および公開読み取りポリシーの設定
-	exists, bErr := minioClient.BucketExists(context.Background(), cfg.MinioBucket)
-	if bErr != nil {
-		log.Printf("[MinIO] Warning: BucketExists check failed: %v", bErr)
-	}
-	if !exists {
-		if err := minioClient.MakeBucket(context.Background(), cfg.MinioBucket, minio.MakeBucketOptions{}); err != nil {
-			log.Printf("[MinIO] Warning: MakeBucket %s failed: %v", cfg.MinioBucket, err)
-		} else {
-			log.Printf("[MinIO] Bucket %s created successfully", cfg.MinioBucket)
-		}
-	}
-	policy := fmt.Sprintf(`{
-		"Version": "2012-10-17",
-		"Statement": [
-			{
-				"Effect": "Allow",
-				"Principal": {"AWS": ["*"]},
-				"Action": ["s3:GetObject"],
-				"Resource": ["arn:aws:s3:::%s/*"]
+	// バケット作成（存在しない場合）および公開読み取りポリシーの設定（MinIO起動待ちリトライ付き）
+	go func() {
+		for i := 0; i < 15; i++ {
+			if i > 0 {
+				time.Sleep(2 * time.Second)
 			}
-		]
-	}`, cfg.MinioBucket)
-	_ = minioClient.SetBucketPolicy(context.Background(), cfg.MinioBucket, policy)
+			exists, bErr := minioClient.BucketExists(context.Background(), cfg.MinioBucket)
+			if bErr == nil {
+				if !exists {
+					if err := minioClient.MakeBucket(context.Background(), cfg.MinioBucket, minio.MakeBucketOptions{}); err == nil {
+						log.Printf("[MinIO] Bucket %s created successfully", cfg.MinioBucket)
+					}
+				}
+				policy := fmt.Sprintf(`{
+					"Version": "2012-10-17",
+					"Statement": [
+						{
+							"Effect": "Allow",
+							"Principal": {"AWS": ["*"]},
+							"Action": ["s3:GetObject"],
+							"Resource": ["arn:aws:s3:::%s/*"]
+						}
+					]
+				}`, cfg.MinioBucket)
+				_ = minioClient.SetBucketPolicy(context.Background(), cfg.MinioBucket, policy)
+				return
+			}
+		}
+	}()
 
 	// ハンドラー
 	authH := &handler.AuthHandler{DB: db, JWTSecret: cfg.JWTSecret, Cfg: cfg}

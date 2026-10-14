@@ -7,4 +7,4 @@ RUN apk add --no-cache curl ca-certificates && \
 EXPOSE 9000 9001
 VOLUME ["/data"]
 
-ENTRYPOINT ["minio"]
+CMD ["minio", "server", "/data", "--console-address", ":9001"]
