@@ -460,7 +460,172 @@ function renderInlineCaption(text?: string): React.ReactNode {
 }
 
 /**
- * rehype plugin to transform <details> and <summary> raw HTML nodes into real HAST elements
+ * HTMLの属性文字列 (例: id="m2" name="m2" class="foo") をパースして HAST properties オブジェクトを生成
+ */
+function parseHtmlAttributes(attrString: string): Record<string, any> {
+  const properties: Record<string, any> = {};
+  if (!attrString) return properties;
+
+  const attrRegex = /([a-zA-Z0-9_\-]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = attrRegex.exec(attrString)) !== null) {
+    const key = match[1].toLowerCase();
+    const val = match[2] ?? match[3] ?? match[4] ?? true;
+
+    if (key === 'class') {
+      properties.className = String(val).trim();
+    } else if (key === 'id') {
+      properties.id = String(val).trim();
+    } else if (key === 'name') {
+      properties.name = String(val).trim();
+      // id が未設定の場合は name を id としても扱う（ページ内アンカー互換性）
+      if (!properties.id) {
+        properties.id = String(val).trim();
+      }
+    } else if (key === 'href') {
+      const trimmed = String(val).trim();
+      const lower = trimmed.toLowerCase();
+      if (
+        lower.startsWith('javascript:') ||
+        lower.startsWith('vbscript:') ||
+        lower.startsWith('data:text/html')
+      ) {
+        properties.href = '#';
+      } else {
+        properties.href = trimmed;
+      }
+    } else if (key === 'target') {
+      properties.target = String(val).trim();
+    } else if (key === 'rel') {
+      properties.rel = String(val).trim();
+    } else if (key === 'title') {
+      properties.title = String(val).trim();
+    } else if (key === 'style') {
+      properties.style = String(val).trim();
+    } else if (key === 'align') {
+      properties.align = String(val).trim();
+    }
+  }
+
+  return properties;
+}
+
+/**
+ * raw / html ノードの文字列を解析し、HAST の element / text ノード配列に変換
+ */
+function parseRawHtmlToHast(val: string): any[] {
+  if (!val) return [];
+
+  // HTMLタグやコメントが含まれていない場合はプレーンテキストとして返す
+  if (!/<[a-zA-Z!/]/.test(val)) {
+    return [{ type: 'text', value: val }];
+  }
+
+  const nodes: any[] = [];
+  let remaining = val;
+
+  // タグまたはコメントにマッチ
+  const tagTokenRegex = /<!--[\s\S]*?-->|<(\/)?([a-zA-Z0-9]+)((?:\s+[^>]*)?)(\/?)>/;
+
+  while (remaining.length > 0) {
+    const match = tagTokenRegex.exec(remaining);
+    if (!match) {
+      if (remaining.length > 0) {
+        nodes.push({ type: 'text', value: remaining });
+      }
+      break;
+    }
+
+    // タグの直前にあるテキスト
+    if (match.index > 0) {
+      const textBefore = remaining.slice(0, match.index);
+      if (textBefore.length > 0) {
+        nodes.push({ type: 'text', value: textBefore });
+      }
+    }
+
+    const fullMatch = match[0];
+    remaining = remaining.slice(match.index + fullMatch.length);
+
+    // HTMLコメントはレンダリングせず除外
+    if (fullMatch.startsWith('<!--')) {
+      continue;
+    }
+
+    const isClose = match[1] === '/';
+    const rawTagName = (match[2] || '').toLowerCase();
+    const attrString = match[3] || '';
+
+    // セキュリティ上の危険なタグは除外
+    if (['script', 'iframe', 'object', 'embed', 'style'].includes(rawTagName)) {
+      continue;
+    }
+
+    const isSelfClosing =
+      match[4] === '/' ||
+      rawTagName === 'br' ||
+      rawTagName === 'hr' ||
+      rawTagName === 'img' ||
+      rawTagName === 'wbr';
+
+    if (isClose) {
+      // 孤立した閉じタグは無視
+      continue;
+    }
+
+    const properties = parseHtmlAttributes(attrString);
+
+    // 単独アンカータグ（例: <a id="m2"></a> や <a id="m2" />、または閉じタグのない <a id="m2">）
+    if (rawTagName === 'a' && (properties.id || properties.name) && !properties.href) {
+      const closeAMatch = /^[\s\n]*<\/a>/i.exec(remaining);
+      if (closeAMatch) {
+        remaining = remaining.slice(closeAMatch[0].length);
+      }
+      nodes.push({
+        type: 'element',
+        tagName: 'a',
+        properties,
+        children: [],
+      });
+      continue;
+    }
+
+    // 直後に対応する閉じタグがあるか確認
+    let innerText: string | null = null;
+    if (!isSelfClosing) {
+      const closePattern = new RegExp(`^([\\s\\S]*?)<\\/${rawTagName}>`, 'i');
+      const closeMatch = closePattern.exec(remaining);
+      if (closeMatch) {
+        innerText = closeMatch[1];
+        remaining = remaining.slice(closeMatch[0].length);
+      }
+    }
+
+    const children = innerText !== null ? parseRawHtmlToHast(innerText) : [];
+
+    if (rawTagName === 'center') {
+      nodes.push({
+        type: 'element',
+        tagName: 'div',
+        properties: { ...properties, className: `${properties.className || ''} text-center`.trim() },
+        children,
+      });
+    } else {
+      nodes.push({
+        type: 'element',
+        tagName: rawTagName,
+        properties,
+        children,
+      });
+    }
+  }
+
+  return nodes;
+}
+
+/**
+ * rehype plugin to transform <details>, <summary>, and raw HTML nodes (<a id="...">, <span ...>, <br>, etc.) into real HAST elements
  */
 function rehypeDetails() {
   return function transformer(tree: any) {
@@ -533,6 +698,17 @@ function rehypeDetails() {
             }
             continue;
           }
+
+          // その他の raw HTML ノード（<a id="...">, <span ...>, <br>, コメント等）の変換
+          const parsedNodes = parseRawHtmlToHast(val);
+          for (const pNode of parsedNodes) {
+            if (stack.length > 0) {
+              stack[stack.length - 1].children.push(pNode);
+            } else {
+              result.push(pNode);
+            }
+          }
+          continue;
         }
 
         if (stack.length > 0) {
@@ -1419,7 +1595,35 @@ export function MarkdownRenderer({ content, className = '', siteSlug }: Markdown
               </summary>
             );
           },
-          a({ href, children, ...props }) {
+          a({ href, id, children, ...props }: any) {
+            const anchorId = id || (props as any).name;
+
+            // アンカーターゲット (例: <a id="m2"></a> または <a name="m2"></a>)
+            // hrefがなく、idまたはnameが指定されている場合
+            if (!href && anchorId) {
+              const isEmpty =
+                !children ||
+                (Array.isArray(children) && children.length === 0) ||
+                (typeof children === 'string' && children.trim() === '');
+
+              if (isEmpty) {
+                return (
+                  <span
+                    id={anchorId}
+                    data-anchor="true"
+                    className="scroll-mt-24 pointer-events-none inline-block h-0 w-0 -translate-y-2 opacity-0 select-none"
+                    aria-hidden="true"
+                  />
+                );
+              }
+
+              return (
+                <span id={anchorId} className="scroll-mt-24" {...props}>
+                  {children}
+                </span>
+              );
+            }
+
             // 文字色・背景色（ハイライト）・下線リンク記号の検知
             if (
               href &&
@@ -1515,6 +1719,7 @@ export function MarkdownRenderer({ content, className = '', siteSlug }: Markdown
 
               return (
                 <a
+                  id={anchorId}
                   href={href}
                   onClick={handleClick}
                   className="text-blue-500 hover:text-blue-600 underline underline-offset-4 transition-colors font-medium cursor-pointer"
@@ -1534,6 +1739,7 @@ export function MarkdownRenderer({ content, className = '', siteSlug }: Markdown
               const formattedHref = href?.startsWith('www.') ? `https://${href}` : href;
               return (
                 <a
+                  id={anchorId}
                   href={formattedHref}
                   target="_blank"
                   rel="noopener noreferrer"
@@ -1599,12 +1805,55 @@ export function MarkdownRenderer({ content, className = '', siteSlug }: Markdown
 
             return (
               <Link
+                id={anchorId}
                 href={internalHref}
                 className="text-blue-500 hover:text-blue-600 underline underline-offset-4 transition-colors font-medium"
                 {...props}
               >
                 {children}
               </Link>
+            );
+          },
+          span({ id, children, className = '', ...props }: any) {
+            if (id) {
+              const isEmpty =
+                !children ||
+                (Array.isArray(children) && children.length === 0) ||
+                (typeof children === 'string' && children.trim() === '');
+              if (isEmpty) {
+                return (
+                  <span
+                    id={id}
+                    data-anchor="true"
+                    className="scroll-mt-24 pointer-events-none inline-block h-0 w-0 -translate-y-2 opacity-0 select-none"
+                    aria-hidden="true"
+                  />
+                );
+              }
+              return (
+                <span id={id} className={`scroll-mt-24 ${className}`} {...props}>
+                  {children}
+                </span>
+              );
+            }
+            return (
+              <span className={className} {...props}>
+                {children}
+              </span>
+            );
+          },
+          u({ children, ...props }: any) {
+            return (
+              <u className="underline underline-offset-4 decoration-current" {...props}>
+                {children}
+              </u>
+            );
+          },
+          s({ children, ...props }: any) {
+            return (
+              <s className="line-through opacity-80" {...props}>
+                {children}
+              </s>
             );
           },
           p({ children, ...props }) {

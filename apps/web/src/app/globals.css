@@ -271,6 +271,18 @@
   padding-right: 1rem;
 }
 
+.markdown-body [data-anchor="true"] {
+  display: inline-block;
+  height: 0;
+  width: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
+  visibility: hidden;
+  pointer-events: none;
+  scroll-margin-top: 6rem;
+}
+
 .markdown-body ul {
   list-style-type: disc;
   padding-left: 1.5rem;
