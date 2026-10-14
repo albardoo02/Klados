@@ -1054,30 +1054,30 @@ export default function SitePageClient() {
             : 'bg-white/80 border-slate-200'
         }`}
       >
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-2 sm:gap-4">
+          <div className="flex items-center gap-1.5 sm:gap-3 min-w-0 flex-1 sm:flex-initial">
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              className="md:hidden p-2 rounded-lg text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 cursor-pointer"
+              className="md:hidden p-2 rounded-lg text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 cursor-pointer shrink-0"
               aria-label="メニューを開く"
             >
               {mobileMenuOpen ? <X className="size-5" /> : <Menu className="size-5" />}
             </button>
 
-            <Link href={sitePrefix || '/'} className="flex items-center gap-2.5 group">
+            <Link href={sitePrefix || '/'} className="flex items-center gap-2.5 group min-w-0">
               <div
-                className="size-8 rounded-lg flex items-center justify-center text-white shadow-xs group-hover:scale-105 transition-transform"
+                className="size-8 rounded-lg flex items-center justify-center text-white shadow-xs group-hover:scale-105 transition-transform shrink-0"
                 style={{ backgroundColor: brandPrimaryColor }}
               >
                 <BookOpen className="size-4" />
               </div>
-              <div className="flex flex-col">
-                <div className="flex items-center gap-1.5">
-                  <span className="font-bold text-base leading-tight tracking-tight">
+              <div className="flex flex-col min-w-0">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="font-bold text-sm sm:text-base leading-tight tracking-tight truncate max-w-[130px] xs:max-w-[200px] sm:max-w-[280px] md:max-w-sm">
                     {site.title}
                   </span>
                   {site.theme && site.theme !== 'minimal' && (
-                    <span className="hidden sm:inline-block text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                    <span className="hidden sm:inline-block text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-muted text-muted-foreground shrink-0">
                       {site.theme}
                     </span>
                   )}
@@ -1091,20 +1091,21 @@ export default function SitePageClient() {
             </Link>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 sm:gap-2 shrink-0">
             {/* グローバル検索ボタン (Ctrl+K) */}
             <button
               type="button"
               onClick={() => setSearchOpen(true)}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs text-muted-foreground transition-colors cursor-pointer ${
+              className={`flex items-center gap-1.5 sm:gap-2 p-2 sm:px-3 sm:py-1.5 rounded-xl border text-xs text-muted-foreground transition-colors cursor-pointer shrink-0 ${
                 isDark
                   ? 'border-slate-800 bg-slate-900/60 hover:border-slate-700 hover:text-slate-200'
                   : 'border-slate-200 bg-slate-50 hover:border-slate-300 hover:text-slate-900'
               }`}
+              title="サイト内を検索 (Ctrl+K)"
             >
-              <Search className="size-3.5" />
+              <Search className="size-3.5 shrink-0" />
               <span className="hidden sm:inline">検索...</span>
-              <kbd className="hidden sm:inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono rounded bg-muted border border-border">
+              <kbd className="hidden lg:inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono rounded bg-muted border border-border">
                 Ctrl K
               </kbd>
             </button>
@@ -1114,15 +1115,15 @@ export default function SitePageClient() {
               <button
                 type="button"
                 onClick={() => setCommentsOpen(true)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-medium transition-colors cursor-pointer ${
+                className={`flex items-center gap-1.5 p-2 sm:px-3 sm:py-1.5 rounded-xl border text-xs font-medium transition-colors cursor-pointer shrink-0 ${
                   isDark
                     ? 'border-slate-800 bg-slate-900/60 text-slate-300 hover:bg-slate-800'
                     : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100'
                 }`}
                 title="このページへのコメントとフィードバック"
               >
-                <MessageSquare className="size-3.5" />
-                <span className="hidden sm:inline">コメント</span>
+                <MessageSquare className="size-3.5 shrink-0" />
+                <span className="hidden md:inline">コメント</span>
                 {comments.length > 0 && (
                   <span
                     className="size-4 rounded-full text-white text-[10px] font-bold flex items-center justify-center -mr-1"
@@ -1137,7 +1138,7 @@ export default function SitePageClient() {
             {/* テーマ切替ボタン */}
             <button
               onClick={toggleTheme}
-              className={`p-2 rounded-xl border transition-colors cursor-pointer ${
+              className={`p-2 rounded-xl border transition-colors cursor-pointer shrink-0 ${
                 isDark
                   ? 'border-slate-700 bg-slate-800/80 text-amber-400 hover:bg-slate-700'
                   : 'border-slate-200 bg-slate-100 text-slate-600 hover:bg-slate-200'
@@ -1150,7 +1151,7 @@ export default function SitePageClient() {
 
             {/* ログイン／ダッシュボードへのリンク (ゲスト時とログイン時で最適化) */}
             {isGuest ? (
-              <div className="hidden sm:flex items-center gap-2">
+              <div className="hidden sm:flex items-center gap-2 shrink-0">
                 <PortalLink
                   href={`/login?site=${encodeURIComponent(siteSlug)}`}
                   className={`inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-xl border transition-colors ${
@@ -1171,13 +1172,13 @@ export default function SitePageClient() {
                 </PortalLink>
               </div>
             ) : (
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
                 {/* ページ新規作成ボタン (編集権限がある場合) */}
                 {canEdit && site.id && site.id !== 'demo-site' && (
                   <button
                     type="button"
                     onClick={() => setCreatePageOpen(true)}
-                    className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-xl text-white shadow-2xs hover:opacity-90 transition-all cursor-pointer"
+                    className="inline-flex items-center gap-1.5 text-xs font-semibold p-2 sm:px-3 sm:py-1.5 rounded-xl text-white shadow-2xs hover:opacity-90 transition-all cursor-pointer shrink-0"
                     style={{ backgroundColor: brandPrimaryColor }}
                     title="新しいWikiページを作成"
                   >

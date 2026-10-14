@@ -47,22 +47,46 @@ export function setCrossSubdomainCookie(name: string, value: string, days = 30) 
   document.cookie = `${name}=${encodeURIComponent(value)}; path=/; max-age=${maxAge}; SameSite=Lax${secure}`;
 }
 
-export function removeCrossSubdomainCookie(name: string) {
+export function purgeCookie(name: string) {
   if (typeof document === 'undefined') return;
   const host = window.location.hostname;
-  let domainPart = '';
+  const secure = window.location.protocol === 'https:' ? '; Secure' : '';
+  const expired = '=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; max-age=0; SameSite=Lax' + secure;
+
+  // 1. Root domain cookie (e.g. .klados.app)
   if (!/^\d+\.\d+\.\d+\.\d+$/.test(host) && host.includes('.')) {
     const parts = host.split('.');
     if (parts.length >= 2) {
       const rootDomain = parts.slice(-2).join('.');
-      domainPart = `; domain=.${rootDomain}`;
+      document.cookie = `${name}${expired}; domain=.${rootDomain}`;
+      document.cookie = `${name}${expired}; domain=${rootDomain}`;
     }
   }
-  const secure = window.location.protocol === 'https:' ? '; Secure' : '';
-  if (domainPart) {
-    document.cookie = `${name}=; path=/; max-age=0${domainPart}; SameSite=Lax${secure}`;
+  // 2. Full hostname cookie
+  document.cookie = `${name}${expired}; domain=${host}`;
+  // 3. Current host fallback without domain
+  document.cookie = `${name}${expired}`;
+}
+
+export function removeCrossSubdomainCookie(name: string) {
+  purgeCookie(name);
+}
+
+export function clearAuthStorageAndCookies() {
+  if (typeof document !== 'undefined') {
+    purgeCookie('access_token');
+    purgeCookie('klados_user');
   }
-  document.cookie = `${name}=; path=/; max-age=0; SameSite=Lax${secure}`;
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.removeItem('access_token');
+      localStorage.removeItem('klados_user');
+      localStorage.removeItem('klados-auth');
+      sessionStorage.removeItem('access_token');
+      sessionStorage.removeItem('klados_user');
+      sessionStorage.removeItem('klados-auth');
+    } catch {}
+  }
 }
 
 export function getInitialAuth(): { user: User | null; token: string | null } {
@@ -169,14 +193,7 @@ export const useAuthStore = create<AuthState>()(
         });
       },
       clearAuth: () => {
-        removeCrossSubdomainCookie('access_token');
-        removeCrossSubdomainCookie('klados_user');
-        try {
-          localStorage.removeItem('access_token');
-          localStorage.removeItem('klados_user');
-          sessionStorage.removeItem('access_token');
-          sessionStorage.removeItem('klados_user');
-        } catch {}
+        clearAuthStorageAndCookies();
         set({ user: null, token: null });
       },
     }),

@@ -1,5 +1,6 @@
 import axios from 'axios';
 import JSZip from 'jszip';
+import { useAuthStore, clearAuthStorageAndCookies } from '@/store/auth';
 
 const getApiBase = () => {
   if (typeof window !== 'undefined') {
@@ -58,19 +59,28 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// レスポンスインターセプター: 401時のリダイレクト
+// レスポンスインターセプター: 401時のセッション完全クリア & 安全なリダイレクト
+let isHandling401 = false;
+
 api.interceptors.response.use(
   (res) => res,
   (error) => {
     if (error.response?.status === 401) {
       if (typeof window !== 'undefined') {
-        localStorage.removeItem('access_token');
-        sessionStorage.removeItem('access_token');
+        // Cookie, LocalStorage, SessionStorage, Zustand を完全消去
+        clearAuthStorageAndCookies();
+        try {
+          useAuthStore.getState().clearAuth();
+        } catch {}
+
         const path = window.location.pathname;
-        // 管理画面（/dashboard）にいる場合のみログイン画面へ強制リダイレクト
+        const isAuthPage = path === '/login' || path === '/register' || path.startsWith('/verify-email');
+
+        // 管理画面（/dashboard）にいる場合のみログイン画面へ遷移（ループ防止ガード付き）
         // 公開Wiki閲覧中（カスタムドメイン含む）は絶対にログイン画面へ飛ばさない
-        if (path.startsWith('/dashboard')) {
-          window.location.href = '/login';
+        if (path.startsWith('/dashboard') && !isAuthPage && !isHandling401) {
+          isHandling401 = true;
+          window.location.href = '/login?session_expired=1';
         }
       }
     }
@@ -139,6 +149,28 @@ export const authApi = {
   login: (data: { email: string; password: string; remember_me?: boolean }) =>
     api.post('/auth/login', data),
   me: () => api.get('/auth/me'),
+  validateSession: async () => {
+    try {
+      const res = await api.get('/auth/me');
+      if (res.data?.success && res.data?.data) {
+        useAuthStore.getState().updateUser(res.data.data);
+        return { valid: true, user: res.data.data };
+      }
+      return { valid: false, user: null };
+    } catch (err: unknown) {
+      const error = err as { response?: { status?: number } };
+      if (error?.response?.status === 401 || error?.response?.status === 403 || error?.response?.status === 404) {
+        clearAuthStorageAndCookies();
+        useAuthStore.getState().clearAuth();
+        return { valid: false, user: null };
+      }
+      const current = useAuthStore.getState();
+      if (current.user && current.token) {
+        return { valid: true, user: current.user };
+      }
+      return { valid: false, user: null };
+    }
+  },
   updateProfile: (data: { display_name?: string; avatar_url?: string }) =>
     api.patch('/auth/profile', data),
   changePassword: (data: { current_password: string; new_password: string }) =>

@@ -63,22 +63,60 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   };
 
   useEffect(() => {
-    // 1. ストアにユーザー情報とトークンが既に存在する場合
-    if (user && token) {
-      setAuthReady(true);
-      return;
+    let isMounted = true;
+
+    async function verifyAuth() {
+      // 1. ストアまたはCookie/Storageから認証情報を確認・同期
+      let currentToken = token;
+      let currentUser = user;
+
+      if (!currentToken || !currentUser) {
+        const recovered = syncAuthFromCookies();
+        currentToken = recovered.token;
+        currentUser = recovered.user;
+      }
+
+      // 未認証ならセッションを確実にクリアしてログイン画面へ
+      if (!currentToken || !currentUser) {
+        if (isMounted) {
+          clearAuth();
+          router.replace('/login');
+        }
+        return;
+      }
+
+      // 2. サーバー側でトークンの有効性を検証 (/auth/me)
+      try {
+        const res = await authApi.me();
+        if (isMounted) {
+          if (res.data?.data) {
+            updateUser(res.data.data);
+          }
+          setAuthReady(true);
+        }
+      } catch (err: unknown) {
+        const error = err as { response?: { status?: number } };
+        // 401 や 403 など認証失効の場合はクリーンアップして期限切れ通知付きでリダイレクト
+        if (error?.response?.status === 401 || error?.response?.status === 403) {
+          if (isMounted) {
+            clearAuth();
+            router.replace('/login?session_expired=1');
+          }
+          return;
+        }
+        // ネットワーク切断やAPI一時不通等の場合は、ローカル情報を信用してアクセスを許可
+        if (isMounted) {
+          setAuthReady(true);
+        }
+      }
     }
 
-    // 2. Cookie / Storage からの復元を試行
-    const recovered = syncAuthFromCookies();
-    if (recovered.user && recovered.token) {
-      setAuthReady(true);
-      return;
-    }
+    verifyAuth();
 
-    // 3. ストレージ・Cookieの全探索後も未認証の場合のみログイン画面へリダイレクト
-    router.push('/login');
-  }, [user, token, router]);
+    return () => {
+      isMounted = false;
+    };
+  }, [router, clearAuth, updateUser]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -92,7 +130,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   const handleLogout = () => {
     clearAuth();
-    router.push('/login');
+    router.replace('/login?logged_out=1');
   };
 
   if (!authReady || !user) {

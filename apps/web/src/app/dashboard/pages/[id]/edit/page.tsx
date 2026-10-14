@@ -64,11 +64,13 @@ import {
   Maximize2,
   MessageSquare,
   Minus,
+  MoreHorizontal,
   Palette,
   Plus,
   Quote,
   RotateCcw,
   Save,
+  Send,
   Settings2,
   Sigma,
   Sparkles,
@@ -311,19 +313,26 @@ export default function PageEditPage() {
   const [categoryInput, setCategoryInput] = useState('');
   const categoryMenuRef = useRef<HTMLDivElement>(null);
 
+  // レスポンシブ「その他」ドロップダウンメニュー用ステート
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const moreMenuRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (categoryMenuRef.current && !categoryMenuRef.current.contains(e.target as Node)) {
         setCategoryMenuOpen(false);
       }
+      if (moreMenuRef.current && !moreMenuRef.current.contains(e.target as Node)) {
+        setMoreMenuOpen(false);
+      }
     };
-    if (categoryMenuOpen) {
+    if (categoryMenuOpen || moreMenuOpen) {
       document.addEventListener('mousedown', handleClickOutside);
     }
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, [categoryMenuOpen]);
+  }, [categoryMenuOpen, moreMenuOpen]);
 
   const handleOpenLinkModal = () => {
     let selText = '';
@@ -2346,937 +2355,1228 @@ export default function PageEditPage() {
         </div>
       )}
 
-      {/* 固定上部メニューバー (スクロールしても消失しない) */}
+      {/* 固定上部メニューバー (画面サイズに応じたフレキシブルなレスポンシブ配置) */}
       <div className="sticky top-0 z-30 shrink-0 bg-background/95 backdrop-blur-sm shadow-xs">
-        <header className="flex items-center justify-between px-4 py-2.5 border-b border-border bg-card/80 backdrop-blur-sm gap-3">
-        <div className="flex items-center gap-3 min-w-0 shrink">
-          <button
-            onClick={() => router.back()}
-            className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors cursor-pointer px-2 py-1 rounded hover:bg-muted shrink-0"
-          >
-            <ArrowLeft className="size-4" />
-            <span className="hidden sm:inline">戻る</span>
-          </button>
-          <div className="h-4 w-px bg-border hidden sm:block shrink-0" />
-          <div className="flex flex-col min-w-0">
-            <span className="font-semibold text-sm leading-tight truncate max-w-[180px] sm:max-w-[260px] md:max-w-[340px]">
-              {page?.title ?? '読み込み中...'}
-            </span>
-            <div className="flex items-center gap-2 text-xs text-muted-foreground truncate">
-              {site && <span className="truncate">{site.title}</span>}
-              {page?.slug && <span className="shrink-0">/{page.slug}</span>}
-              {(page?.updated_by || page?.created_by) && (
-                <span className="hidden md:inline-flex items-center gap-1 text-[11px] text-muted-foreground shrink-0">
-                  <span>•</span>
-                  <span>
-                    最終更新:{' '}
-                    {(page.updated_by || page.created_by)?.display_name ||
-                      (page.updated_by || page.created_by)?.username}
-                  </span>
-                </span>
-              )}
-              <span className="inline-flex items-center gap-1 shrink-0">
-                {saved ? (
-                  <>
-                    <Check className="size-3 text-emerald-500" />
-                    <span>保存済み</span>
-                  </>
-                ) : (
-                  <span className="text-amber-500 font-medium">編集中...</span>
-                )}
+        <header className="flex items-center justify-between px-3 sm:px-4 py-2 sm:py-2.5 border-b border-border bg-card/80 backdrop-blur-sm gap-2 sm:gap-3">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1 sm:flex-initial mr-1">
+            <button
+              onClick={() => router.back()}
+              className="flex items-center gap-1 text-xs sm:text-sm text-muted-foreground hover:text-foreground transition-colors cursor-pointer px-1.5 sm:px-2 py-1 rounded hover:bg-muted shrink-0"
+              title="戻る"
+            >
+              <ArrowLeft className="size-4" />
+              <span className="hidden sm:inline">戻る</span>
+            </button>
+            <div className="h-4 w-px bg-border hidden sm:block shrink-0" />
+            <div className="flex flex-col min-w-0">
+              <span className="font-semibold text-xs sm:text-sm leading-tight truncate max-w-[120px] xs:max-w-[180px] sm:max-w-[240px] md:max-w-[320px] lg:max-w-[420px]">
+                {page?.title ?? '読み込み中...'}
               </span>
-            </div>
-          </div>
-        </div>
-
-        {/* コラボレーター アバター表示 & ツール群 */}
-        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-          {/* コラボレーター アバター一覧 */}
-          <div className="flex items-center gap-1.5 pl-1 shrink-0">
-            <div className="flex -space-x-2 overflow-hidden items-center">
-              {collaborators.map((c) => {
-                const initial = c.name.charAt(0).toUpperCase() || 'U';
-                return (
-                  <div
-                    key={c.id}
-                    title={`${c.name} (編集中)`}
-                    className={`size-7 rounded-full flex items-center justify-center text-[10px] font-bold border-2 ring-1 ring-background shadow-xs transition-transform hover:scale-110 cursor-default shrink-0 ${c.color}`}
-                  >
-                    {initial}
-                  </div>
-                );
-              })}
-            </div>
-            {collaborators.length > 1 && (
-              <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-800 whitespace-nowrap shrink-0">
-                <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="hidden md:inline">{collaborators.length}人が編集</span>
-              </span>
-            )}
-          </div>
-
-          <div className="h-4 w-px bg-border hidden sm:block shrink-0" />
-
-          {/* キーバインド切り替え (通常 / Vim / nano) */}
-          <div className="flex border border-border rounded-lg overflow-hidden text-xs bg-muted/20 p-0.5 whitespace-nowrap shrink-0">
-            <button
-              type="button"
-              onClick={() => handleToggleKeybinding('standard')}
-              className={`px-2 py-1 rounded transition-colors cursor-pointer text-[11px] font-medium whitespace-nowrap shrink-0 ${
-                keybinding === 'standard'
-                  ? 'bg-background shadow-xs text-foreground'
-                  : 'text-muted-foreground hover:text-foreground'
-              }`}
-              title="標準エディタ操作"
-            >
-              標準
-            </button>
-            <button
-              type="button"
-              onClick={() => handleToggleKeybinding('vim')}
-              className={`px-2 py-1 rounded transition-colors cursor-pointer text-[11px] font-medium flex items-center gap-1 whitespace-nowrap shrink-0 ${
-                keybinding === 'vim'
-                  ? 'bg-primary text-primary-foreground shadow-xs font-bold'
-                  : 'text-muted-foreground hover:text-foreground'
-              }`}
-              title="Vim キーバインド (Normal, Insert, Visualモード対応)"
-            >
-              <Terminal className="size-3 shrink-0" />
-              <span>Vim</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => handleToggleKeybinding('nano')}
-              className={`px-2 py-1 rounded transition-colors cursor-pointer text-[11px] font-medium flex items-center gap-1 whitespace-nowrap shrink-0 ${
-                keybinding === 'nano'
-                  ? 'bg-emerald-600 text-white shadow-xs font-bold'
-                  : 'text-muted-foreground hover:text-foreground'
-              }`}
-              title="GNU nano キーバインド (^O: 保存, ^K: 切り取り, ^U: 貼り付け, ^W: 検索, ^X: 終了)"
-            >
-              <Terminal className="size-3 shrink-0" />
-              <span>nano</span>
-            </button>
-          </div>
-
-          {/* カテゴリ設定 (メニューバー・オプション) */}
-          <div className="relative" ref={categoryMenuRef}>
-            <button
-              type="button"
-              onClick={() => setCategoryMenuOpen(!categoryMenuOpen)}
-              className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs border rounded-lg transition-colors cursor-pointer relative whitespace-nowrap shrink-0 ${
-                categoryMenuOpen || pageCategories.length > 0
-                  ? 'border-amber-300 dark:border-amber-700 bg-amber-50/70 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 font-semibold'
-                  : 'text-muted-foreground hover:text-foreground border-border hover:bg-muted'
-              }`}
-              title="ページのカテゴリを設定 (本文に [[Category:...]] を書かずに管理できます)"
-            >
-              <FolderTree className="size-3.5 text-amber-500 shrink-0" />
-              <span className="hidden md:inline">カテゴリ設定</span>
-              {pageCategories.length > 0 && (
-                <span className="px-1.5 py-0.2 rounded-full bg-amber-500 text-white text-[10px] font-bold">
-                  {pageCategories.length}
-                </span>
-              )}
-            </button>
-
-            {categoryMenuOpen && (
-              <div className="absolute right-0 top-full mt-2 z-50 w-80 p-4 bg-card text-card-foreground border border-border rounded-2xl shadow-2xl space-y-3 animate-in fade-in-0 zoom-in-95 duration-100">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1.5">
-                    <FolderTree className="size-4 text-amber-500" />
-                    <h4 className="font-bold text-xs">ページのカテゴリ設定</h4>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setCategoryMenuOpen(false)}
-                    className="p-0.5 rounded text-muted-foreground hover:text-foreground cursor-pointer"
-                  >
-                    <X className="size-4" />
-                  </button>
-                </div>
-                <p className="text-[11px] text-muted-foreground leading-relaxed">
-                  コンテンツ内に <code className="font-mono text-[10px]">[[Category:...]]</code> を書かなくても、ここで安全にカテゴリを割り当て・保持できます。
-                </p>
-
-                {/* 現在のカテゴリチップ */}
-                {pageCategories.length > 0 ? (
-                  <div className="flex flex-wrap gap-1.5">
-                    {pageCategories.map((cat) => (
-                      <span
-                        key={cat}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/70"
-                      >
-                        <FolderTree className="size-3 text-amber-500" />
-                        {cat}
-                        <button
-                          type="button"
-                          onClick={() => handleRemovePageCategory(cat)}
-                          className="ml-0.5 hover:text-rose-500 cursor-pointer"
-                          title="カテゴリを解除"
-                        >
-                          <X className="size-3" />
-                        </button>
-                      </span>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-[11px] text-muted-foreground italic py-1">
-                    カテゴリはまだ割り当てられていません
-                  </div>
-                )}
-
-                {/* 新規追加 */}
-                <div className="flex gap-1.5">
-                  <input
-                    type="text"
-                    value={categoryInput}
-                    onChange={(e) => setCategoryInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        handleAddPageCategory();
-                      }
-                    }}
-                    placeholder="カテゴリ名を入力してEnter..."
-                    className="flex-1 text-xs px-2.5 py-1.5 bg-muted/50 border border-border rounded-xl focus:outline-none focus:ring-1 focus:ring-primary"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => handleAddPageCategory()}
-                    disabled={!categoryInput.trim()}
-                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 disabled:opacity-40 cursor-pointer"
-                  >
-                    <Plus className="size-3.5" />
-                    追加
-                  </button>
-                </div>
-
-                {/* 既存カテゴリ候補 */}
-                {siteCategories.length > 0 && (
-                  <div className="pt-2 border-t border-border space-y-1.5">
-                    <span className="text-[10px] font-semibold text-muted-foreground block">
-                      サイト内の既存カテゴリから選択:
+              <div className="flex items-center gap-1.5 sm:gap-2 text-[11px] sm:text-xs text-muted-foreground truncate">
+                {site && <span className="truncate hidden sm:inline">{site.title}</span>}
+                {page?.slug && <span className="shrink-0 hidden xs:inline">/{page.slug}</span>}
+                {(page?.updated_by || page?.created_by) && (
+                  <span className="hidden lg:inline-flex items-center gap-1 text-[11px] text-muted-foreground shrink-0">
+                    <span>•</span>
+                    <span>
+                      更新:{' '}
+                      {(page.updated_by || page.created_by)?.display_name ||
+                        (page.updated_by || page.created_by)?.username}
                     </span>
-                    <div className="flex flex-wrap gap-1 max-h-32 overflow-y-auto">
-                      {siteCategories.map((c) => {
-                        const catName = String(c?.name || c?.category_name || '').trim();
-                        if (!catName) return null;
-                        const isAssigned = pageCategories.some(
-                          (item) => item.toLowerCase() === catName.toLowerCase()
-                        );
-                        return (
-                          <button
-                            key={catName}
-                            type="button"
-                            onClick={() =>
-                              isAssigned
-                                ? handleRemovePageCategory(catName)
-                                : handleAddPageCategory(catName)
-                            }
-                            className={`text-[11px] px-2 py-0.5 rounded-full border transition-colors cursor-pointer ${
-                              isAssigned
-                                ? 'bg-amber-500 text-white border-amber-500 font-semibold'
-                                : 'bg-muted/40 text-muted-foreground border-border hover:border-amber-400 hover:text-foreground'
-                            }`}
-                          >
-                            {isAssigned ? '✓ ' : '+ '}
-                            {catName}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
+                  </span>
                 )}
+                <span className="inline-flex items-center gap-1 shrink-0">
+                  {saved ? (
+                    <>
+                      <Check className="size-3 text-emerald-500" />
+                      <span className="hidden xs:inline">保存済み</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="size-2 rounded-full bg-amber-500 animate-pulse xs:hidden" />
+                      <span className="text-amber-500 font-medium hidden xs:inline">編集中...</span>
+                    </>
+                  )}
+                </span>
               </div>
-            )}
+            </div>
           </div>
 
-          {/* コメント ドロワー開閉ボタン */}
-          <button
-            type="button"
-            onClick={() => setCommentsOpen(true)}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground border border-border hover:bg-muted rounded-lg transition-colors cursor-pointer relative whitespace-nowrap shrink-0"
-            title="コメント & フィードバックを開く"
-          >
-            <MessageSquare className="size-3.5 shrink-0" />
-            <span className="hidden md:inline">コメント</span>
-            {commentList.length > 0 && (
-              <span className="size-4 rounded-full bg-primary text-primary-foreground text-[10px] font-bold flex items-center justify-center -mr-1">
-                {commentList.length}
-              </span>
-            )}
-          </button>
+          {/* 右側操作・ツール群 */}
+          <div className="flex items-center gap-1 sm:gap-1.5 md:gap-2 shrink-0">
+            {/* [xl以上] コラボレーター アバター一覧 */}
+            <div className="hidden xl:flex items-center gap-1.5 pl-1 shrink-0">
+              <div className="flex -space-x-2 overflow-hidden items-center">
+                {collaborators.map((c) => {
+                  const initial = c.name.charAt(0).toUpperCase() || 'U';
+                  return (
+                    <div
+                      key={c.id}
+                      title={`${c.name} (編集中)`}
+                      className={`size-7 rounded-full flex items-center justify-center text-[10px] font-bold border-2 ring-1 ring-background shadow-xs transition-transform hover:scale-110 cursor-default shrink-0 ${c.color}`}
+                    >
+                      {initial}
+                    </div>
+                  );
+                })}
+              </div>
+              {collaborators.length > 1 && (
+                <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-800 whitespace-nowrap shrink-0">
+                  <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  <span>{collaborators.length}人が編集</span>
+                </span>
+              )}
+            </div>
 
-          {/* 履歴 (History) ボタン */}
-          <button
-            type="button"
-            onClick={() => {
-              setSelectedVersion(null);
-              setHistoryOpen(true);
-            }}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground border border-border hover:bg-muted rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0"
-            title="変更履歴と差分を表示"
-          >
-            <HistoryIcon className="size-3.5 shrink-0" />
-            <span className="hidden md:inline">履歴</span>
-          </button>
+            {/* [xl以上] キーバインド切り替え (標準 / Vim / nano) */}
+            <div className="hidden xl:flex border border-border rounded-lg overflow-hidden text-xs bg-muted/20 p-0.5 whitespace-nowrap shrink-0">
+              <button
+                type="button"
+                onClick={() => handleToggleKeybinding('standard')}
+                className={`px-2 py-1 rounded transition-colors cursor-pointer text-[11px] font-medium whitespace-nowrap shrink-0 ${
+                  keybinding === 'standard'
+                    ? 'bg-background shadow-xs text-foreground'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+                title="標準エディタ操作"
+              >
+                標準
+              </button>
+              <button
+                type="button"
+                onClick={() => handleToggleKeybinding('vim')}
+                className={`px-2 py-1 rounded transition-colors cursor-pointer text-[11px] font-medium flex items-center gap-1 whitespace-nowrap shrink-0 ${
+                  keybinding === 'vim'
+                    ? 'bg-primary text-primary-foreground shadow-xs font-bold'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+                title="Vim キーバインド (Normal, Insert, Visualモード対応)"
+              >
+                <Terminal className="size-3 shrink-0" />
+                <span>Vim</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleToggleKeybinding('nano')}
+                className={`px-2 py-1 rounded transition-colors cursor-pointer text-[11px] font-medium flex items-center gap-1 whitespace-nowrap shrink-0 ${
+                  keybinding === 'nano'
+                    ? 'bg-emerald-600 text-white shadow-xs font-bold'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+                title="GNU nano キーバインド (^O: 保存, ^K: 切り取り, ^U: 貼り付け, ^W: 検索, ^X: 終了)"
+              >
+                <Terminal className="size-3 shrink-0" />
+                <span>nano</span>
+              </button>
+            </div>
 
-          {/* メディア一覧ボタン */}
-          <button
-            type="button"
-            onClick={() => setMediaLibraryOpen(true)}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground border border-border hover:bg-muted rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0"
-            title="サイトのメディア一覧を開く"
-          >
-            <Images className="size-3.5 shrink-0" />
-            <span className="hidden md:inline">メディア</span>
-          </button>
+            {/* [md以上] カテゴリ設定 (メニューバー・オプション) */}
+            <div className="relative hidden md:block" ref={categoryMenuRef}>
+              <button
+                type="button"
+                onClick={() => setCategoryMenuOpen(!categoryMenuOpen)}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs border rounded-lg transition-colors cursor-pointer relative whitespace-nowrap shrink-0 ${
+                  categoryMenuOpen || pageCategories.length > 0
+                    ? 'border-amber-300 dark:border-amber-700 bg-amber-50/70 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 font-semibold'
+                    : 'text-muted-foreground hover:text-foreground border-border hover:bg-muted'
+                }`}
+                title="ページのカテゴリを設定"
+              >
+                <FolderTree className="size-3.5 text-amber-500 shrink-0" />
+                <span className="hidden lg:inline">カテゴリ</span>
+                {pageCategories.length > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full bg-amber-500 text-white text-[10px] font-bold">
+                    {pageCategories.length}
+                  </span>
+                )}
+              </button>
 
-          {/* MDファイル読み込みボタン */}
-          <label
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground border border-border hover:bg-muted rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0"
-            title="手元の .md ファイルを読み込んでエディタに反映 (カテゴリ指定可能)"
-          >
-            <UploadCloud className="size-3.5 shrink-0" />
-            <span className="hidden md:inline">MD読込</span>
-            <input
-              type="file"
-              accept=".md,.markdown,.txt"
-              className="hidden"
-              onChange={async (e) => {
-                const file = e.target.files?.[0];
-                if (file) {
-                  await handleMdFileSelect(file);
-                }
-                e.target.value = '';
-              }}
-            />
-          </label>
+              {categoryMenuOpen && (
+                <div className="absolute right-0 top-full mt-2 z-50 w-80 max-w-[calc(100vw-2rem)] p-4 bg-card text-card-foreground border border-border rounded-2xl shadow-2xl space-y-3 animate-in fade-in-0 zoom-in-95 duration-100">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                      <FolderTree className="size-4 text-amber-500" />
+                      <h4 className="font-bold text-xs">ページのカテゴリ設定</h4>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setCategoryMenuOpen(false)}
+                      className="p-0.5 rounded text-muted-foreground hover:text-foreground cursor-pointer"
+                    >
+                      <X className="size-4" />
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground leading-relaxed">
+                    コンテンツ内に <code className="font-mono text-[10px]">[[Category:...]]</code> を書かなくても、ここで安全にカテゴリを割り当て・保持できます。
+                  </p>
 
-          {/* 公開プレビューリンク */}
-          {publicUrl && (
-            <Link
-              href={publicUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground border border-border hover:bg-muted rounded-lg transition-colors whitespace-nowrap shrink-0"
-              title="公開ページを別タブで確認"
-            >
-              <ExternalLink className="size-3.5 shrink-0" />
-              <span className="hidden lg:inline">公開サイト</span>
-            </Link>
-          )}
+                  {/* 現在のカテゴリチップ */}
+                  {pageCategories.length > 0 ? (
+                    <div className="flex flex-wrap gap-1.5">
+                      {pageCategories.map((cat) => (
+                        <span
+                          key={cat}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/70"
+                        >
+                          <FolderTree className="size-3 text-amber-500" />
+                          {cat}
+                          <button
+                            type="button"
+                            onClick={() => handleRemovePageCategory(cat)}
+                            className="ml-0.5 hover:text-rose-500 cursor-pointer"
+                            title="カテゴリを解除"
+                          >
+                            <X className="size-3" />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-[11px] text-muted-foreground italic py-1">
+                      カテゴリはまだ割り当てられていません
+                    </div>
+                  )}
 
-          {/* ビュー切り替えタブ */}
-          <div className="flex border border-border rounded-lg overflow-hidden text-xs bg-muted/30 p-0.5 whitespace-nowrap shrink-0">
-            <button
-              onClick={() => setTab('edit')}
-              className={`flex items-center gap-1 px-3 py-1 rounded-md transition-all cursor-pointer whitespace-nowrap shrink-0 ${
-                tab === 'edit'
-                  ? 'bg-background shadow-xs text-foreground font-medium'
-                  : 'text-muted-foreground hover:text-foreground'
-              }`}
-              title="編集のみ"
-            >
-              <FileEdit className="size-3.5 shrink-0" />
-              <span className="hidden sm:inline">編集</span>
-            </button>
-            <button
-              onClick={() => setTab('split')}
-              className={`flex items-center gap-1 px-3 py-1 rounded-md transition-all cursor-pointer whitespace-nowrap shrink-0 ${
-                tab === 'split'
-                  ? 'bg-background shadow-xs text-foreground font-medium'
-                  : 'text-muted-foreground hover:text-foreground'
-              }`}
-              title="分割プレビュー"
-            >
-              <Columns className="size-3.5 shrink-0" />
-              <span className="hidden sm:inline">分割</span>
-            </button>
-            <button
-              onClick={() => setTab('preview')}
-              className={`flex items-center gap-1 px-3 py-1 rounded-md transition-all cursor-pointer whitespace-nowrap shrink-0 ${
-                tab === 'preview'
-                  ? 'bg-background shadow-xs text-foreground font-medium'
-                  : 'text-muted-foreground hover:text-foreground'
-              }`}
-              title="プレビューのみ"
-            >
-              <Eye className="size-3.5 shrink-0" />
-              <span className="hidden sm:inline">プレビュー</span>
-            </button>
-          </div>
+                  {/* 新規追加 */}
+                  <div className="flex gap-1.5">
+                    <input
+                      type="text"
+                      value={categoryInput}
+                      onChange={(e) => setCategoryInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleAddPageCategory();
+                        }
+                      }}
+                      placeholder="カテゴリ名を入力してEnter..."
+                      className="flex-1 text-xs px-2.5 py-1.5 bg-muted/50 border border-border rounded-xl focus:outline-none focus:ring-1 focus:ring-primary"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleAddPageCategory()}
+                      disabled={!categoryInput.trim()}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 disabled:opacity-40 cursor-pointer"
+                    >
+                      <Plus className="size-3.5" />
+                      追加
+                    </button>
+                  </div>
 
-          <button
-            onClick={handleManualSave}
-            disabled={saved || updateMutation.isPending}
-            className="flex items-center gap-1 px-3 py-1.5 text-xs bg-secondary hover:bg-secondary/80 text-secondary-foreground rounded-lg disabled:opacity-40 transition-colors font-medium cursor-pointer whitespace-nowrap shrink-0"
-          >
-            {updateMutation.isPending ? (
-              <Loader2 className="size-3.5 animate-spin shrink-0" />
-            ) : (
-              <Save className="size-3.5 shrink-0" />
-            )}
-            <span>保存</span>
-          </button>
+                  {/* 既存カテゴリ候補 */}
+                  {siteCategories.length > 0 && (
+                    <div className="pt-2 border-t border-border space-y-1.5">
+                      <span className="text-[10px] font-semibold text-muted-foreground block">
+                        サイト内の既存カテゴリから選択:
+                      </span>
+                      <div className="flex flex-wrap gap-1 max-h-32 overflow-y-auto">
+                        {siteCategories.map((c) => {
+                          const catName = String(c?.name || c?.category_name || '').trim();
+                          if (!catName) return null;
+                          const isAssigned = pageCategories.some(
+                            (item) => item.toLowerCase() === catName.toLowerCase()
+                          );
+                          return (
+                            <button
+                              key={catName}
+                              type="button"
+                              onClick={() =>
+                                isAssigned
+                                  ? handleRemovePageCategory(catName)
+                                  : handleAddPageCategory(catName)
+                              }
+                              className={`text-[11px] px-2 py-0.5 rounded-full border transition-colors cursor-pointer ${
+                                isAssigned
+                                  ? 'bg-amber-500 text-white border-amber-500 font-semibold'
+                                  : 'bg-muted/40 text-muted-foreground border-border hover:border-amber-400 hover:text-foreground'
+                              }`}
+                            >
+                              {isAssigned ? '✓ ' : '+ '}
+                              {catName}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
 
-          <button
-            onClick={() =>
-              publishMutation.mutate(page?.status === 'published' ? 'draft' : 'published')
-            }
-            disabled={publishMutation.isPending}
-            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
-              page?.status === 'published'
-                ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
-                : 'bg-primary hover:bg-primary/90 text-primary-foreground'
-            }`}
-          >
-            {publishMutation.isPending ? (
-              <Loader2 className="size-3.5 animate-spin shrink-0" />
-            ) : page?.status === 'published' ? (
-              <>
-                <Check className="size-3.5 shrink-0" />
-                <span>公開中</span>
-              </>
-            ) : (
-              <span>公開する</span>
-            )}
-          </button>
-        </div>
-      </header>
-
-      {/* Markdown 書式ツールバー */}
-      {(tab === 'edit' || tab === 'split') && (
-        <div className="relative z-30 flex flex-wrap items-center gap-1 px-4 py-1.5 border-b border-border bg-muted/20 text-xs">
-          {/* スラッシュコマンド トリガーヒント */}
-          <button
-            type="button"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => {
-              insertText('/');
-              setSlashFilter('');
-              setSlashMenuOpen(true);
-            }}
-            className="flex items-center gap-1 px-2 py-1 rounded bg-primary/10 text-primary hover:bg-primary/20 transition-colors font-medium cursor-pointer"
-            title="スラッシュコマンド (/ を入力)"
-          >
-            <Sparkles className="size-3.5" />
-            <span>/ コマンド</span>
-          </button>
-
-          <div className="h-4 w-px bg-border mx-1" />
-
-          <button
-            type="button"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => wrapText('**', '**', '太字テキスト')}
-            className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer"
-            title="太字 (Bold)"
-          >
-            <Bold className="size-4" />
-          </button>
-          <button
-            type="button"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => wrapText('*', '*', '斜体テキスト')}
-            className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer"
-            title="斜体 (Italic)"
-          >
-            <Italic className="size-4" />
-          </button>
-          <button
-            type="button"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => wrapText('<u>', '</u>', '下線テキスト')}
-            className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer"
-            title="下線 (Underline)"
-          >
-            <Underline className="size-4" />
-          </button>
-          <button
-            type="button"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => wrapText('~~', '~~', '打ち消しテキスト')}
-            className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer"
-            title="取り消し線"
-          >
-            <Strikethrough className="size-4" />
-          </button>
-
-          {/* テキストカラー & ハイライト (2D HSVポインタ + RGB/HEX カラーピッカー) */}
-          <div className="relative" ref={colorPickerRef}>
+            {/* [md以上] コメント ドロワー開閉ボタン */}
             <button
               type="button"
-              onMouseDown={(e) => {
-                e.preventDefault();
-                if (viewRef.current) {
-                  lastSelectionRef.current = {
-                    from: viewRef.current.state.selection.main.from,
-                    to: viewRef.current.state.selection.main.to,
-                  };
-                }
-              }}
-              onClick={() => setColorPickerOpen(!colorPickerOpen)}
-              className={`px-2 py-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer flex items-center gap-1.5 ${
-                colorPickerOpen ? 'bg-muted text-foreground ring-1 ring-border' : ''
-              }`}
-              title="選択箇所の文字色・背景色を自由に設定 (RGBポインタピッカー)"
+              onClick={() => setCommentsOpen(true)}
+              className="hidden md:inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground border border-border hover:bg-muted rounded-lg transition-colors cursor-pointer relative whitespace-nowrap shrink-0"
+              title="コメント & フィードバックを開く"
             >
-              <Palette className="size-4 text-primary" />
-              <span
-                className="size-3 rounded-full border border-border shadow-2xs"
-                style={{ backgroundColor: customColor }}
-              />
+              <MessageSquare className="size-3.5 shrink-0" />
+              <span className="hidden lg:inline">コメント</span>
+              {commentList.length > 0 && (
+                <span className="size-4 rounded-full bg-primary text-primary-foreground text-[10px] font-bold flex items-center justify-center -mr-1">
+                  {commentList.length}
+                </span>
+              )}
             </button>
 
-            {colorPickerOpen && (
-              <div className="absolute left-0 top-full mt-2 z-50 w-72 p-3.5 bg-card text-card-foreground border border-border rounded-2xl shadow-2xl space-y-3 animate-in fade-in-0 zoom-in-95 duration-100 select-none">
-                {/* モード切替 (文字色 / 背景ハイライト) & リセット */}
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex flex-1 bg-muted/60 p-0.5 rounded-xl border border-border text-[11px] font-semibold">
-                    <button
-                      type="button"
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => setColorMode('text')}
-                      className={`flex-1 py-1 rounded-lg flex items-center justify-center gap-1 transition-all cursor-pointer ${
-                        colorMode === 'text'
-                          ? 'bg-background text-foreground shadow-2xs'
-                          : 'text-muted-foreground hover:text-foreground'
-                      }`}
-                    >
-                      <Palette className="size-3 text-primary" />
-                      <span>文字色</span>
-                    </button>
-                    <button
-                      type="button"
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => setColorMode('bg')}
-                      className={`flex-1 py-1 rounded-lg flex items-center justify-center gap-1 transition-all cursor-pointer ${
-                        colorMode === 'bg'
-                          ? 'bg-background text-foreground shadow-2xs'
-                          : 'text-muted-foreground hover:text-foreground'
-                      }`}
-                    >
-                      <Highlighter className="size-3 text-amber-500" />
-                      <span>背景マーカー</span>
-                    </button>
-                  </div>
-                  <button
-                    type="button"
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={clearColorSyntax}
-                    className="text-[10px] text-muted-foreground hover:text-rose-500 underline px-1 cursor-pointer shrink-0"
-                    title="選択箇所の色指定を解除"
-                  >
-                    色解除
-                  </button>
-                </div>
+            {/* [md以上] 履歴 (History) ボタン */}
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedVersion(null);
+                setHistoryOpen(true);
+              }}
+              className="hidden md:inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground border border-border hover:bg-muted rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0"
+              title="変更履歴と差分を表示"
+            >
+              <HistoryIcon className="size-3.5 shrink-0" />
+              <span className="hidden lg:inline">履歴</span>
+            </button>
 
-                {/* 2D Saturation / Value ポインタ移動カラーピッカー */}
-                <div className="space-y-2">
-                  <div
-                    ref={svBoxRef}
-                    onMouseDown={handleSvPointerDown}
-                    className="relative w-full h-36 rounded-xl overflow-hidden cursor-crosshair border border-border shadow-inner"
-                    style={{
-                      backgroundColor: `hsl(${hsv.h}, 100%, 50%)`,
-                      backgroundImage:
-                        'linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, transparent)',
-                    }}
-                  >
-                    {/* ポインタ */}
-                    <div
-                      className="absolute size-4 -ml-2 -mt-2 rounded-full border-2 border-white shadow-md ring-1 ring-black/40 pointer-events-none transition-transform duration-75"
-                      style={{
-                        left: `${hsv.s}%`,
-                        top: `${100 - hsv.v}%`,
-                        backgroundColor: customColor,
+            {/* [xl以上] メディア一覧ボタン */}
+            <button
+              type="button"
+              onClick={() => setMediaLibraryOpen(true)}
+              className="hidden xl:inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground border border-border hover:bg-muted rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0"
+              title="サイトのメディア一覧を開く"
+            >
+              <Images className="size-3.5 shrink-0" />
+              <span>メディア</span>
+            </button>
+
+            {/* [xl以上] MDファイル読み込みボタン */}
+            <label
+              className="hidden xl:inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground border border-border hover:bg-muted rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0"
+              title="手元の .md ファイルを読み込んでエディタに反映"
+            >
+              <UploadCloud className="size-3.5 shrink-0" />
+              <span>MD読込</span>
+              <input
+                type="file"
+                accept=".md,.markdown,.txt"
+                className="hidden"
+                onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  if (file) {
+                    await handleMdFileSelect(file);
+                  }
+                  e.target.value = '';
+                }}
+              />
+            </label>
+
+            {/* [xl以上] 公開プレビューリンク */}
+            {publicUrl && (
+              <Link
+                href={publicUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hidden xl:inline-flex items-center gap-1 px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground border border-border hover:bg-muted rounded-lg transition-colors whitespace-nowrap shrink-0"
+                title="公開ページを別タブで確認"
+              >
+                <ExternalLink className="size-3.5 shrink-0" />
+                <span>公開サイト</span>
+              </Link>
+            )}
+
+            {/* ビュー切り替えタブ (中〜大画面用: 3分割対応) */}
+            <div className="hidden sm:flex border border-border rounded-lg overflow-hidden text-xs bg-muted/30 p-0.5 whitespace-nowrap shrink-0">
+              <button
+                onClick={() => setTab('edit')}
+                className={`flex items-center gap-1 px-2.5 sm:px-3 py-1 rounded-md transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                  tab === 'edit'
+                    ? 'bg-background shadow-xs text-foreground font-medium'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+                title="編集のみ"
+              >
+                <FileEdit className="size-3.5 shrink-0" />
+                <span className="hidden md:inline">編集</span>
+              </button>
+              <button
+                onClick={() => setTab('split')}
+                className={`flex items-center gap-1 px-2.5 sm:px-3 py-1 rounded-md transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                  tab === 'split'
+                    ? 'bg-background shadow-xs text-foreground font-medium'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+                title="分割プレビュー (小画面では上下分割、大画面では左右分割)"
+              >
+                <Columns className="size-3.5 shrink-0" />
+                <span className="hidden md:inline">分割</span>
+              </button>
+              <button
+                onClick={() => setTab('preview')}
+                className={`flex items-center gap-1 px-2.5 sm:px-3 py-1 rounded-md transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                  tab === 'preview'
+                    ? 'bg-background shadow-xs text-foreground font-medium'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+                title="プレビューのみ"
+              >
+                <Eye className="size-3.5 shrink-0" />
+                <span className="hidden md:inline">プレビュー</span>
+              </button>
+            </div>
+
+            {/* ビュー切り替えタブ (スマホ小画面用: 超コンパクト2択) */}
+            <div className="sm:hidden flex border border-border rounded-lg overflow-hidden text-xs bg-muted/30 p-0.5 whitespace-nowrap shrink-0">
+              <button
+                onClick={() => setTab('edit')}
+                className={`flex items-center gap-1 px-2 py-1 rounded-md transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                  tab === 'edit'
+                    ? 'bg-background shadow-xs text-foreground font-medium'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+                title="編集モード"
+              >
+                <FileEdit className="size-3.5 shrink-0" />
+                <span>編集</span>
+              </button>
+              <button
+                onClick={() => setTab('preview')}
+                className={`flex items-center gap-1 px-2 py-1 rounded-md transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                  tab === 'preview'
+                    ? 'bg-background shadow-xs text-foreground font-medium'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+                title="プレビューモード"
+              >
+                <Eye className="size-3.5 shrink-0" />
+                <span>表示</span>
+              </button>
+            </div>
+
+            {/* 保存ボタン */}
+            <button
+              onClick={handleManualSave}
+              disabled={saved || updateMutation.isPending}
+              className="flex items-center gap-1 px-2.5 sm:px-3 py-1.5 text-xs bg-secondary hover:bg-secondary/80 text-secondary-foreground rounded-lg disabled:opacity-40 transition-colors font-medium cursor-pointer whitespace-nowrap shrink-0"
+              title="ページを保存 (Ctrl+S / Cmd+S)"
+            >
+              {updateMutation.isPending ? (
+                <Loader2 className="size-3.5 animate-spin shrink-0" />
+              ) : (
+                <Save className="size-3.5 shrink-0" />
+              )}
+              <span className="hidden xs:inline">保存</span>
+            </button>
+
+            {/* 公開ボタン */}
+            <button
+              onClick={() =>
+                publishMutation.mutate(page?.status === 'published' ? 'draft' : 'published')
+              }
+              disabled={publishMutation.isPending}
+              className={`flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-medium rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                page?.status === 'published'
+                  ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                  : 'bg-primary hover:bg-primary/90 text-primary-foreground'
+              }`}
+              title={page?.status === 'published' ? '下書きに戻す' : '一般に公開する'}
+            >
+              {publishMutation.isPending ? (
+                <Loader2 className="size-3.5 animate-spin shrink-0" />
+              ) : page?.status === 'published' ? (
+                <>
+                  <Check className="size-3.5 shrink-0" />
+                  <span className="hidden xs:inline">公開中</span>
+                </>
+              ) : (
+                <>
+                  <Send className="size-3.5 shrink-0" />
+                  <span className="hidden xs:inline">公開</span>
+                </>
+              )}
+            </button>
+
+            {/* [xl未満] レスポンシブ「その他」ドロップダウンメニュー */}
+            <div className="relative xl:hidden" ref={moreMenuRef}>
+              <button
+                type="button"
+                onClick={() => setMoreMenuOpen(!moreMenuOpen)}
+                className={`p-1.5 sm:p-2 rounded-lg border transition-colors cursor-pointer relative shrink-0 ${
+                  moreMenuOpen
+                    ? 'border-primary bg-primary/10 text-primary'
+                    : 'border-border text-muted-foreground hover:text-foreground hover:bg-muted'
+                }`}
+                title="その他の編集メニュー & 設定"
+                aria-label="その他メニュー"
+              >
+                <MoreHorizontal className="size-4" />
+                {(pageCategories.length > 0 || commentList.length > 0) && (
+                  <span className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-amber-500 ring-2 ring-background" />
+                )}
+              </button>
+
+              {moreMenuOpen && (
+                <div className="absolute right-0 top-full mt-2 z-50 w-72 max-w-[calc(100vw-2rem)] bg-card text-card-foreground border border-border rounded-2xl shadow-2xl py-2 animate-in fade-in-0 zoom-in-95 duration-100 text-xs divide-y divide-border">
+                  {/* 分割プレビュー切り替え (スマホで分割を見たい場合) */}
+                  <div className="px-3 py-1.5 space-y-1">
+                    <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                      表示レイアウト
+                    </p>
+                    <div className="grid grid-cols-3 gap-1 bg-muted/40 p-1 rounded-xl">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTab('edit');
+                          setMoreMenuOpen(false);
+                        }}
+                        className={`py-1 rounded-lg text-center font-medium transition-colors cursor-pointer ${
+                          tab === 'edit'
+                            ? 'bg-background shadow-xs text-foreground font-bold'
+                            : 'text-muted-foreground hover:text-foreground'
+                        }`}
+                      >
+                        編集のみ
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTab('split');
+                          setMoreMenuOpen(false);
+                        }}
+                        className={`py-1 rounded-lg text-center font-medium transition-colors cursor-pointer ${
+                          tab === 'split'
+                            ? 'bg-background shadow-xs text-foreground font-bold'
+                            : 'text-muted-foreground hover:text-foreground'
+                        }`}
+                      >
+                        分割
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTab('preview');
+                          setMoreMenuOpen(false);
+                        }}
+                        className={`py-1 rounded-lg text-center font-medium transition-colors cursor-pointer ${
+                          tab === 'preview'
+                            ? 'bg-background shadow-xs text-foreground font-bold'
+                            : 'text-muted-foreground hover:text-foreground'
+                        }`}
+                      >
+                        プレビュー
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* ツールメニュー項目 */}
+                  <div className="py-1">
+                    {/* カテゴリ設定 */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMoreMenuOpen(false);
+                        setCategoryMenuOpen(true);
                       }}
-                    />
-                  </div>
-
-                  {/* 色相 (Hue) スライダーバー */}
-                  <div
-                    ref={hueBarRef}
-                    onMouseDown={handleHuePointerDown}
-                    className="relative w-full h-3.5 rounded-full cursor-pointer border border-border/60 shadow-inner"
-                    style={{
-                      background:
-                        'linear-gradient(to right, #ff0000 0%, #ffff00 17%, #00ff00 33%, #00ffff 50%, #0000ff 67%, #ff00ff 83%, #ff0000 100%)',
-                    }}
-                  >
-                    <div
-                      className="absolute top-1/2 -translate-y-1/2 -ml-2 size-4 rounded-full bg-white border-2 border-slate-700 shadow pointer-events-none"
-                      style={{ left: `${(hsv.h / 360) * 100}%` }}
-                    />
-                  </div>
-                </div>
-
-                {/* RGB & HEX 数値入力 + プレビュー */}
-                <div className="space-y-2 pt-1 border-t border-border">
-                  <div className="grid grid-cols-4 gap-1.5 items-end">
-                    <div>
-                      <label className="block text-[9px] font-mono text-muted-foreground mb-0.5 text-center">
-                        R
-                      </label>
-                      <input
-                        type="number"
-                        min={0}
-                        max={255}
-                        value={rgbInput.r}
-                        onChange={(e) =>
-                          updateColorFromRgb(Number(e.target.value), rgbInput.g, rgbInput.b)
-                        }
-                        className="w-full h-6 px-1 text-[11px] font-mono text-center bg-muted/50 border border-border rounded text-foreground"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[9px] font-mono text-muted-foreground mb-0.5 text-center">
-                        G
-                      </label>
-                      <input
-                        type="number"
-                        min={0}
-                        max={255}
-                        value={rgbInput.g}
-                        onChange={(e) =>
-                          updateColorFromRgb(rgbInput.r, Number(e.target.value), rgbInput.b)
-                        }
-                        className="w-full h-6 px-1 text-[11px] font-mono text-center bg-muted/50 border border-border rounded text-foreground"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[9px] font-mono text-muted-foreground mb-0.5 text-center">
-                        B
-                      </label>
-                      <input
-                        type="number"
-                        min={0}
-                        max={255}
-                        value={rgbInput.b}
-                        onChange={(e) =>
-                          updateColorFromRgb(rgbInput.r, rgbInput.g, Number(e.target.value))
-                        }
-                        className="w-full h-6 px-1 text-[11px] font-mono text-center bg-muted/50 border border-border rounded text-foreground"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[9px] font-mono text-muted-foreground mb-0.5 text-center">
-                        HEX
-                      </label>
-                      <input
-                        type="text"
-                        value={customColor}
-                        onChange={(e) => updateColorFromHex(e.target.value)}
-                        className="w-full h-6 px-1 text-[10px] font-mono text-center bg-muted/50 border border-border rounded text-foreground"
-                      />
-                    </div>
-                  </div>
-
-                  {/* プレビュー & 適用ボタン */}
-                  <div className="flex items-center gap-2 pt-1">
-                    <div
-                      className="px-2.5 py-1 rounded-lg border border-border text-xs font-bold shrink-0"
-                      style={
-                        colorMode === 'text'
-                          ? { color: customColor }
-                          : { backgroundColor: customColor, color: '#0f172a' }
-                      }
+                      className="w-full flex items-center justify-between px-3.5 py-2 hover:bg-muted text-foreground transition-colors text-left cursor-pointer"
                     >
-                      Aa サンプル
-                    </div>
+                      <div className="flex items-center gap-2.5">
+                        <FolderTree className="size-4 text-amber-500" />
+                        <span>カテゴリ設定</span>
+                      </div>
+                      {pageCategories.length > 0 && (
+                        <span className="px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300 font-bold text-[10px]">
+                          {pageCategories.length}個設定済み
+                        </span>
+                      )}
+                    </button>
+
+                    {/* コメント */}
                     <button
                       type="button"
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() =>
-                        colorMode === 'text'
-                          ? applyTextColor(customColor)
-                          : applyBgHighlight(customColor)
-                      }
-                      className="flex-1 py-1.5 px-3 text-xs font-semibold bg-primary text-primary-foreground rounded-xl hover:bg-primary/90 shadow-xs transition-colors cursor-pointer"
+                      onClick={() => {
+                        setMoreMenuOpen(false);
+                        setCommentsOpen(true);
+                      }}
+                      className="w-full flex items-center justify-between px-3.5 py-2 hover:bg-muted text-foreground transition-colors text-left cursor-pointer"
                     >
-                      {colorMode === 'text' ? '選択箇所に文字色を適用' : '選択箇所に背景色を適用'}
+                      <div className="flex items-center gap-2.5">
+                        <MessageSquare className="size-4 text-blue-500" />
+                        <span>コメント & フィードバック</span>
+                      </div>
+                      {commentList.length > 0 && (
+                        <span className="px-2 py-0.5 rounded-full bg-primary/10 text-primary font-bold text-[10px]">
+                          {commentList.length}件
+                        </span>
+                      )}
                     </button>
+
+                    {/* 変更履歴 */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMoreMenuOpen(false);
+                        setSelectedVersion(null);
+                        setHistoryOpen(true);
+                      }}
+                      className="w-full flex items-center gap-2.5 px-3.5 py-2 hover:bg-muted text-foreground transition-colors text-left cursor-pointer"
+                    >
+                      <HistoryIcon className="size-4 text-indigo-500" />
+                      <span>変更履歴と差分</span>
+                    </button>
+
+                    {/* メディア一覧 */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMoreMenuOpen(false);
+                        setMediaLibraryOpen(true);
+                      }}
+                      className="w-full flex items-center gap-2.5 px-3.5 py-2 hover:bg-muted text-foreground transition-colors text-left cursor-pointer"
+                    >
+                      <Images className="size-4 text-emerald-500" />
+                      <span>メディアライブラリ</span>
+                    </button>
+
+                    {/* Markdownファイル読み込み */}
+                    <label className="w-full flex items-center gap-2.5 px-3.5 py-2 hover:bg-muted text-foreground transition-colors text-left cursor-pointer">
+                      <UploadCloud className="size-4 text-sky-500" />
+                      <span>MDファイルを読み込む</span>
+                      <input
+                        type="file"
+                        accept=".md,.markdown,.txt"
+                        className="hidden"
+                        onChange={async (e) => {
+                          setMoreMenuOpen(false);
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            await handleMdFileSelect(file);
+                          }
+                          e.target.value = '';
+                        }}
+                      />
+                    </label>
+                  </div>
+
+                  {/* キーバインド設定 */}
+                  <div className="px-3.5 py-2 space-y-1.5">
+                    <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                      <Terminal className="size-3" />
+                      <span>エディタ操作モード</span>
+                    </p>
+                    <div className="grid grid-cols-3 gap-1 bg-muted/40 p-1 rounded-xl">
+                      <button
+                        type="button"
+                        onClick={() => handleToggleKeybinding('standard')}
+                        className={`py-1 rounded-lg text-center font-medium transition-colors cursor-pointer ${
+                          keybinding === 'standard'
+                            ? 'bg-background shadow-xs text-foreground font-bold'
+                            : 'text-muted-foreground hover:text-foreground'
+                        }`}
+                      >
+                        標準
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleToggleKeybinding('vim')}
+                        className={`py-1 rounded-lg text-center font-medium transition-colors cursor-pointer ${
+                          keybinding === 'vim'
+                            ? 'bg-primary text-primary-foreground shadow-xs font-bold'
+                            : 'text-muted-foreground hover:text-foreground'
+                        }`}
+                      >
+                        Vim
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleToggleKeybinding('nano')}
+                        className={`py-1 rounded-lg text-center font-medium transition-colors cursor-pointer ${
+                          keybinding === 'nano'
+                            ? 'bg-emerald-600 text-white shadow-xs font-bold'
+                            : 'text-muted-foreground hover:text-foreground'
+                        }`}
+                      >
+                        nano
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 公開リンク & コラボレーター情報 */}
+                  <div className="py-1">
+                    {publicUrl && (
+                      <Link
+                        href={publicUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={() => setMoreMenuOpen(false)}
+                        className="w-full flex items-center justify-between px-3.5 py-2 hover:bg-muted text-foreground transition-colors text-left"
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <ExternalLink className="size-4 text-slate-400" />
+                          <span>公開ページを確認</span>
+                        </div>
+                        <span className="text-[10px] text-muted-foreground">別タブ</span>
+                      </Link>
+                    )}
+
+                    {collaborators.length > 1 && (
+                      <div className="px-3.5 py-2 flex items-center justify-between text-muted-foreground">
+                        <div className="flex items-center gap-2">
+                          <div className="size-2 rounded-full bg-emerald-500 animate-pulse" />
+                          <span>同時編集中</span>
+                        </div>
+                        <span className="font-semibold text-foreground">
+                          {collaborators.length} 人
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </div>
+              )}
+            </div>
+          </div>
+        </header>
 
-                {/* クイックプリセットスウォッチ */}
-                <div className="pt-2 border-t border-border">
-                  <div className="text-[10px] font-semibold text-muted-foreground mb-1.5 flex items-center justify-between">
-                    <span>プリセット (ワンクリック適用)</span>
-                    {colorMode === 'bg' && (
+        {/* Markdown 書式ツールバー (水平スワイプ・スクロール対応で画面圧迫とレイアウト崩れを完全に防止) */}
+        {(tab === 'edit' || tab === 'split') && (
+          <div className="relative z-20 flex items-center gap-1 px-2.5 sm:px-4 py-1.5 border-b border-border bg-muted/20 text-xs overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden whitespace-nowrap scroll-smooth">
+            {/* スラッシュコマンド トリガーヒント */}
+            <button
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                insertText('/');
+                setSlashFilter('');
+                setSlashMenuOpen(true);
+              }}
+              className="flex items-center gap-1 px-2 py-1 rounded bg-primary/10 text-primary hover:bg-primary/20 transition-colors font-medium cursor-pointer shrink-0"
+              title="スラッシュコマンド (/ を入力)"
+            >
+              <Sparkles className="size-3.5 shrink-0" />
+              <span>/ コマンド</span>
+            </button>
+
+            <div className="h-4 w-px bg-border mx-1 shrink-0" />
+
+            <div className="flex items-center gap-0.5 shrink-0">
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => wrapText('**', '**', '太字テキスト')}
+                className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer shrink-0"
+                title="太字 (Bold)"
+              >
+                <Bold className="size-4 shrink-0" />
+              </button>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => wrapText('*', '*', '斜体テキスト')}
+                className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer shrink-0"
+                title="斜体 (Italic)"
+              >
+                <Italic className="size-4 shrink-0" />
+              </button>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => wrapText('<u>', '</u>', '下線テキスト')}
+                className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer shrink-0"
+                title="下線 (Underline)"
+              >
+                <Underline className="size-4 shrink-0" />
+              </button>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => wrapText('~~', '~~', '打ち消しテキスト')}
+                className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer shrink-0"
+                title="取り消し線"
+              >
+                <Strikethrough className="size-4 shrink-0" />
+              </button>
+            </div>
+
+            {/* テキストカラー & ハイライト (2D HSVポインタ + RGB/HEX カラーピッカー) */}
+            <div className="relative shrink-0" ref={colorPickerRef}>
+              <button
+                type="button"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  if (viewRef.current) {
+                    lastSelectionRef.current = {
+                      from: viewRef.current.state.selection.main.from,
+                      to: viewRef.current.state.selection.main.to,
+                    };
+                  }
+                }}
+                onClick={() => setColorPickerOpen(!colorPickerOpen)}
+                className={`px-2 py-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer flex items-center gap-1.5 shrink-0 ${
+                  colorPickerOpen ? 'bg-muted text-foreground ring-1 ring-border' : ''
+                }`}
+                title="選択箇所の文字色・背景色を自由に設定"
+              >
+                <Palette className="size-4 text-primary shrink-0" />
+                <span
+                  className="size-3 rounded-full border border-border shadow-2xs shrink-0"
+                  style={{ backgroundColor: customColor }}
+                />
+              </button>
+
+              {colorPickerOpen && (
+                <div className="absolute left-0 sm:left-auto top-full mt-2 z-50 w-72 max-w-[calc(100vw-2rem)] p-3.5 bg-card text-card-foreground border border-border rounded-2xl shadow-2xl space-y-3 animate-in fade-in-0 zoom-in-95 duration-100 select-none">
+                  {/* モード切替 (文字色 / 背景ハイライト) & リセット */}
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex flex-1 bg-muted/60 p-0.5 rounded-xl border border-border text-[11px] font-semibold">
                       <button
                         type="button"
                         onMouseDown={(e) => e.preventDefault()}
-                        onClick={() => {
-                          wrapText('==', '==', 'ハイライトテキスト');
-                          setColorPickerOpen(false);
-                        }}
-                        className="text-[10px] text-primary hover:underline cursor-pointer font-medium"
+                        onClick={() => setColorMode('text')}
+                        className={`flex-1 py-1 rounded-lg flex items-center justify-center gap-1 transition-all cursor-pointer ${
+                          colorMode === 'text'
+                            ? 'bg-background text-foreground shadow-2xs'
+                            : 'text-muted-foreground hover:text-foreground'
+                        }`}
                       >
-                        == 標準マーカー ==
+                        <Palette className="size-3 text-primary" />
+                        <span>文字色</span>
                       </button>
-                    )}
-                  </div>
-                  <div className="grid grid-cols-8 gap-1.5">
-                    {(colorMode === 'text'
-                      ? [
-                          { name: '赤', color: '#ef4444' },
-                          { name: 'オレンジ', color: '#f97316' },
-                          { name: 'アンバー', color: '#f59e0b' },
-                          { name: 'エメラルド', color: '#10b981' },
-                          { name: 'シアン', color: '#06b6d4' },
-                          { name: 'ブルー', color: '#3b82f6' },
-                          { name: 'インディゴ', color: '#6366f1' },
-                          { name: 'バイオレット', color: '#8b5cf6' },
-                          { name: 'ピンク', color: '#ec4899' },
-                          { name: 'ローズ', color: '#f43f5e' },
-                          { name: 'ライム', color: '#84cc16' },
-                          { name: 'ティール', color: '#14b8a6' },
-                          { name: 'スカイ', color: '#0ea5e9' },
-                          { name: 'スレート', color: '#64748b' },
-                          { name: 'ダーク', color: '#1e293b' },
-                          { name: 'ホワイト', color: '#ffffff' },
-                        ]
-                      : [
-                          { name: 'イエロー', color: '#fef08a' },
-                          { name: 'グリーン', color: '#bbf7d0' },
-                          { name: 'ブルー', color: '#bfdbfe' },
-                          { name: 'ピンク', color: '#fbcfe8' },
-                          { name: 'オレンジ', color: '#fed7aa' },
-                          { name: 'パープル', color: '#e9d5ff' },
-                          { name: 'シアン', color: '#a5f3fc' },
-                          { name: 'ローズ', color: '#fecdd3' },
-                        ]
-                    ).map((c) => (
                       <button
-                        key={c.color}
+                        type="button"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => setColorMode('bg')}
+                        className={`flex-1 py-1 rounded-lg flex items-center justify-center gap-1 transition-all cursor-pointer ${
+                          colorMode === 'bg'
+                            ? 'bg-background text-foreground shadow-2xs'
+                            : 'text-muted-foreground hover:text-foreground'
+                        }`}
+                      >
+                        <Highlighter className="size-3 text-amber-500" />
+                        <span>背景</span>
+                      </button>
+                    </div>
+                    <button
+                      type="button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={clearColorSyntax}
+                      className="text-[10px] text-muted-foreground hover:text-rose-500 underline px-1 cursor-pointer shrink-0"
+                      title="選択箇所の色指定を解除"
+                    >
+                      色解除
+                    </button>
+                  </div>
+
+                  {/* 2D Saturation / Value ポインタ移動カラーピッカー */}
+                  <div className="space-y-2">
+                    <div
+                      ref={svBoxRef}
+                      onMouseDown={handleSvPointerDown}
+                      className="relative w-full h-36 rounded-xl overflow-hidden cursor-crosshair border border-border shadow-inner"
+                      style={{
+                        backgroundColor: `hsl(${hsv.h}, 100%, 50%)`,
+                        backgroundImage:
+                          'linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, transparent)',
+                      }}
+                    >
+                      {/* ポインタ */}
+                      <div
+                        className="absolute size-4 -ml-2 -mt-2 rounded-full border-2 border-white shadow-md ring-1 ring-black/40 pointer-events-none transition-transform duration-75"
+                        style={{
+                          left: `${hsv.s}%`,
+                          top: `${100 - hsv.v}%`,
+                          backgroundColor: customColor,
+                        }}
+                      />
+                    </div>
+
+                    {/* 色相 (Hue) スライダーバー */}
+                    <div
+                      ref={hueBarRef}
+                      onMouseDown={handleHuePointerDown}
+                      className="relative w-full h-3.5 rounded-full cursor-pointer border border-border/60 shadow-inner"
+                      style={{
+                        background:
+                          'linear-gradient(to right, #ff0000 0%, #ffff00 17%, #00ff00 33%, #00ffff 50%, #0000ff 67%, #ff00ff 83%, #ff0000 100%)',
+                      }}
+                    >
+                      <div
+                        className="absolute top-1/2 -translate-y-1/2 -ml-2 size-4 rounded-full bg-white border-2 border-slate-700 shadow pointer-events-none"
+                        style={{ left: `${(hsv.h / 360) * 100}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* RGB & HEX 数値入力 + プレビュー */}
+                  <div className="space-y-2 pt-1 border-t border-border">
+                    <div className="grid grid-cols-4 gap-1.5 items-end">
+                      <div>
+                        <label className="block text-[9px] font-mono text-muted-foreground mb-0.5 text-center">
+                          R
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={255}
+                          value={rgbInput.r}
+                          onChange={(e) =>
+                            updateColorFromRgb(Number(e.target.value), rgbInput.g, rgbInput.b)
+                          }
+                          className="w-full h-6 px-1 text-[11px] font-mono text-center bg-muted/50 border border-border rounded text-foreground"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[9px] font-mono text-muted-foreground mb-0.5 text-center">
+                          G
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={255}
+                          value={rgbInput.g}
+                          onChange={(e) =>
+                            updateColorFromRgb(rgbInput.r, Number(e.target.value), rgbInput.b)
+                          }
+                          className="w-full h-6 px-1 text-[11px] font-mono text-center bg-muted/50 border border-border rounded text-foreground"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[9px] font-mono text-muted-foreground mb-0.5 text-center">
+                          B
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={255}
+                          value={rgbInput.b}
+                          onChange={(e) =>
+                            updateColorFromRgb(rgbInput.r, rgbInput.g, Number(e.target.value))
+                          }
+                          className="w-full h-6 px-1 text-[11px] font-mono text-center bg-muted/50 border border-border rounded text-foreground"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[9px] font-mono text-muted-foreground mb-0.5 text-center">
+                          HEX
+                        </label>
+                        <input
+                          type="text"
+                          value={customColor}
+                          onChange={(e) => updateColorFromHex(e.target.value)}
+                          className="w-full h-6 px-1 text-[10px] font-mono text-center bg-muted/50 border border-border rounded text-foreground"
+                        />
+                      </div>
+                    </div>
+
+                    {/* プレビュー & 適用ボタン */}
+                    <div className="flex items-center gap-2 pt-1">
+                      <div
+                        className="px-2.5 py-1 rounded-lg border border-border text-xs font-bold shrink-0"
+                        style={
+                          colorMode === 'text'
+                            ? { color: customColor }
+                            : { backgroundColor: customColor, color: '#0f172a' }
+                        }
+                      >
+                        Aa
+                      </div>
+                      <button
                         type="button"
                         onMouseDown={(e) => e.preventDefault()}
                         onClick={() =>
                           colorMode === 'text'
-                            ? applyTextColor(c.color)
-                            : applyBgHighlight(c.color)
+                            ? applyTextColor(customColor)
+                            : applyBgHighlight(customColor)
                         }
-                        className="size-6 rounded-full border border-border/60 transition-transform hover:scale-110 cursor-pointer shadow-2xs"
-                        style={{ backgroundColor: c.color }}
-                        title={`${c.name} (${c.color})`}
-                      />
-                    ))}
+                        className="flex-1 py-1.5 px-3 text-xs font-semibold bg-primary text-primary-foreground rounded-xl hover:bg-primary/90 shadow-xs transition-colors cursor-pointer"
+                      >
+                        {colorMode === 'text' ? '文字色を適用' : '背景色を適用'}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* クイックプリセットスウォッチ */}
+                  <div className="pt-2 border-t border-border">
+                    <div className="text-[10px] font-semibold text-muted-foreground mb-1.5 flex items-center justify-between">
+                      <span>プリセット</span>
+                      {colorMode === 'bg' && (
+                        <button
+                          type="button"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => {
+                            wrapText('==', '==', 'ハイライトテキスト');
+                            setColorPickerOpen(false);
+                          }}
+                          className="text-[10px] text-primary hover:underline cursor-pointer font-medium"
+                        >
+                          == 標準マーカー ==
+                        </button>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-8 gap-1.5">
+                      {(colorMode === 'text'
+                        ? [
+                            { name: '赤', color: '#ef4444' },
+                            { name: 'オレンジ', color: '#f97316' },
+                            { name: 'アンバー', color: '#f59e0b' },
+                            { name: 'エメラルド', color: '#10b981' },
+                            { name: 'シアン', color: '#06b6d4' },
+                            { name: 'ブルー', color: '#3b82f6' },
+                            { name: 'インディゴ', color: '#6366f1' },
+                            { name: 'バイオレット', color: '#8b5cf6' },
+                            { name: 'ピンク', color: '#ec4899' },
+                            { name: 'ローズ', color: '#f43f5e' },
+                            { name: 'ライム', color: '#84cc16' },
+                            { name: 'ティール', color: '#14b8a6' },
+                            { name: 'スカイ', color: '#0ea5e9' },
+                            { name: 'スレート', color: '#64748b' },
+                            { name: 'ダーク', color: '#1e293b' },
+                            { name: 'ホワイト', color: '#ffffff' },
+                          ]
+                        : [
+                            { name: 'イエロー', color: '#fef08a' },
+                            { name: 'グリーン', color: '#bbf7d0' },
+                            { name: 'ブルー', color: '#bfdbfe' },
+                            { name: 'ピンク', color: '#fbcfe8' },
+                            { name: 'オレンジ', color: '#fed7aa' },
+                            { name: 'パープル', color: '#e9d5ff' },
+                            { name: 'シアン', color: '#a5f3fc' },
+                            { name: 'ローズ', color: '#fecdd3' },
+                          ]
+                      ).map((c) => (
+                        <button
+                          key={c.color}
+                          type="button"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() =>
+                            colorMode === 'text'
+                              ? applyTextColor(c.color)
+                              : applyBgHighlight(c.color)
+                          }
+                          className="size-5 rounded-full border border-border/60 transition-transform hover:scale-110 cursor-pointer shadow-2xs"
+                          style={{ backgroundColor: c.color }}
+                          title={`${c.name} (${c.color})`}
+                        />
+                      ))}
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
+
+            <div className="h-4 w-px bg-border mx-1 shrink-0" />
+
+            <div className="flex items-center gap-0.5 shrink-0">
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => wrapText('# ', '', '見出し1')}
+                className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer shrink-0"
+                title="大見出し (H1)"
+              >
+                <Heading1 className="size-4 shrink-0" />
+              </button>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => wrapText('## ', '', '見出し2')}
+                className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer shrink-0"
+                title="中見出し (H2)"
+              >
+                <Heading2 className="size-4 shrink-0" />
+              </button>
+            </div>
+
+            <div className="h-4 w-px bg-border mx-1 shrink-0" />
+
+            <div className="flex items-center gap-0.5 shrink-0">
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => wrapText('- ', '', 'リスト項目')}
+                className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer shrink-0"
+                title="箇条書きリスト"
+              >
+                <List className="size-4 shrink-0" />
+              </button>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => wrapText('1. ', '', '番号付きリスト')}
+                className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer shrink-0"
+                title="番号付きリスト"
+              >
+                <ListOrdered className="size-4 shrink-0" />
+              </button>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => wrapText('> ', '', '引用テキスト')}
+                className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer shrink-0"
+                title="引用"
+              >
+                <Quote className="size-4 shrink-0" />
+              </button>
+            </div>
+
+            <div className="h-4 w-px bg-border mx-1 shrink-0" />
+
+            <div className="flex items-center gap-0.5 shrink-0">
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => wrapText('```ts\n', '\n```', 'console.log("Hello, Klados!");')}
+                className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer shrink-0"
+                title="コードブロック"
+              >
+                <Code className="size-4 shrink-0" />
+              </button>
+              <button
+                type="button"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  handleOpenTableMaker();
+                }}
+                className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer shrink-0"
+                title="テーブルメーカー"
+              >
+                <TableIcon className="size-4 shrink-0" />
+              </button>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => wrapText('[', '](https://example.com)', 'リンクテキスト')}
+                className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer shrink-0"
+                title="外部リンク"
+              >
+                <ExternalLink className="size-4 shrink-0" />
+              </button>
+              <button
+                type="button"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  handleOpenLinkModal();
+                }}
+                className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer shrink-0"
+                title="内部リンク挿入 ([[ページ名]])"
+              >
+                <LinkIcon className="size-4 shrink-0" />
+              </button>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => wrapText('$$ ', ' $$', 'E = mc^2')}
+                className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer shrink-0"
+                title="KaTeX数式"
+              >
+                <Sigma className="size-4 shrink-0" />
+              </button>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => setCategoryMenuOpen(true)}
+                className="p-1.5 rounded hover:bg-muted text-amber-500 hover:text-amber-600 cursor-pointer shrink-0"
+                title="カテゴリ設定を開く"
+              >
+                <FolderTree className="size-4 shrink-0" />
+              </button>
+            </div>
+
+            <div className="h-4 w-px bg-border mx-1 shrink-0" />
+
+            {/* 画像アップロード & メディア挿入グループ */}
+            <div className="flex items-center gap-1 shrink-0">
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileInputChange}
+                accept="image/*"
+                className="hidden"
+              />
+              <button
+                type="button"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  if (viewRef.current) {
+                    lastSelectionRef.current = {
+                      from: viewRef.current.state.selection.main.from,
+                      to: viewRef.current.state.selection.main.to,
+                    };
+                  }
+                }}
+                onClick={() => {
+                  if (viewRef.current) {
+                    lastSelectionRef.current = {
+                      from: viewRef.current.state.selection.main.from,
+                      to: viewRef.current.state.selection.main.to,
+                    };
+                  }
+                  fileInputRef.current?.click();
+                }}
+                disabled={isUploading}
+                className="flex items-center gap-1.5 px-2 py-1 rounded bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors cursor-pointer font-medium disabled:opacity-50 shrink-0"
+                title="画像を直接アップロードして挿入"
+              >
+                {isUploading ? (
+                  <Loader2 className="size-4 animate-spin text-blue-500 shrink-0" />
+                ) : (
+                  <ImageIcon className="size-4 shrink-0" />
+                )}
+                <span className="hidden sm:inline">{isUploading ? 'アップロード中...' : '画像アップロード'}</span>
+                <span className="sm:hidden">{isUploading ? '...' : '画像'}</span>
+              </button>
+
+              <button
+                type="button"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  if (viewRef.current) {
+                    lastSelectionRef.current = {
+                      from: viewRef.current.state.selection.main.from,
+                      to: viewRef.current.state.selection.main.to,
+                    };
+                  }
+                }}
+                onClick={() => {
+                  if (viewRef.current) {
+                    lastSelectionRef.current = {
+                      from: viewRef.current.state.selection.main.from,
+                      to: viewRef.current.state.selection.main.to,
+                    };
+                  }
+                  setMediaLibraryOpen(true);
+                }}
+                className="flex items-center gap-1.5 px-2 py-1 rounded bg-secondary hover:bg-secondary/80 text-secondary-foreground transition-colors cursor-pointer font-medium shrink-0"
+                title="アップロード済みメディアから選択して挿入"
+              >
+                <Images className="size-3.5 shrink-0" />
+                <span className="hidden sm:inline">メディアから挿入</span>
+                <span className="sm:hidden">メディア</span>
+              </button>
+
+              <button
+                type="button"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  if (viewRef.current) {
+                    lastSelectionRef.current = {
+                      from: viewRef.current.state.selection.main.from,
+                      to: viewRef.current.state.selection.main.to,
+                    };
+                  }
+                }}
+                onClick={() => handleOpenImageOptionsModal()}
+                className="flex items-center gap-1 px-2 py-1 rounded border border-border hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer font-medium shrink-0"
+                title="画像のサイズ・配置・キャプションを設定"
+              >
+                <Settings2 className="size-3.5 text-primary shrink-0" />
+                <span className="hidden sm:inline">画像サイズ・配置</span>
+                <span className="sm:hidden">配置設定</span>
+              </button>
+            </div>
           </div>
-
-          <div className="h-4 w-px bg-border mx-1" />
-
-          <button
-            type="button"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => wrapText('# ', '', '見出し1')}
-            className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer"
-            title="大見出し (H1)"
-          >
-            <Heading1 className="size-4" />
-          </button>
-          <button
-            type="button"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => wrapText('## ', '', '見出し2')}
-            className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer"
-            title="中見出し (H2)"
-          >
-            <Heading2 className="size-4" />
-          </button>
-
-          <div className="h-4 w-px bg-border mx-1" />
-
-          <button
-            type="button"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => wrapText('- ', '', 'リスト項目')}
-            className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer"
-            title="箇条書きリスト"
-          >
-            <List className="size-4" />
-          </button>
-          <button
-            type="button"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => wrapText('1. ', '', '番号付きリスト')}
-            className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer"
-            title="番号付きリスト"
-          >
-            <ListOrdered className="size-4" />
-          </button>
-          <button
-            type="button"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => wrapText('> ', '', '引用テキスト')}
-            className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer"
-            title="引用"
-          >
-            <Quote className="size-4" />
-          </button>
-
-          <div className="h-4 w-px bg-border mx-1" />
-
-          <button
-            type="button"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => wrapText('```ts\n', '\n```', 'console.log("Hello, Klados!");')}
-            className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer"
-            title="コードブロック"
-          >
-            <Code className="size-4" />
-          </button>
-          <button
-            type="button"
-            onMouseDown={(e) => {
-              e.preventDefault();
-              handleOpenTableMaker();
-            }}
-            className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer"
-            title="テーブルメーカー (表の作成 / カーソル位置の表を編集)"
-          >
-            <TableIcon className="size-4" />
-          </button>
-          <button
-            type="button"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => wrapText('[', '](https://example.com)', 'リンクテキスト')}
-            className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer"
-            title="外部リンク ([テキスト](URL))"
-          >
-            <ExternalLink className="size-4" />
-          </button>
-          <button
-            type="button"
-            onMouseDown={(e) => {
-              e.preventDefault();
-              handleOpenLinkModal();
-            }}
-            className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer"
-            title="サイト内ページの内部リンクを検索して挿入 ([[ページ名]])"
-          >
-            <LinkIcon className="size-4" />
-          </button>
-          <button
-            type="button"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => wrapText('$$ ', ' $$', 'E = mc^2')}
-            className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer"
-            title="KaTeX数式"
-          >
-            <Sigma className="size-4" />
-          </button>
-          <button
-            type="button"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => setCategoryMenuOpen(true)}
-            className="p-1.5 rounded hover:bg-muted text-amber-500 hover:text-amber-600 cursor-pointer"
-            title="カテゴリ設定を開く (メニューオプションでカテゴリを管理)"
-          >
-            <FolderTree className="size-4" />
-          </button>
-
-          <div className="h-4 w-px bg-border mx-1" />
-
-          {/* 画像アップロードボタン */}
-          <input
-            type="file"
-            ref={fileInputRef}
-            onChange={handleFileInputChange}
-            accept="image/*"
-            className="hidden"
-          />
-          <button
-            type="button"
-            onMouseDown={(e) => {
-              e.preventDefault();
-              if (viewRef.current) {
-                lastSelectionRef.current = {
-                  from: viewRef.current.state.selection.main.from,
-                  to: viewRef.current.state.selection.main.to,
-                };
-              }
-            }}
-            onClick={() => {
-              if (viewRef.current) {
-                lastSelectionRef.current = {
-                  from: viewRef.current.state.selection.main.from,
-                  to: viewRef.current.state.selection.main.to,
-                };
-              }
-              fileInputRef.current?.click();
-            }}
-            disabled={isUploading}
-            className="flex items-center gap-1.5 px-2 py-1 rounded bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors cursor-pointer font-medium disabled:opacity-50"
-            title="画像を直接アップロードして挿入"
-          >
-            {isUploading ? (
-              <Loader2 className="size-4 animate-spin text-blue-500" />
-            ) : (
-              <ImageIcon className="size-4" />
-            )}
-            <span>{isUploading ? 'アップロード中...' : '画像アップロード'}</span>
-          </button>
-
-          {/* メディアライブラリから選択 */}
-          <button
-            type="button"
-            onMouseDown={(e) => {
-              e.preventDefault();
-              if (viewRef.current) {
-                lastSelectionRef.current = {
-                  from: viewRef.current.state.selection.main.from,
-                  to: viewRef.current.state.selection.main.to,
-                };
-              }
-            }}
-            onClick={() => {
-              if (viewRef.current) {
-                lastSelectionRef.current = {
-                  from: viewRef.current.state.selection.main.from,
-                  to: viewRef.current.state.selection.main.to,
-                };
-              }
-              setMediaLibraryOpen(true);
-            }}
-            className="flex items-center gap-1.5 px-2 py-1 rounded bg-secondary hover:bg-secondary/80 text-secondary-foreground transition-colors cursor-pointer font-medium"
-            title="アップロード済みメディアからサイズ・挿入位置・キャプションを指定して挿入"
-          >
-            <Images className="size-3.5" />
-            <span>メディア一覧から挿入</span>
-          </button>
-
-          {/* カーソル行の画像サイズ・配置・キャプション編集 / MediaWiki画像設定 */}
-          <button
-            type="button"
-            onMouseDown={(e) => {
-              e.preventDefault();
-              if (viewRef.current) {
-                lastSelectionRef.current = {
-                  from: viewRef.current.state.selection.main.from,
-                  to: viewRef.current.state.selection.main.to,
-                };
-              }
-            }}
-            onClick={() => handleOpenImageOptionsModal()}
-            className="flex items-center gap-1 px-2 py-1 rounded border border-border hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer font-medium"
-            title="画像のサイズ・挿入位置（右/左回り込み・中央）・サムネイル枠・キャプションを設定"
-          >
-            <Settings2 className="size-3.5 text-primary" />
-            <span>画像サイズ・配置設定</span>
-          </button>
-        </div>
-      )}
+        )}
       </div>
 
-      {/* エディタ & プレビュー本体 */}
-      <div className="flex-1 flex overflow-hidden relative" onKeyDown={handleEditorKeyDown}>
+      {/* エディタ & プレビュー本体 (画面サイズに応じた縦/横分割のフレキシブル配置) */}
+      <div
+        className={`flex-1 flex ${
+          tab === 'split' ? 'flex-col md:flex-row' : 'flex-col'
+        } overflow-hidden relative`}
+        onKeyDown={handleEditorKeyDown}
+      >
         {/* エディタ領域 */}
         {(tab === 'edit' || tab === 'split') && (
           <div
@@ -3285,7 +3585,9 @@ export default function PageEditPage() {
             onDrop={handleDrop}
             onPaste={handlePaste}
             className={`${
-              tab === 'split' ? 'w-1/2 border-r border-border' : 'w-full'
+              tab === 'split'
+                ? 'w-full md:w-1/2 h-1/2 md:h-full border-b md:border-b-0 md:border-r border-border'
+                : 'w-full h-full'
             } flex flex-col overflow-hidden relative`}
           >
             {isDragging && (
@@ -3685,12 +3987,14 @@ export default function PageEditPage() {
           </div>
         )}
 
-        {/* プレビュー領域 */}
+        {/* プレビュー領域 (小画面では上下分割の下半分、大画面では左右分割の右半分) */}
         {(tab === 'preview' || tab === 'split') && (
           <div
             className={`${
-              tab === 'split' ? 'w-1/2' : 'w-full'
-            } overflow-auto p-8 bg-card/40`}
+              tab === 'split'
+                ? 'w-full md:w-1/2 h-1/2 md:h-full'
+                : 'w-full h-full'
+            } overflow-auto p-4 sm:p-6 md:p-8 bg-card/40`}
           >
             <div className="max-w-3xl mx-auto">
               {preview || pageCategories.length > 0 ? (

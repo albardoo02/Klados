@@ -210,120 +210,123 @@ export function PageActionTabs({
         </div>
       )}
 
-      <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-px mb-6 overflow-x-auto select-none">
-        {/* 左側: メインタブ (閲覧・編集・ソース・履歴) */}
-        <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
-          {/* 閲覧タブ (アクティブ) */}
-          <span
-            className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-t-xl border-t border-x border-b-0 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-2xs -mb-px relative z-10"
-            style={{ color: brandColor }}
-          >
-            <BookOpen className="size-3.5" />
-            <span>閲覧</span>
-          </span>
-
-          {/* 編集タブ (関係者・編集権限がある場合のみ表示) */}
-          {canEdit ? (
-            <Link
-              href={`/dashboard/pages/${page.id}/edit`}
-              className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/60 rounded-t-xl transition-colors cursor-pointer"
-              title="エディタを開いてこのページを編集"
+      <div className="border-b border-slate-200 dark:border-slate-800 pb-px mb-6 select-none relative">
+        <div className="flex items-center justify-between gap-1.5 sm:gap-2">
+          {/* 左側: メインタブ (閲覧・編集・ソース・履歴) - 横スクロール対応 */}
+          <div className="flex items-center gap-1 sm:gap-1.5 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden min-w-0 flex-1 -mb-px">
+            {/* 閲覧タブ (アクティブ) */}
+            <span
+              className="flex items-center gap-1.5 px-3 sm:px-3.5 py-2 text-xs font-semibold rounded-t-xl border-t border-x border-b-0 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-2xs relative z-10 shrink-0"
+              style={{ color: brandColor }}
             >
-              <Edit3 className="size-3.5" />
-              <span>編集</span>
-            </Link>
-          ) : (
-            onOpenCollaborate && (
+              <BookOpen className="size-3.5 shrink-0" />
+              <span>閲覧</span>
+            </span>
+
+            {/* 編集タブ (関係者・編集権限がある場合のみ表示) */}
+            {canEdit ? (
+              <Link
+                href={`/dashboard/pages/${page.id}/edit`}
+                className="flex items-center gap-1.5 px-3 sm:px-3.5 py-2 text-xs font-medium text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/60 rounded-t-xl transition-colors cursor-pointer shrink-0"
+                title="エディタを開いてこのページを編集"
+              >
+                <Edit3 className="size-3.5 shrink-0" />
+                <span>編集</span>
+              </Link>
+            ) : (
+              onOpenCollaborate && (
+                <button
+                  type="button"
+                  onClick={onOpenCollaborate}
+                  className="flex items-center gap-1.5 px-3 sm:px-3.5 py-2 text-xs font-medium text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 rounded-t-xl transition-colors cursor-pointer shrink-0"
+                  title="アジ鯖API認証で共同編集権限を自動取得して編集する"
+                >
+                  <Edit3 className="size-3.5 shrink-0" />
+                  <span className="hidden sm:inline">共同編集に参加</span>
+                  <span className="sm:hidden">共同編集</span>
+                </button>
+              )
+            )}
+
+            {/* 新規作成タブ (関係者・編集権限がある場合のみ表示) */}
+            {canEdit && onOpenCreatePage && (
               <button
                 type="button"
-                onClick={onOpenCollaborate}
-                className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 rounded-t-xl transition-colors cursor-pointer"
-                title="アジ鯖API認証で共同編集権限を自動取得して編集する"
+                onClick={onOpenCreatePage}
+                className="flex items-center gap-1.5 px-3 sm:px-3.5 py-2 text-xs font-medium text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/60 rounded-t-xl transition-colors cursor-pointer shrink-0"
+                title="新しいWikiページを作成"
               >
-                <Edit3 className="size-3.5" />
-                <span>共同編集に参加</span>
+                <Plus className="size-3.5 shrink-0" />
+                <span className="hidden sm:inline">新規作成</span>
+                <span className="sm:hidden">新規</span>
               </button>
-            )
-          )}
+            )}
 
-          {/* 新規作成タブ (関係者・編集権限がある場合のみ表示) */}
-          {canEdit && onOpenCreatePage && (
+            {/* ソースを表示タブ */}
             <button
               type="button"
-              onClick={onOpenCreatePage}
-              className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/60 rounded-t-xl transition-colors cursor-pointer"
-              title="新しいWikiページを作成"
+              onClick={() => setSourceOpen(true)}
+              className="flex items-center gap-1.5 px-3 sm:px-3.5 py-2 text-xs font-medium text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/60 rounded-t-xl transition-colors cursor-pointer shrink-0"
+              title="Markdownソースコードを表示"
             >
-              <Plus className="size-3.5" />
-              <span>新規作成</span>
+              <Code2 className="size-3.5 shrink-0" />
+              <span className="hidden sm:inline">ソースを表示</span>
+              <span className="sm:hidden">ソース</span>
             </button>
-          )}
 
-          {/* ソースを表示タブ */}
-          <button
-            type="button"
-            onClick={() => setSourceOpen(true)}
-            className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/60 rounded-t-xl transition-colors cursor-pointer"
-            title="Markdownソースコードを表示"
-          >
-            <Code2 className="size-3.5" />
-            <span className="hidden sm:inline">ソースを表示</span>
-            <span className="sm:hidden">ソース</span>
-          </button>
-
-          {/* 履歴表示タブ */}
-          <button
-            type="button"
-            onClick={() => setHistoryOpen(true)}
-            className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/60 rounded-t-xl transition-colors cursor-pointer"
-            title="版の履歴と差分を表示"
-          >
-            <History className="size-3.5" />
-            <span className="hidden sm:inline">履歴表示</span>
-            <span className="sm:hidden">履歴</span>
-          </button>
-        </div>
-
-        {/* 右側: ツール (★お気に入り, その他▼) */}
-        <div className="flex items-center gap-1 shrink-0 pb-1">
-          {/* ★ お気に入りボタン */}
-          <button
-            type="button"
-            onClick={toggleStar}
-            className={`p-1.5 rounded-lg border transition-all cursor-pointer ${
-              isStarred
-                ? 'border-amber-300 bg-amber-50 text-amber-500 dark:bg-amber-950/50 dark:border-amber-700 shadow-2xs scale-105'
-                : 'border-transparent text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
-            }`}
-            title={
-              isStarred
-                ? 'お気に入りから解除 (ウォッチリストから除外)'
-                : 'このページをお気に入りに追加 (ウォッチリストに登録)'
-            }
-            aria-label="お気に入り"
-          >
-            <Star
-              className={`size-4 transition-transform ${
-                isStarred ? 'fill-amber-400 text-amber-400 scale-110' : ''
-              }`}
-            />
-          </button>
-
-          {/* その他 ▼ ドロップダウン */}
-          <div className="relative" ref={dropdownRef}>
+            {/* 履歴表示タブ */}
             <button
               type="button"
-              onClick={() => setDropdownOpen(!dropdownOpen)}
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+              onClick={() => setHistoryOpen(true)}
+              className="flex items-center gap-1.5 px-3 sm:px-3.5 py-2 text-xs font-medium text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/60 rounded-t-xl transition-colors cursor-pointer shrink-0"
+              title="版の履歴と差分を表示"
             >
-              <span>その他</span>
-              <ChevronDown
-                className={`size-3 transition-transform ${dropdownOpen ? 'rotate-180' : ''}`}
+              <History className="size-3.5 shrink-0" />
+              <span className="hidden sm:inline">履歴表示</span>
+              <span className="sm:hidden">履歴</span>
+            </button>
+          </div>
+
+          {/* 右側: ツール (★お気に入り, その他▼) - スクロールから独立して常にアクセス可能 */}
+          <div className="flex items-center gap-1 shrink-0 pb-1 z-20">
+            {/* ★ お気に入りボタン */}
+            <button
+              type="button"
+              onClick={toggleStar}
+              className={`p-1.5 rounded-lg border transition-all cursor-pointer ${
+                isStarred
+                  ? 'border-amber-300 bg-amber-50 text-amber-500 dark:bg-amber-950/50 dark:border-amber-700 shadow-2xs scale-105'
+                  : 'border-transparent text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+              }`}
+              title={
+                isStarred
+                  ? 'お気に入りから解除 (ウォッチリストから除外)'
+                  : 'このページをお気に入りに追加 (ウォッチリストに登録)'
+              }
+              aria-label="お気に入り"
+            >
+              <Star
+                className={`size-4 transition-transform ${
+                  isStarred ? 'fill-amber-400 text-amber-400 scale-110' : ''
+                }`}
               />
             </button>
 
-            {dropdownOpen && (
-              <div className="absolute right-0 mt-1 w-56 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl py-1.5 z-30 animate-in fade-in-0 zoom-in-95 duration-100 text-xs divide-y divide-slate-100 dark:divide-slate-800">
+            {/* その他 ▼ ドロップダウン */}
+            <div className="relative" ref={dropdownRef}>
+              <button
+                type="button"
+                onClick={() => setDropdownOpen(!dropdownOpen)}
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+              >
+                <span>その他</span>
+                <ChevronDown
+                  className={`size-3 transition-transform ${dropdownOpen ? 'rotate-180' : ''}`}
+                />
+              </button>
+
+              {dropdownOpen && (
+                <div className="absolute right-0 mt-1 w-56 max-w-[calc(100vw-2rem)] bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl py-1.5 z-50 animate-in fade-in-0 zoom-in-95 duration-100 text-xs divide-y divide-slate-100 dark:divide-slate-800">
                 {/* グループ 1: ウォッチリスト & リンク元 & 共有 */}
                 <div className="py-1">
                   <button
@@ -465,6 +468,7 @@ export function PageActionTabs({
           </div>
         </div>
       </div>
+    </div>
 
       {/* モーダル群 */}
       <PageHistoryModal

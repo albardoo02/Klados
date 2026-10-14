@@ -12,10 +12,11 @@ import { Eye, EyeOff, ShieldCheck, AlertTriangle, Lock } from 'lucide-react';
 export default function LoginPage() {
   const t = useTranslations();
   const router = useRouter();
-  const { user, token, setAuth } = useAuthStore();
+  const { user, token, setAuth, clearAuth } = useAuthStore();
   const [form, setForm] = useState({ email: '', password: '' });
   const [rememberMe, setRememberMe] = useState(false);
   const [error, setError] = useState('');
+  const [sessionNotice, setSessionNotice] = useState<{ type: 'info' | 'warning'; message: string } | null>(null);
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [authConfig, setAuthConfig] = useState<AuthConfig | null>(null);
@@ -28,23 +29,69 @@ export default function LoginPage() {
   const [showAdminEmailForm, setShowAdminEmailForm] = useState(false);
 
   useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const isSessionExpired = params.get('session_expired') === '1';
+    const isLoggedOut = params.get('logged_out') === '1';
+
+    if (isSessionExpired) {
+      clearAuth();
+      setSessionNotice({
+        type: 'warning',
+        message: 'セッションの有効期限が切れたか、認証が失効しました。再度ログインしてください。',
+      });
+      return;
+    }
+
+    if (isLoggedOut) {
+      clearAuth();
+      setSessionNotice({
+        type: 'info',
+        message: 'ログアウトしました。',
+      });
+      return;
+    }
+
+    // セッションループ防護（短時間の連続リダイレクトを遮断）
+    try {
+      const now = Date.now();
+      const lastRedirect = parseInt(sessionStorage.getItem('last_auth_redirect_time') || '0', 10);
+      let count = parseInt(sessionStorage.getItem('auth_redirect_count') || '0', 10);
+
+      if (now - lastRedirect < 5000) {
+        count += 1;
+      } else {
+        count = 1;
+      }
+      sessionStorage.setItem('last_auth_redirect_time', now.toString());
+      sessionStorage.setItem('auth_redirect_count', count.toString());
+
+      if (count > 2) {
+        console.warn('Authentication redirect loop detected. Resetting session.');
+        clearAuth();
+        sessionStorage.removeItem('auth_redirect_count');
+        setSessionNotice({
+          type: 'warning',
+          message: '画面の自動遷移ループを検出したため、安全のために認証セッションをリセットしました。再度ログインしてください。',
+        });
+        return;
+      }
+    } catch {}
+
     if (user && token) {
-      if (typeof window !== 'undefined') {
-        const params = new URLSearchParams(window.location.search);
-        const returnTo = params.get('return_to');
-        if (returnTo && returnTo.startsWith('/') && !returnTo.startsWith('/login')) {
-          router.replace(returnTo);
-          return;
-        }
-        const siteSlug = params.get('site');
-        if (siteSlug) {
-          router.replace(`/sites/${siteSlug}`);
-          return;
-        }
+      const returnTo = params.get('return_to');
+      if (returnTo && returnTo.startsWith('/') && !returnTo.startsWith('/login')) {
+        router.replace(returnTo);
+        return;
+      }
+      const siteSlug = params.get('site');
+      if (siteSlug) {
+        router.replace(`/sites/${siteSlug}`);
+        return;
       }
       router.replace('/dashboard');
     }
-  }, [user, token, router]);
+  }, [user, token, router, clearAuth]);
 
   useEffect(() => {
     let siteParam: string | undefined;
@@ -139,6 +186,23 @@ export default function LoginPage() {
           </h1>
           <p className="text-xs text-slate-500 mt-1">{t('brand.description')}</p>
         </div>
+
+        {sessionNotice && (
+          <div
+            className={`rounded-2xl p-3.5 mb-5 text-xs flex items-center gap-2.5 border animate-in fade-in ${
+              sessionNotice.type === 'warning'
+                ? 'bg-amber-50 border-amber-200 text-amber-900'
+                : 'bg-blue-50 border-blue-200 text-blue-900'
+            }`}
+          >
+            {sessionNotice.type === 'warning' ? (
+              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+            ) : (
+              <ShieldCheck className="w-4 h-4 text-blue-600 shrink-0" />
+            )}
+            <span className="font-medium leading-relaxed">{sessionNotice.message}</span>
+          </div>
+        )}
 
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-3 mb-5 text-xs">
