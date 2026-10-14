@@ -1053,19 +1053,27 @@ func (h *AuthHandler) exchangeDiscordCode(ctx context.Context, code, redirectURI
 
 	if guildsResp, err := client.Do(guildsReq); err == nil {
 		defer guildsResp.Body.Close()
-		var dcGuilds []struct {
-			ID   string `json:"id"`
-			Name string `json:"name"`
-		}
-		if json.NewDecoder(guildsResp.Body).Decode(&dcGuilds) == nil {
-			for _, g := range dcGuilds {
-				guilds = append(guilds, DiscordGuildInfo{
-					ID:   g.ID,
-					Name: g.Name,
-				})
+		if guildsResp.StatusCode == http.StatusOK {
+			var dcGuilds []struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
 			}
+			if json.NewDecoder(guildsResp.Body).Decode(&dcGuilds) == nil {
+				for _, g := range dcGuilds {
+					guilds = append(guilds, DiscordGuildInfo{
+						ID:   g.ID,
+						Name: g.Name,
+					})
+				}
+			}
+		} else {
+			log.Printf("[OAuth:Discord] Failed to fetch guilds for user '%s', status: %d", dcUser.Username, guildsResp.StatusCode)
 		}
+	} else {
+		log.Printf("[OAuth:Discord] Error fetching guilds for user '%s': %v", dcUser.Username, err)
 	}
+
+	log.Printf("[OAuth:Discord] User '%s' (%s). Detected guilds from Discord: %d guilds", dcUser.Username, email, len(guilds))
 
 	return providerID, email, username, displayName, avatarURL, guilds, nil
 }

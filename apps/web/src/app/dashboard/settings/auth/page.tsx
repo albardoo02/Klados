@@ -203,7 +203,7 @@ export default function AuthSettingsPage() {
   const openCreateModal = () => {
     setEditingRule(null);
     setRuleName('');
-    setProvider('github');
+    setProvider('all');
     setRuleType('github_org');
     setMatchValue('');
     setTargetSiteId(selectedSiteId || (sites.length > 0 ? sites[0].id : ''));
@@ -215,7 +215,7 @@ export default function AuthSettingsPage() {
   const openEditModal = (rule: AuthRoutingRule) => {
     setEditingRule(rule);
     setRuleName(rule.name);
-    setProvider(rule.provider);
+    setProvider(rule.provider || 'all');
     setRuleType(rule.rule_type);
     setMatchValue(rule.match_value);
     setTargetSiteId(rule.target_site_id || '');
@@ -242,9 +242,17 @@ export default function AuthSettingsPage() {
     e.preventDefault();
     if (!ruleName.trim() || !matchValue.trim()) return;
 
+    // ruleType に応じて provider が矛盾している場合の自動補正
+    let finalProvider = provider;
+    if (ruleType === 'github_org' && provider !== 'all' && provider !== 'github') {
+      finalProvider = 'github';
+    } else if (ruleType === 'discord_guild' && provider !== 'all' && provider !== 'discord') {
+      finalProvider = 'discord';
+    }
+
     saveRuleMutation.mutate({
       name: ruleName.trim(),
-      provider,
+      provider: finalProvider,
       rule_type: ruleType,
       match_value: matchValue.trim(),
       action_type: targetSiteId ? 'assign_site_role' : 'none',
@@ -1413,7 +1421,19 @@ export default function AuthSettingsPage() {
                   </label>
                   <select
                     value={ruleType}
-                    onChange={(e: any) => setRuleType(e.target.value)}
+                    onChange={(e: any) => {
+                      const newType = e.target.value;
+                      setRuleType(newType);
+                      if (newType === 'github_org') {
+                        setProvider('github');
+                      } else if (newType === 'discord_guild') {
+                        setProvider('discord');
+                      } else if (newType === 'email_domain' || newType === 'email_list') {
+                        if (provider === 'github' || provider === 'discord') {
+                          setProvider('all');
+                        }
+                      }
+                    }}
                     className="w-full px-3 py-2 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs"
                   >
                     <option value="github_org">GitHub 組織名 (Org)</option>

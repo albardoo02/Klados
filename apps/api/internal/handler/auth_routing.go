@@ -776,7 +776,12 @@ func (h *AuthHandler) applyRoutingRulesContext(
 	for _, rule := range rules {
 		// プロバイダー照合
 		if rule.Provider != "all" && rule.Provider != "" && rule.Provider != ctx.Provider {
-			continue
+			// ルールタイプが対象プロバイダと直接一致している場合は救済
+			isSpecialMatch := (rule.RuleType == "github_org" && ctx.Provider == "github") ||
+				(rule.RuleType == "discord_guild" && ctx.Provider == "discord")
+			if !isSpecialMatch {
+				continue
+			}
 		}
 
 		matched := false
@@ -785,15 +790,33 @@ func (h *AuthHandler) applyRoutingRulesContext(
 
 		switch rule.RuleType {
 		case "github_org":
+			cleanMatch := strings.TrimSpace(matchVal)
+			cleanMatch = strings.TrimPrefix(cleanMatch, "@")
+			cleanMatch = strings.TrimPrefix(cleanMatch, "https://github.com/")
+			cleanMatch = strings.TrimPrefix(cleanMatch, "http://github.com/")
+			cleanMatch = strings.TrimSuffix(cleanMatch, "/")
 			for _, o := range ctx.Orgs {
-				if strings.EqualFold(o, matchVal) {
+				cleanO := strings.TrimSpace(o)
+				if strings.EqualFold(cleanO, cleanMatch) {
 					matched = true
 					break
 				}
 			}
 		case "discord_guild":
+			cleanMatch := strings.TrimSpace(matchVal)
+			if strings.Contains(cleanMatch, "discord.com/channels/") {
+				parts := strings.Split(cleanMatch, "discord.com/channels/")
+				if len(parts) > 1 {
+					sub := strings.Split(parts[1], "/")
+					if len(sub) > 0 && sub[0] != "" {
+						cleanMatch = sub[0]
+					}
+				}
+			}
 			for _, g := range ctx.Guilds {
-				if (g.ID != "" && g.ID == matchVal) || (g.Name != "" && strings.EqualFold(g.Name, matchVal)) {
+				gID := strings.TrimSpace(g.ID)
+				gName := strings.TrimSpace(g.Name)
+				if (gID != "" && gID == cleanMatch) || (gName != "" && strings.EqualFold(gName, cleanMatch)) {
 					matched = true
 					break
 				}
@@ -830,15 +853,45 @@ func (h *AuthHandler) applyRoutingRulesContext(
 				if persist {
 					var member model.SiteMember
 					err := h.DB.Where("site_id = ? AND user_id = ?", siteID, user.ID).First(&member).Error
+
+					// ロールに応じたデフォルト権限を生成
+					var defaultPerms model.SitePermissions
+					switch rule.TargetRole {
+					case model.RoleAdmin:
+						defaultPerms = model.SitePermissions{
+							CanEditPages:      true,
+							CanPublishPages:   true,
+							CanDeletePages:    true,
+							CanManageSettings: true,
+							CanInviteMembers:  true,
+							CanManageMedia:    true,
+						}
+					case model.RoleEditor:
+						defaultPerms = model.SitePermissions{
+							CanEditPages:      true,
+							CanPublishPages:   true,
+							CanDeletePages:    false,
+							CanManageSettings: false,
+							CanInviteMembers:  false,
+							CanManageMedia:    true,
+						}
+					case model.RoleViewer:
+						defaultPerms = model.SitePermissions{}
+					}
+					permsBytes, _ := json.Marshal(defaultPerms)
+
 					if err != nil {
 						newMember := model.SiteMember{
-							SiteID: siteID,
-							UserID: user.ID,
-							Role:   rule.TargetRole,
+							ID:          uuid.New(),
+							SiteID:      siteID,
+							UserID:      user.ID,
+							Role:        rule.TargetRole,
+							Permissions: datatypes.JSON(permsBytes),
 						}
 						h.DB.Create(&newMember)
 					} else if member.Role != rule.TargetRole && member.Role != model.RoleOwner {
 						member.Role = rule.TargetRole
+						member.Permissions = datatypes.JSON(permsBytes)
 						h.DB.Save(&member)
 					}
 				}
