@@ -96,26 +96,27 @@ export function getInitialAuth(): { user: User | null; token: string | null } {
   let token: string | null = null;
   let user: User | null = null;
 
-  // 1. Try localStorage / sessionStorage
-  try {
-    token = localStorage.getItem('access_token') || sessionStorage.getItem('access_token');
-    const storedUser = localStorage.getItem('klados_user') || sessionStorage.getItem('klados_user');
-    if (storedUser) {
-      user = JSON.parse(storedUser);
-    }
-  } catch {}
-
-  // 2. Fallback to cookies (cross-subdomain session: .klados.app)
-  if (!token) {
-    token = getCookie('access_token');
-  }
-  if (!user) {
-    const cookieUser = getCookie('klados_user');
-    if (cookieUser) {
+  // 1. First check shared cross-subdomain cookie (.klados.app)
+  const cookieToken = getCookie('access_token');
+  const cookieUserStr = getCookie('klados_user');
+  if (cookieToken) {
+    token = cookieToken;
+    if (cookieUserStr) {
       try {
-        user = JSON.parse(cookieUser);
+        user = JSON.parse(cookieUserStr);
       } catch {}
     }
+  }
+
+  // 2. Fallback to localStorage / sessionStorage if no cookie
+  if (!token) {
+    try {
+      token = localStorage.getItem('access_token') || sessionStorage.getItem('access_token');
+      const storedUser = localStorage.getItem('klados_user') || sessionStorage.getItem('klados_user');
+      if (storedUser) {
+        user = JSON.parse(storedUser);
+      }
+    } catch {}
   }
 
   // 3. Fallback to persisted klados-auth in localStorage
@@ -132,13 +133,11 @@ export function getInitialAuth(): { user: User | null; token: string | null } {
     } catch {}
   }
 
-  // If token found from cookies, keep localStorage in sync
+  // Keep localStorage in sync with authoritative session
   if (token && typeof localStorage !== 'undefined') {
     try {
-      if (!localStorage.getItem('access_token')) {
-        localStorage.setItem('access_token', token);
-      }
-      if (user && !localStorage.getItem('klados_user')) {
+      localStorage.setItem('access_token', token);
+      if (user) {
         localStorage.setItem('klados_user', JSON.stringify(user));
       }
     } catch {}

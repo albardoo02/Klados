@@ -31,7 +31,9 @@ export const api = axios.create({
 // リクエストインターセプター: JWTトークン付与（localStorage → sessionStorage → cookie の順で探す）
 api.interceptors.request.use((config) => {
   if (typeof window !== 'undefined') {
-    let token = localStorage.getItem('access_token') ?? sessionStorage.getItem('access_token');
+    const match = document.cookie.match(/(?:^|;\s*)access_token=([^;]*)/);
+    const cookieToken = match ? decodeURIComponent(match[1]) : null;
+    let token = cookieToken || localStorage.getItem('access_token') || sessionStorage.getItem('access_token');
     if (!token) {
       try {
         const stored = localStorage.getItem('klados-auth');
@@ -43,17 +45,15 @@ api.interceptors.request.use((config) => {
         }
       } catch {}
     }
-    if (!token) {
-      const match = document.cookie.match(/(?:^|;\s*)access_token=([^;]*)/);
-      token = match ? decodeURIComponent(match[1]) : null;
-      if (token) {
-        try {
-          localStorage.setItem('access_token', token);
-        } catch {}
-      }
-    }
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
+      if (cookieToken && typeof localStorage !== 'undefined') {
+        try {
+          if (localStorage.getItem('access_token') !== cookieToken) {
+            localStorage.setItem('access_token', cookieToken);
+          }
+        } catch {}
+      }
     }
   }
   return config;

@@ -62,23 +62,35 @@ func (h *SiteHandler) List(c *gin.Context) {
 	userIDStr := c.GetString("user_id")
 	userID, _ := uuid.Parse(userIDStr)
 
-	// オーナーとして所有しているサイト
-	var ownedSites []model.Site
-	h.DB.Where("user_id = ?", userID).Order("created_at desc").Find(&ownedSites)
+	var currentUser model.User
+	_ = h.DB.Where("id = ?", userID).First(&currentUser)
 
-	// メンバーとして招待されたサイト
+	var ownedSites []model.Site
+	if currentUser.IsRoot {
+		h.DB.Order("created_at desc").Find(&ownedSites)
+	} else {
+		h.DB.Where("user_id = ?", userID).Order("created_at desc").Find(&ownedSites)
+	}
+
 	var memberRecords []model.SiteMember
-	h.DB.Preload("Site").Where("user_id = ?", userID).Find(&memberRecords)
+	if !currentUser.IsRoot {
+		h.DB.Preload("Site").Where("user_id = ?", userID).Find(&memberRecords)
+	}
 
 	var results []SiteResponseItem
 	siteMap := make(map[uuid.UUID]bool)
 
 	for _, s := range ownedSites {
 		siteMap[s.ID] = true
+		role := model.RoleOwner
+		isOwner := s.UserID == userID || currentUser.IsRoot
+		if currentUser.IsRoot && s.UserID != userID {
+			role = model.RoleAdmin
+		}
 		results = append(results, SiteResponseItem{
 			Site:    s,
-			Role:    model.RoleOwner,
-			IsOwner: true,
+			Role:    role,
+			IsOwner: isOwner,
 		})
 	}
 
@@ -166,9 +178,15 @@ func (h *SiteHandler) Get(c *gin.Context) {
 		return
 	}
 
-	// オーナーかメンバーか確認
+	var currentUser model.User
+	_ = h.DB.Where("id = ?", userID).First(&currentUser)
+
+	// オーナーかメンバーか確認 (Root管理者は全サイトでオーナー/管理者権限)
+	isOwner := site.UserID == userID || currentUser.IsRoot
 	role := model.RoleOwner
-	isOwner := site.UserID == userID
+	if currentUser.IsRoot && site.UserID != userID {
+		role = model.RoleAdmin
+	}
 
 	if !isOwner {
 		var member model.SiteMember
@@ -227,8 +245,11 @@ func (h *SiteHandler) Update(c *gin.Context) {
 		return
 	}
 
-	// オーナーまたは管理者・設定変更権限を持つカスタムメンバー
-	if site.UserID != userID {
+	var currentUser model.User
+	_ = h.DB.Where("id = ?", userID).First(&currentUser)
+
+	// オーナーまたは管理者・設定変更権限を持つカスタムメンバー (Root管理者は無条件許可)
+	if site.UserID != userID && !currentUser.IsRoot {
 		var member model.SiteMember
 		if err := h.DB.Where("site_id = ? AND user_id = ?", site.ID, userID).First(&member).Error; err != nil {
 			c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
@@ -297,7 +318,15 @@ func (h *SiteHandler) Delete(c *gin.Context) {
 	userID := c.GetString("user_id")
 	id := c.Param("id")
 
-	result := h.DB.Where("id = ? AND user_id = ?", id, userID).Delete(&model.Site{})
+	var currentUser model.User
+	_ = h.DB.Where("id = ?", userID).First(&currentUser)
+
+	var result *gorm.DB
+	if currentUser.IsRoot {
+		result = h.DB.Where("id = ?", id).Delete(&model.Site{})
+	} else {
+		result = h.DB.Where("id = ? AND user_id = ?", id, userID).Delete(&model.Site{})
+	}
 	if result.RowsAffected == 0 {
 		c.JSON(http.StatusNotFound, gin.H{"error": "site not found"})
 		return
@@ -342,10 +371,17 @@ func (h *SiteHandler) GetBySlug(c *gin.Context) {
 		if err == nil && t.Valid {
 			if sub, ok := claims["sub"].(string); ok {
 				if uid, err := uuid.Parse(sub); err == nil {
-					if site.UserID == uid {
+					var currentUser model.User
+					_ = h.DB.Where("id = ?", uid).First(&currentUser)
+
+					if currentUser.IsRoot || site.UserID == uid {
 						canEdit = true
 						isOwner = true
-						role = string(model.RoleOwner)
+						if currentUser.IsRoot && site.UserID != uid {
+							role = string(model.RoleAdmin)
+						} else {
+							role = string(model.RoleOwner)
+						}
 					} else {
 						var member model.SiteMember
 						if err := h.DB.Where("site_id = ? AND user_id = ?", site.ID, uid).Limit(1).Find(&member).Error; err == nil && member.ID != uuid.Nil {

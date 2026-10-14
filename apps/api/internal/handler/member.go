@@ -17,6 +17,12 @@ type MemberHandler struct {
 
 // ユーザーがサイトのオーナーまたは権限を持っているかチェックするヘルパー
 func (h *MemberHandler) checkPermission(siteID uuid.UUID, userID uuid.UUID, requiredPerm string) (bool, model.SiteRole, error) {
+	// Root管理者は全サイトに対して全権限を持つ
+	var u model.User
+	if err := h.DB.Where("id = ?", userID).First(&u).Error; err == nil && u.IsRoot {
+		return true, model.RoleAdmin, nil
+	}
+
 	var site model.Site
 	if err := h.DB.Where("id = ?", siteID).First(&site).Error; err != nil {
 		return false, "", err

@@ -669,8 +669,9 @@ export default function SitePageClient() {
   // 1. ゲストユーザーは常に編集不可
   // 2. ログインユーザーの場合、バックエンドから返された can_edit を判定
   // 3. または、サイトのオーナー (site.user_id === user.id) であれば編集可能
-  const isOwner = !isGuest && !!site.user_id && site.user_id === user?.id;
-  const canEdit = !isGuest && (site.can_edit !== undefined ? site.can_edit : isOwner);
+  // 4. システム管理者 (user.is_root) は無条件で全サイト編集可能
+  const isOwner = !isGuest && (Boolean(user?.is_root) || (!!site.user_id && site.user_id === user?.id));
+  const canEdit = !isGuest && (Boolean(user?.is_root) || (site.can_edit !== undefined ? site.can_edit : isOwner));
 
   const targetSlug = useMemo(() => {
     const raw = currentSlug;
