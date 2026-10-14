@@ -47,16 +47,16 @@ export default async function HomePage() {
 
             <nav className="hidden md:flex items-center gap-6 text-sm font-medium text-muted-foreground">
               <a href="#features" className="hover:text-foreground transition-colors">
-                特徴・使いやすさ
+                {t('landing.nav_features')}
               </a>
               <a href="#editor" className="hover:text-foreground transition-colors">
-                エディタ体験
+                {t('landing.nav_editor')}
               </a>
               <a href="#self-hosting" className="hover:text-foreground transition-colors">
-                自宅鯖ホスティング
+                {t('landing.nav_self_hosting')}
               </a>
               <a href="#comparison" className="hover:text-foreground transition-colors">
-                他ツール比較
+                {t('landing.nav_comparison')}
               </a>
             </nav>
           </div>
@@ -67,13 +67,13 @@ export default async function HomePage() {
               href="/login"
               className="px-4 py-2 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted rounded-xl transition-colors"
             >
-              ログイン
+              {t('landing.nav_login')}
             </Link>
             <Link
               href="/register"
               className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-white bg-primary hover:bg-primary/90 rounded-xl transition-all shadow-sm shadow-primary/25 hover:shadow-primary/40 active:scale-95"
             >
-              <span>無料で始める</span>
+              <span>{t('landing.nav_start_free')}</span>
               <ArrowRight className="size-4" />
             </Link>
           </div>
@@ -90,22 +90,22 @@ export default async function HomePage() {
             {/* バッジチップ */}
             <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-muted/80 border border-border text-xs font-medium text-foreground mb-8 shadow-xs animate-in fade-in slide-in-from-bottom-2 duration-500">
               <span className="flex size-2 rounded-full bg-emerald-500 animate-pulse" />
-              <span>新世代の Markdown サイト公開プラットフォーム</span>
+              <span>{t('landing.badge_main')}</span>
               <span className="text-muted-foreground">|</span>
-              <span className="text-blue-600 dark:text-blue-400 font-semibold">自鯖・Proxmox対応</span>
+              <span className="text-blue-600 dark:text-blue-400 font-semibold">{t('landing.badge_sub')}</span>
             </div>
 
             {/* メインキャッチコピー */}
             <h1 className="text-4xl sm:text-6xl lg:text-7xl font-extrabold tracking-tight text-foreground max-w-4xl mx-auto leading-[1.15] mb-6">
-              書くことに、もっと集中を。
+              {t('landing.hero_title_p1')}
               <span className="block mt-2 bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 bg-clip-text text-transparent">
-                Markdownが、美しいWebサイトになる。
+                {t('landing.hero_title_p2')}
               </span>
             </h1>
 
             {/* サブテキスト */}
             <p className="text-lg sm:text-xl text-muted-foreground max-w-2xl mx-auto leading-relaxed mb-10">
-              複雑な設定やHTML・CSSは不要。リアルタイム共同編集、KaTeX数式、独自ドメイン、メディア管理まで、すべてを直感的に使いこなせます。
+              {t('landing.hero_subtitle')}
             </p>
 
             {/* CTAボタングループ */}
@@ -114,7 +114,7 @@ export default async function HomePage() {
                 href="/register"
                 className="w-full sm:w-auto px-7 py-3.5 rounded-2xl bg-primary text-primary-foreground font-bold text-base hover:bg-primary/90 transition-all shadow-lg shadow-primary/20 hover:shadow-xl hover:shadow-primary/30 active:scale-98 flex items-center justify-center gap-2"
               >
-                <span>今すぐ無料でサイトを作成</span>
+                <span>{t('landing.cta_create_website')}</span>
                 <ArrowRight className="size-4" />
               </Link>
               <Link
@@ -122,7 +122,7 @@ export default async function HomePage() {
                 className="w-full sm:w-auto px-7 py-3.5 rounded-2xl bg-muted/60 hover:bg-muted text-foreground border border-border font-semibold text-base transition-all flex items-center justify-center gap-2"
               >
                 <Sparkles className="size-4 text-blue-500" />
-                <span>デモを体験（登録不要）</span>
+                <span>{t('landing.cta_try_demo')}</span>
               </Link>
             </div>
 
@@ -130,19 +130,19 @@ export default async function HomePage() {
             <div className="flex flex-wrap items-center justify-center gap-6 sm:gap-8 text-xs font-semibold text-muted-foreground">
               <div className="flex items-center gap-1.5">
                 <CheckCircle2 className="size-4 text-emerald-500" />
-                <span>Next.js 15 超高速レンダリング</span>
+                <span>{t('landing.hl_rendering')}</span>
               </div>
               <div className="flex items-center gap-1.5">
                 <CheckCircle2 className="size-4 text-emerald-500" />
-                <span>リアルタイム WebSocket 共同編集</span>
+                <span>{t('landing.hl_collab')}</span>
               </div>
               <div className="flex items-center gap-1.5">
                 <CheckCircle2 className="size-4 text-emerald-500" />
-                <span>独自ドメイン・SSL 自動対応</span>
+                <span>{t('landing.hl_domains')}</span>
               </div>
               <div className="flex items-center gap-1.5">
                 <CheckCircle2 className="size-4 text-emerald-500" />
-                <span>完全オープンソース (MIT)</span>
+                <span>{t('landing.hl_oss')}</span>
               </div>
             </div>
           </div>

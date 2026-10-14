@@ -14,8 +14,12 @@ export function LocaleSwitcher() {
   ];
 
   const handleSwitch = (newLocale: Locale) => {
+    if (newLocale === locale) return;
     setLocale(newLocale);
     router.refresh();
+    if (typeof window !== 'undefined') {
+      window.location.reload();
+    }
   };
 
   return (

@@ -19,7 +19,24 @@
   },
   "landing": {
     "cta_start": "Get started for free",
-    "cta_login": "Log in"
+    "cta_login": "Log in",
+    "nav_features": "Features",
+    "nav_editor": "Editor Experience",
+    "nav_self_hosting": "Self-Hosting",
+    "nav_comparison": "Comparison",
+    "nav_login": "Log in",
+    "nav_start_free": "Get started",
+    "badge_main": "Next-Gen Markdown Website Publishing",
+    "badge_sub": "Self-host & Proxmox ready",
+    "hero_title_p1": "Focus on what matters: Writing.",
+    "hero_title_p2": "Turn Markdown into stunning websites.",
+    "hero_subtitle": "No complex HTML or CSS required. Intuitive real-time collaboration, KaTeX math, custom domains, and media management right out of the box.",
+    "cta_create_website": "Create a website for free",
+    "cta_try_demo": "Try demo (no sign-up)",
+    "hl_rendering": "Ultra-fast Next.js 16 rendering",
+    "hl_collab": "Real-time WebSocket collaboration",
+    "hl_domains": "Custom domain & auto SSL",
+    "hl_oss": "100% Open Source (MIT)"
   },
   "auth": {
     "email": "Email address",
@@ -58,6 +75,8 @@
   },
   "nav": {
     "search_placeholder": "Search or command...",
+    "auth_settings": "Authentication & Routing",
+    "auth_settings_desc": "Login methods & auto role routing",
     "api_keys": "API keys",
     "profile_menu_title": "Account settings",
     "profile_menu_desc": "Edit display name and password",

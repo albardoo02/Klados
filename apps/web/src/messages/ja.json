@@ -19,7 +19,24 @@
   },
   "landing": {
     "cta_start": "無料ではじめる",
-    "cta_login": "ログイン"
+    "cta_login": "ログイン",
+    "nav_features": "特徴・使いやすさ",
+    "nav_editor": "エディタ体験",
+    "nav_self_hosting": "自宅鯖ホスティング",
+    "nav_comparison": "他ツール比較",
+    "nav_login": "ログイン",
+    "nav_start_free": "無料で始める",
+    "badge_main": "新世代の Markdown サイト公開プラットフォーム",
+    "badge_sub": "自鯖・Proxmox対応",
+    "hero_title_p1": "書くことに、もっと集中を。",
+    "hero_title_p2": "Markdownが、美しいWebサイトになる。",
+    "hero_subtitle": "複雑な設定やHTML・CSSは不要。リアルタイム共同編集、KaTeX数式、独自ドメイン、メディア管理まで、すべてを直感的に使いこなせます。",
+    "cta_create_website": "今すぐ無料でサイトを作成",
+    "cta_try_demo": "デモを体験（登録不要）",
+    "hl_rendering": "Next.js 16 超高速レンダリング",
+    "hl_collab": "リアルタイム WebSocket 共同編集",
+    "hl_domains": "独自ドメイン・SSL 自動対応",
+    "hl_oss": "完全オープンソース (MIT)"
   },
   "auth": {
     "email": "メールアドレス",
@@ -58,6 +75,8 @@
   },
   "nav": {
     "search_placeholder": "検索またはコマンド...",
+    "auth_settings": "認証・ログイン設定",
+    "auth_settings_desc": "サイト別ログイン・権限自動付与",
     "api_keys": "API キー",
     "profile_menu_title": "個人設定 / プロフィール",
     "profile_menu_desc": "表示名やパスワードの編集",

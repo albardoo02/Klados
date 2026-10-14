@@ -182,7 +182,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             title="サイト別・全体のログイン認証 & アクセス振り分け設定"
           >
             <ShieldCheck className="size-3.5 text-blue-600" />
-            <span className="hidden md:inline">認証・ログイン設定</span>
+            <span className="hidden md:inline">{t('nav.auth_settings')}</span>
           </Link>
 
           {/* APIキー設定リンク */}
@@ -278,8 +278,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   >
                     <ShieldCheck className="size-4 text-emerald-600" />
                     <div className="flex-1">
-                      <span>認証 & 振り分け設定</span>
-                      <span className="block text-[10px] text-slate-400 font-normal">サイト別ログイン・権限自動付与</span>
+                      <span>{t('nav.auth_settings')}</span>
+                      <span className="block text-[10px] text-slate-400 font-normal">{t('nav.auth_settings_desc')}</span>
                     </div>
                   </Link>
 

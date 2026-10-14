@@ -31,6 +31,7 @@ function IntlWrapper({ children }: { children: React.ReactNode }) {
 
   return (
     <NextIntlClientProvider
+      key={activeLocale}
       locale={activeLocale}
       messages={messages[activeLocale]}
       timeZone={defaultTimeZone}
