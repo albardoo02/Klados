@@ -3,7 +3,8 @@
 import {useMutation, useQuery, useQueryClient} from '@tanstack/react-query';
 import {commentsApi, mediaApi, pagesApi, PageVersion, sitesApi, categoriesApi, CategorySummary} from '@/lib/api';
 import {useParams, useRouter} from 'next/navigation';
-import {useEffect, useMemo, useRef, useState} from 'react';
+import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import {createPortal} from 'react-dom';
 import {basicSetup, EditorView} from 'codemirror';
 import {markdown} from '@codemirror/lang-markdown';
 import { Annotation, Compartment, EditorState, RangeSetBuilder } from '@codemirror/state';
@@ -526,7 +527,19 @@ export default function PageEditPage() {
     g: 68,
     b: 68,
   });
-  const colorPickerRef = useRef<HTMLDivElement>(null);
+  const colorPickerTriggerRef = useRef<HTMLDivElement>(null);
+  const colorPickerPopupRef = useRef<HTMLDivElement>(null);
+  const [colorPickerPos, setColorPickerPos] = useState<{ top: number; left: number } | null>(null);
+
+  const updateColorPickerPos = useCallback(() => {
+    if (colorPickerTriggerRef.current) {
+      const rect = colorPickerTriggerRef.current.getBoundingClientRect();
+      const pickerWidth = 288;
+      const left = Math.max(8, Math.min(rect.left, window.innerWidth - pickerWidth - 8));
+      const top = rect.bottom + 6;
+      setColorPickerPos({ top, left });
+    }
+  }, []);
   const svBoxRef = useRef<HTMLDivElement>(null);
   const hueBarRef = useRef<HTMLDivElement>(null);
 
@@ -604,20 +617,33 @@ export default function PageEditPage() {
     window.addEventListener('mouseup', onUp);
   };
 
-  // カラーピッカー外側クリックで閉じる
+  // カラーピッカー外側クリックで閉じる & 位置追従
   useEffect(() => {
+    if (!colorPickerOpen) return;
+    updateColorPickerPos();
+    const handleReposition = () => updateColorPickerPos();
+    window.addEventListener('resize', handleReposition);
+    window.addEventListener('scroll', handleReposition, true);
+
     const handleClickOutside = (e: MouseEvent) => {
-      if (colorPickerRef.current && !colorPickerRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      if (
+        colorPickerPopupRef.current &&
+        !colorPickerPopupRef.current.contains(target) &&
+        colorPickerTriggerRef.current &&
+        !colorPickerTriggerRef.current.contains(target)
+      ) {
         setColorPickerOpen(false);
       }
     };
-    if (colorPickerOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-    }
+    document.addEventListener('mousedown', handleClickOutside);
+
     return () => {
+      window.removeEventListener('resize', handleReposition);
+      window.removeEventListener('scroll', handleReposition, true);
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, [colorPickerOpen]);
+  }, [colorPickerOpen, updateColorPickerPos]);
 
   // リアルタイム協調編集 & Presence ステート
   const [collaborators, setCollaborators] = useState<Collaborator[]>([]);
@@ -3091,7 +3117,7 @@ export default function PageEditPage() {
             </div>
 
             {/* テキストカラー & ハイライト (2D HSVポインタ + RGB/HEX カラーピッカー) */}
-            <div className="relative shrink-0" ref={colorPickerRef}>
+            <div className="relative shrink-0" ref={colorPickerTriggerRef}>
               <button
                 type="button"
                 onMouseDown={(e) => {
@@ -3103,7 +3129,10 @@ export default function PageEditPage() {
                     };
                   }
                 }}
-                onClick={() => setColorPickerOpen(!colorPickerOpen)}
+                onClick={() => {
+                  updateColorPickerPos();
+                  setColorPickerOpen(!colorPickerOpen);
+                }}
                 className={`px-2 py-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer flex items-center gap-1.5 shrink-0 ${
                   colorPickerOpen ? 'bg-muted text-foreground ring-1 ring-border' : ''
                 }`}
@@ -3116,8 +3145,17 @@ export default function PageEditPage() {
                 />
               </button>
 
-              {colorPickerOpen && (
-                <div className="absolute left-0 sm:left-auto top-full mt-2 z-50 w-72 max-w-[calc(100vw-2rem)] p-3.5 bg-card text-card-foreground border border-border rounded-2xl shadow-2xl space-y-3 animate-in fade-in-0 zoom-in-95 duration-100 select-none">
+              {colorPickerOpen && typeof document !== 'undefined' && colorPickerPos && createPortal(
+                <div
+                  ref={colorPickerPopupRef}
+                  style={{
+                    position: 'fixed',
+                    top: colorPickerPos.top,
+                    left: colorPickerPos.left,
+                    zIndex: 9999,
+                  }}
+                  className="w-72 max-w-[calc(100vw-2rem)] p-3.5 bg-card text-card-foreground border border-border rounded-2xl shadow-2xl space-y-3 animate-in fade-in-0 zoom-in-95 duration-100 select-none"
+                >
                   {/* モード切替 (文字色 / 背景ハイライト) & リセット */}
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex flex-1 bg-muted/60 p-0.5 rounded-xl border border-border text-[11px] font-semibold">
@@ -3352,7 +3390,8 @@ export default function PageEditPage() {
                       ))}
                     </div>
                   </div>
-                </div>
+                </div>,
+                document.body
               )}
             </div>
 
