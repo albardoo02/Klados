@@ -104,7 +104,7 @@ export async function middleware(req: NextRequest) {
       isExactOrSubpath(url.pathname, '/login') ||
       isExactOrSubpath(url.pathname, '/register')
     ) {
-      const mainPortal = getMainPortalUrl();
+      const mainPortal = getMainPortalUrl(undefined, hostname);
       return NextResponse.redirect(new URL(`${mainPortal}${url.pathname}${url.search}`));
     }
 

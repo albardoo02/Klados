@@ -3,6 +3,7 @@
 import { X, Code2, Copy, Check, ExternalLink } from 'lucide-react';
 import { useState } from 'react';
 import Link from 'next/link';
+import { getMainPortalUrl, isMainDomain } from '@/lib/domains';
 
 interface PageSourceModalProps {
   isOpen: boolean;
@@ -26,6 +27,11 @@ export function PageSourceModal({ isOpen, onClose, page, canEdit = false }: Page
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
+
+  const isCrossHost = typeof window !== 'undefined' && !isMainDomain(window.location.hostname);
+  const editHref = isCrossHost
+    ? `${getMainPortalUrl()}/dashboard/pages/${page.id}/edit`
+    : `/dashboard/pages/${page.id}/edit`;
 
   return (
     <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
@@ -53,13 +59,23 @@ export function PageSourceModal({ isOpen, onClose, page, canEdit = false }: Page
               )}
             </button>
             {canEdit && (
-              <Link
-                href={`/dashboard/pages/${page.id}/edit`}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white transition-colors"
-              >
-                <span>エディタで編集</span>
-                <ExternalLink className="size-3" />
-              </Link>
+              isCrossHost ? (
+                <a
+                  href={editHref}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white transition-colors"
+                >
+                  <span>エディタで編集</span>
+                  <ExternalLink className="size-3" />
+                </a>
+              ) : (
+                <Link
+                  href={editHref}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white transition-colors"
+                >
+                  <span>エディタで編集</span>
+                  <ExternalLink className="size-3" />
+                </Link>
+              )
             )}
             <button
               onClick={onClose}

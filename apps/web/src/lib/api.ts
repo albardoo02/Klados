@@ -478,7 +478,7 @@ export const mediaApi = {
     form.append('file', file);
     form.append('site_id', siteId);
     return api.post('/media/upload', form, {
-      headers: { 'Content-Type': undefined },
+      headers: { 'Content-Type': 'multipart/form-data' },
     });
   },
   list: (siteId: string) => api.get(`/media?site_id=${siteId}`),
@@ -498,7 +498,7 @@ export const mediaApi = {
       skipped_count: number;
       message: string;
     }>('/media/import', form, {
-      headers: { 'Content-Type': undefined },
+      headers: { 'Content-Type': 'multipart/form-data' },
     });
   },
 };

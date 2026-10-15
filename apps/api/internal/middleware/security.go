@@ -33,8 +33,9 @@ func SecurityHeaders() gin.HandlerFunc {
 // Default for standard API JSON requests is maxBytes (e.g. 2MB).
 func MaxBodySize(maxBytes int64) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Do not restrict multipart uploads here (handled separately by MediaHandler)
-		if c.Request.URL.Path != "/v1/media" && c.Request.URL.Path != "/v1/auth/avatar" {
+		// Do not restrict multipart uploads here (handled separately by MediaHandler with 10MB limit)
+		path := c.Request.URL.Path
+		if !strings.HasPrefix(path, "/v1/media") && !strings.HasPrefix(path, "/v1/sites") && path != "/v1/auth/avatar" {
 			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBytes)
 		}
 		c.Next()

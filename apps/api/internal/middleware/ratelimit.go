@@ -82,6 +82,13 @@ func RateLimit(requestsPerMinute int, burst int) gin.HandlerFunc {
 	limiter := NewIPRateLimiter(requestsPerMinute, burst)
 
 	return func(c *gin.Context) {
+		// 静的メディアファイル（画像・アセット）へのリクエストはレートリミット対象外
+		path := c.Request.URL.Path
+		if strings.HasPrefix(path, "/v1/public/media") || strings.HasPrefix(path, "/v1/media/") {
+			c.Next()
+			return
+		}
+
 		ip := c.ClientIP()
 		if !limiter.Allow(ip) {
 			c.Header("Retry-After", "60")

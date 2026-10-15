@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { getSitePageHref } from '@/lib/site-url';
+import { getMainPortalUrl, isMainDomain } from '@/lib/domains';
 import {
   BookOpen,
   Edit3,
@@ -100,6 +101,11 @@ export function PageActionTabs({
 
   const dropdownRef = useRef<HTMLDivElement>(null);
   const brandColor = site.primary_color || '#3b82f6';
+
+  const isCrossHost = typeof window !== 'undefined' && !isMainDomain(window.location.hostname);
+  const editHref = isCrossHost
+    ? `${getMainPortalUrl()}/dashboard/pages/${page.id}/edit`
+    : `/dashboard/pages/${page.id}/edit`;
 
   // トースト表示タイマー
   const showToast = (msg: string) => {
@@ -225,14 +231,25 @@ export function PageActionTabs({
 
             {/* 編集タブ (関係者・編集権限がある場合のみ表示) */}
             {canEdit ? (
-              <Link
-                href={`/dashboard/pages/${page.id}/edit`}
-                className="flex items-center gap-1.5 px-3 sm:px-3.5 py-2 text-xs font-medium text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/60 rounded-t-xl transition-colors cursor-pointer shrink-0"
-                title="エディタを開いてこのページを編集"
-              >
-                <Edit3 className="size-3.5 shrink-0" />
-                <span>編集</span>
-              </Link>
+              isCrossHost ? (
+                <a
+                  href={editHref}
+                  className="flex items-center gap-1.5 px-3 sm:px-3.5 py-2 text-xs font-medium text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/60 rounded-t-xl transition-colors cursor-pointer shrink-0"
+                  title="エディタを開いてこのページを編集"
+                >
+                  <Edit3 className="size-3.5 shrink-0" />
+                  <span>編集</span>
+                </a>
+              ) : (
+                <Link
+                  href={editHref}
+                  className="flex items-center gap-1.5 px-3 sm:px-3.5 py-2 text-xs font-medium text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/60 rounded-t-xl transition-colors cursor-pointer shrink-0"
+                  title="エディタを開いてこのページを編集"
+                >
+                  <Edit3 className="size-3.5 shrink-0" />
+                  <span>編集</span>
+                </Link>
+              )
             ) : (
               onOpenCollaborate && (
                 <button
