@@ -512,6 +512,26 @@ func (h *MediaHandler) getMediaReader(ctx context.Context, media model.MediaFile
 	if media.Filename != "" && media.Filename != media.StorageKey {
 		keysToTry = append(keysToTry, media.Filename)
 	}
+	if media.OriginalName != "" {
+		keysToTry = append(keysToTry,
+			media.OriginalName,
+			fmt.Sprintf("sites/%s/media/%s", media.SiteID.String(), media.OriginalName),
+			fmt.Sprintf("media/%s", media.OriginalName),
+			fmt.Sprintf("%s/%s", media.SiteID.String(), media.OriginalName),
+		)
+	}
+	if media.ID != uuid.Nil {
+		ext := filepath.Ext(media.Filename)
+		if ext == "" {
+			ext = filepath.Ext(media.OriginalName)
+		}
+		keysToTry = append(keysToTry,
+			media.ID.String(),
+			media.ID.String()+ext,
+			fmt.Sprintf("sites/%s/media/%s%s", media.SiteID.String(), media.ID.String(), ext),
+			fmt.Sprintf("media/%s%s", media.ID.String(), ext),
+		)
+	}
 
 	if h.Storage != nil {
 		for _, key := range keysToTry {

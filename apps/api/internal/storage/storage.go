@@ -89,19 +89,74 @@ func (s *LocalStorage) Get(ctx context.Context, key string) (io.ReadCloser, int6
 	}
 
 	// Try each candidate path
-	for _, p := range candidates {
+	tryPath := func(p string) (io.ReadCloser, int64, string, bool) {
 		f, err := os.Open(p)
-		if err == nil {
-			stat, sErr := f.Stat()
-			if sErr == nil && !stat.IsDir() {
-				ext := filepath.Ext(p)
-				cType := mime.TypeByExtension(ext)
-				if cType == "" {
-					cType = "application/octet-stream"
+		if err != nil {
+			return nil, 0, "", false
+		}
+		stat, sErr := f.Stat()
+		if sErr != nil {
+			f.Close()
+			return nil, 0, "", false
+		}
+		if stat.IsDir() {
+			// MinIO object directory format: contains part.1
+			partPath := filepath.Join(p, "part.1")
+			partF, pErr := os.Open(partPath)
+			if pErr == nil {
+				partStat, psErr := partF.Stat()
+				if psErr == nil && !partStat.IsDir() {
+					f.Close()
+					ext := filepath.Ext(p)
+					cType := mime.TypeByExtension(ext)
+					if cType == "" {
+						cType = "application/octet-stream"
+					}
+					return partF, partStat.Size(), cType, true
 				}
-				return f, stat.Size(), cType, nil
+				partF.Close()
 			}
 			f.Close()
+			return nil, 0, "", false
+		}
+
+		ext := filepath.Ext(p)
+		cType := mime.TypeByExtension(ext)
+		if cType == "" {
+			cType = "application/octet-stream"
+		}
+		return f, stat.Size(), cType, true
+	}
+
+	for _, p := range candidates {
+		if rc, size, cType, ok := tryPath(p); ok {
+			return rc, size, cType, nil
+		}
+	}
+
+	// Deep search for base filename across sites/ directories if not found in exact path
+	baseName := filepath.Base(cleanKey)
+	if baseName != "" && baseName != "." {
+		searchRoots := []string{s.baseDir, filepath.Join(s.baseDir, "klados-media")}
+		for _, fb := range s.fallbackDirs {
+			searchRoots = append(searchRoots, fb, filepath.Join(fb, "klados-media"))
+		}
+
+		for _, root := range searchRoots {
+			// Search: root/sites/*/media/baseName
+			patterns := []string{
+				filepath.Join(root, "sites", "*", "media", baseName),
+				filepath.Join(root, "media", baseName),
+				filepath.Join(root, baseName),
+			}
+			for _, pat := range patterns {
+				matches, _ := filepath.Glob(pat)
+				for _, m := range matches {
+					if rc, size, cType, ok := tryPath(m); ok {
+						return rc, size, cType, nil
+					}
+				}
+			}
 		}
 	}
 
