@@ -13,6 +13,7 @@ import (
 	"github.com/klados/api/internal/config"
 	"github.com/klados/api/internal/handler"
 	"github.com/klados/api/internal/middleware"
+	"github.com/klados/api/internal/storage"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"gorm.io/gorm"
@@ -63,44 +64,63 @@ func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
 		AllowCredentials: true,
 	}))
 
-	// MinIO クライアント
-	minioClient, err := minio.New(cfg.MinioEndpoint, &minio.Options{
-		Creds:  credentials.NewStaticV4(cfg.MinioAccessKey, cfg.MinioSecretKey, ""),
-		Secure: cfg.MinioUseSSL,
-	})
-	if err != nil {
-		log.Fatalf("failed to init minio: %v", err)
+	// ストレージの初期化 (Local Filesystem または S3/MinIO)
+	fallbackDirs := []string{
+		"/data/minio_data/klados-media",
+		"/data/minio_data",
+		"./data/minio_data/klados-media",
+		"./data/media",
 	}
+	localStorage := storage.NewLocalStorage(cfg.StorageDir, fallbackDirs)
 
-	// バケット作成（存在しない場合）および公開読み取りポリシーの設定（MinIO起動待ちリトライ付き）
-	go func() {
-		for i := 0; i < 15; i++ {
-			if i > 0 {
-				time.Sleep(2 * time.Second)
-			}
-			exists, bErr := minioClient.BucketExists(context.Background(), cfg.MinioBucket)
-			if bErr == nil {
-				if !exists {
-					if err := minioClient.MakeBucket(context.Background(), cfg.MinioBucket, minio.MakeBucketOptions{}); err == nil {
-						log.Printf("[MinIO] Bucket %s created successfully", cfg.MinioBucket)
+	var storageDriver storage.Storage = localStorage
+	var minioClient *minio.Client
+
+	if cfg.StorageDriver == "s3" || cfg.StorageDriver == "minio" {
+		mClient, err := minio.New(cfg.MinioEndpoint, &minio.Options{
+			Creds:  credentials.NewStaticV4(cfg.MinioAccessKey, cfg.MinioSecretKey, ""),
+			Secure: cfg.MinioUseSSL,
+		})
+		if err != nil {
+			log.Printf("[Storage] Warning: failed to init minio client: %v. Falling back to local storage.", err)
+		} else {
+			minioClient = mClient
+			storageDriver = storage.NewS3Storage(minioClient, cfg.MinioBucket, localStorage)
+			log.Printf("[Storage] S3/MinIO storage configured for endpoint %s, bucket %s (with local fallback)", cfg.MinioEndpoint, cfg.MinioBucket)
+
+			// バケット作成（存在しない場合）および公開読み取りポリシーの設定（MinIO起動待ちリトライ付き）
+			go func() {
+				for i := 0; i < 15; i++ {
+					if i > 0 {
+						time.Sleep(2 * time.Second)
+					}
+					exists, bErr := minioClient.BucketExists(context.Background(), cfg.MinioBucket)
+					if bErr == nil {
+						if !exists {
+							if err := minioClient.MakeBucket(context.Background(), cfg.MinioBucket, minio.MakeBucketOptions{}); err == nil {
+								log.Printf("[MinIO] Bucket %s created successfully", cfg.MinioBucket)
+							}
+						}
+						policy := fmt.Sprintf(`{
+							"Version": "2012-10-17",
+							"Statement": [
+								{
+									"Effect": "Allow",
+									"Principal": {"AWS": ["*"]},
+									"Action": ["s3:GetObject"],
+									"Resource": ["arn:aws:s3:::%s/*"]
+								}
+							]
+						}`, cfg.MinioBucket)
+						_ = minioClient.SetBucketPolicy(context.Background(), cfg.MinioBucket, policy)
+						return
 					}
 				}
-				policy := fmt.Sprintf(`{
-					"Version": "2012-10-17",
-					"Statement": [
-						{
-							"Effect": "Allow",
-							"Principal": {"AWS": ["*"]},
-							"Action": ["s3:GetObject"],
-							"Resource": ["arn:aws:s3:::%s/*"]
-						}
-					]
-				}`, cfg.MinioBucket)
-				_ = minioClient.SetBucketPolicy(context.Background(), cfg.MinioBucket, policy)
-				return
-			}
+			}()
 		}
-	}()
+	} else {
+		log.Printf("[Storage] Built-in local filesystem storage enabled at %s", cfg.StorageDir)
+	}
 
 	// ハンドラー
 	authH := &handler.AuthHandler{DB: db, JWTSecret: cfg.JWTSecret, Cfg: cfg}
@@ -113,6 +133,7 @@ func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
 	categoryH := &handler.CategoryHandler{DB: db}
 	mediaH := &handler.MediaHandler{
 		DB:       db,
+		Storage:  storageDriver,
 		Minio:    minioClient,
 		Bucket:   cfg.MinioBucket,
 		Endpoint: cfg.MinioEndpoint,

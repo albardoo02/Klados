@@ -32,11 +32,11 @@ services:
       retries: 5
 
   minio:
+    profiles:
+      - minio
     build:
       context: ./docker/minio
       dockerfile: Dockerfile
-    image: klados-minio:latest
-    pull_policy: never
     container_name: klados-minio
     restart: unless-stopped
     command: ["minio", "server", "/data", "--console-address", ":9001"]
@@ -68,6 +68,8 @@ services:
       DATABASE_URL: host=postgres user=klados password=klados dbname=klados port=5432 sslmode=disable
       REDIS_URL: redis://redis:6379
       JWT_SECRET: change-me-in-production-use-long-random-string
+      STORAGE_DRIVER: local
+      STORAGE_DIR: /data/media
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
@@ -75,6 +77,9 @@ services:
       MINIO_USE_SSL: "false"
       ALLOW_ORIGINS: http://localhost:3000
       ENVIRONMENT: development
+    volumes:
+      - media_data:/data/media
+      - minio_data:/data/minio_data:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -101,4 +106,5 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  media_data:
   minio_data:

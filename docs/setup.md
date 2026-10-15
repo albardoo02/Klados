@@ -86,13 +86,15 @@ pnpm dev
 | `DATABASE_URL`     | `host=localhost user=klados password=klados dbname=klados port=5432 sslmode=disable` | PostgreSQL 接続文字列                                              |
 | `REDIS_URL`        | `redis://localhost:6379`                                                             | Redis 接続 URL                                                     |
 | `JWT_SECRET`       | *(要変更)*                                                                           | **⚠️ 必ず変更してください**（後述）                                |
-| `MINIO_ENDPOINT`   | `localhost:9000`                                                                     | MinIO の API エンドポイント                                        |
-| `MINIO_ACCESS_KEY` | `minioadmin`                                                                         | MinIO のアクセスキー                                               |
-| `MINIO_SECRET_KEY` | `minioadmin`                                                                         | MinIO のシークレットキー                                           |
-| `MINIO_BUCKET`     | `klados-media`                                                                       | メディアファイル用バケット名                                       |
-| `MINIO_USE_SSL`    | `false`                                                                              | MinIO への接続に SSL を使用するか                                  |
-| `ALLOW_ORIGINS`    | `http://localhost:3000`                                                              | CORS で許可するオリジン（カンマ区切りで複数指定可）                |
-| `ENVIRONMENT`      | `development`                                                                        | `development` または `production`（後者で Gin がリリースモードに） |
+| `STORAGE_DRIVER`   | `local`                                                                              | ストレージ方式 (`local`: 内蔵ローカル保存, `s3`: S3/MinIO)           |
+| `STORAGE_DIR`      | `/data/media`                                                                        | ローカル保存時の保存先ディレクトリ                                   |
+| `MINIO_ENDPOINT`   | `localhost:9000`                                                                     | S3 / MinIO の API エンドポイント（`STORAGE_DRIVER=s3` 時のみ使用）   |
+| `MINIO_ACCESS_KEY` | `minioadmin`                                                                         | S3 / MinIO のアクセスキー                                            |
+| `MINIO_SECRET_KEY` | `minioadmin`                                                                         | S3 / MinIO のシークレットキー                                        |
+| `MINIO_BUCKET`     | `klados-media`                                                                       | メディアファイル用バケット名                                         |
+| `MINIO_USE_SSL`    | `false`                                                                              | S3 / MinIO への接続に SSL を使用するか                               |
+| `ALLOW_ORIGINS`    | `http://localhost:3000`                                                              | CORS で許可するオリジン（カンマ区切りで複数指定可）                  |
+| `ENVIRONMENT`      | `development`                                                                        | `development` または `production`（後者で Gin がリリースモードに）   |
 
 ### フロントエンド（Web）
 
@@ -279,17 +281,23 @@ DATABASE_URL=host=your-db-host user=klados password=your-password dbname=klados 
 REDIS_URL=redis://:password@your-redis-host:6379
 ```
 
-### MinIO（ファイルストレージ）
+### ストレージ（ファイル・画像保存）
 
-画像・メディアファイルのアップロード先として使用します。S3 互換のため、本番環境では AWS S3 や Cloudflare R2 に置き換えることができます。
+画像・メディアファイルのアップロード先です。Klados は**完全自己完結の内蔵ローカルストレージ（推奨・デフォルト）**および **S3互換ストレージ（MinIO / AWS S3 / Cloudflare R2）**をサポートしています。
 
-#### ローカル開発（MinIO コンテナ）
+#### 1. 内蔵ローカルストレージ（デフォルト・推奨）
 
-Docker Compose で自動起動します。
+`STORAGE_DRIVER=local`（デフォルト設定）の場合、MinIO コンテナの起動や公式イメージのダウンロードを行わず、API コンテナ内部および Docker ボリューム（`media_data:/data/media`）へ直接保存・配信されます。
+公式 MinIO リポジトリの廃止・ダウンロード失敗（410 Gone）や Quay.io のレート制限に一切依存せず、`docker compose up -d` だけで確実に動作します。
 
-- API エンドポイント: `http://localhost:9000`
-- 管理コンソール: `http://localhost:9001`
-- ユーザー名 / パスワード: `minioadmin` / `minioadmin`
+#### 2. MinIO / S3 互換ストレージを利用する場合
+
+スタンドアロンの S3 / MinIO を利用する場合は、`apps/api/.env` で `STORAGE_DRIVER=s3` と設定してください。
+Docker Compose の MinIO コンテナを起動したい場合は `--profile minio` を指定します:
+
+```bash
+docker compose --profile minio up -d
+```
 
 #### 本番環境（AWS S3 に置き換える場合）
 

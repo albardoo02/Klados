@@ -13,12 +13,14 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/klados/api/internal/model"
+	"github.com/klados/api/internal/storage"
 	"github.com/minio/minio-go/v7"
 	"gorm.io/gorm"
 )
 
 type MediaHandler struct {
 	DB       *gorm.DB
+	Storage  storage.Storage
 	Minio    *minio.Client
 	Bucket   string
 	Endpoint string
@@ -113,7 +115,15 @@ func (h *MediaHandler) Upload(c *gin.Context) {
 	filename := fmt.Sprintf("%s%s", mediaID.String(), ext)
 	storageKey := fmt.Sprintf("sites/%s/media/%s", sUID.String(), filename)
 
-	if h.Minio != nil && h.Bucket != "" {
+	var uploaded bool
+	if h.Storage != nil {
+		if err := h.Storage.Save(c.Request.Context(), storageKey, file, header.Size, mimeType); err != nil {
+			log.Printf("[MediaHandler.Upload] Storage.Save error: %v (key: %s)", err, storageKey)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to upload file to storage: %v", err)})
+			return
+		}
+		uploaded = true
+	} else if h.Minio != nil && h.Bucket != "" {
 		exists, bErr := h.Minio.BucketExists(c.Request.Context(), h.Bucket)
 		if bErr != nil || !exists {
 			if mErr := h.Minio.MakeBucket(c.Request.Context(), h.Bucket, minio.MakeBucketOptions{}); mErr == nil {
@@ -145,6 +155,13 @@ func (h *MediaHandler) Upload(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to upload file to storage: %v", err)})
 			return
 		}
+		uploaded = true
+	}
+
+	if !uploaded {
+		log.Printf("[MediaHandler.Upload] No storage driver configured for key: %s", storageKey)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "no storage driver configured"})
+		return
 	}
 
 	uUID, _ := uuid.Parse(userIDStr)
@@ -193,7 +210,11 @@ func (h *MediaHandler) Delete(c *gin.Context) {
 		return
 	}
 
-	h.Minio.RemoveObject(context.Background(), h.Bucket, media.StorageKey, minio.RemoveObjectOptions{})
+	if h.Storage != nil {
+		_ = h.Storage.Delete(context.Background(), media.StorageKey)
+	} else if h.Minio != nil && h.Bucket != "" {
+		h.Minio.RemoveObject(context.Background(), h.Bucket, media.StorageKey, minio.RemoveObjectOptions{})
+	}
 	h.DB.Delete(&media)
 
 	c.JSON(http.StatusOK, gin.H{"success": true})
@@ -235,15 +256,30 @@ func (h *MediaHandler) UploadAvatar(c *gin.Context) {
 	filename := fmt.Sprintf("%s%s", uuid.New().String()[:8], ext)
 	storageKey := fmt.Sprintf("avatars/%s-%s", userIDStr, filename)
 
-	_, err = h.Minio.PutObject(
-		context.Background(),
-		h.Bucket,
-		storageKey,
-		file,
-		header.Size,
-		minio.PutObjectOptions{ContentType: mimeType},
-	)
-	if err != nil {
+	var uploaded bool
+	if h.Storage != nil {
+		if err := h.Storage.Save(context.Background(), storageKey, file, header.Size, mimeType); err == nil {
+			uploaded = true
+		} else {
+			log.Printf("[MediaHandler.UploadAvatar] Storage.Save error: %v", err)
+		}
+	} else if h.Minio != nil && h.Bucket != "" {
+		_, err = h.Minio.PutObject(
+			context.Background(),
+			h.Bucket,
+			storageKey,
+			file,
+			header.Size,
+			minio.PutObjectOptions{ContentType: mimeType},
+		)
+		if err == nil {
+			uploaded = true
+		} else {
+			log.Printf("[MediaHandler.UploadAvatar] MinIO PutObject error: %v", err)
+		}
+	}
+
+	if !uploaded {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "アバターのアップロードに失敗しました"})
 		return
 	}
@@ -275,25 +311,38 @@ func (h *MediaHandler) ServeFile(c *gin.Context) {
 	key := c.Param("key")
 	key = strings.TrimPrefix(key, "/")
 
-	obj, err := h.Minio.GetObject(c.Request.Context(), h.Bucket, key, minio.GetObjectOptions{})
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "file not found"})
-		return
+	if h.Storage != nil {
+		rc, size, cType, err := h.Storage.Get(c.Request.Context(), key)
+		if err == nil {
+			defer rc.Close()
+			c.Header("Cache-Control", "public, max-age=86400")
+			c.Header("Content-Disposition", "inline")
+			if strings.Contains(strings.ToLower(cType), "svg") {
+				c.Header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox")
+			}
+			c.DataFromReader(http.StatusOK, size, cType, rc, nil)
+			return
+		}
 	}
-	defer obj.Close()
 
-	stat, err := obj.Stat()
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "file not found"})
-		return
+	if h.Minio != nil && h.Bucket != "" {
+		obj, err := h.Minio.GetObject(c.Request.Context(), h.Bucket, key, minio.GetObjectOptions{})
+		if err == nil {
+			defer obj.Close()
+			stat, sErr := obj.Stat()
+			if sErr == nil {
+				c.Header("Cache-Control", "public, max-age=86400")
+				c.Header("Content-Disposition", "inline")
+				if strings.Contains(strings.ToLower(stat.ContentType), "svg") {
+					c.Header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox")
+				}
+				c.DataFromReader(http.StatusOK, stat.Size, stat.ContentType, obj, nil)
+				return
+			}
+		}
 	}
 
-	c.Header("Cache-Control", "public, max-age=86400")
-	c.Header("Content-Disposition", "inline")
-	if strings.Contains(strings.ToLower(stat.ContentType), "svg") {
-		c.Header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox")
-	}
-	c.DataFromReader(http.StatusOK, stat.Size, stat.ContentType, obj, nil)
+	c.JSON(http.StatusNotFound, gin.H{"error": "file not found"})
 }
 
 func (h *MediaHandler) ServeByID(c *gin.Context) {
@@ -340,7 +389,49 @@ func (h *MediaHandler) ServeByID(c *gin.Context) {
 		return
 	}
 
-	// 3. MinIO から直接ストリーミング配信
+	// 3. ストレージから直接ストリーミング配信
+	cleanKey := strings.TrimPrefix(media.StorageKey, "/")
+	keysToTry := []string{
+		media.StorageKey,
+		cleanKey,
+		strings.TrimPrefix(cleanKey, h.Bucket+"/"),
+	}
+	if idx := strings.Index(cleanKey, "/media/"); idx != -1 {
+		keysToTry = append(keysToTry, cleanKey[idx+1:], cleanKey[idx+7:])
+	}
+	if media.Filename != "" && media.Filename != media.StorageKey {
+		keysToTry = append(keysToTry, media.Filename)
+	}
+
+	// 3.1. h.Storage (Local or configured S3) からの取得
+	if h.Storage != nil {
+		for _, key := range keysToTry {
+			if key == "" {
+				continue
+			}
+			rc, size, cType, err := h.Storage.Get(c.Request.Context(), key)
+			if err == nil {
+				defer rc.Close()
+				contentType := media.MimeType
+				if contentType == "" {
+					contentType = cType
+				}
+				if contentType == "" {
+					contentType = "application/octet-stream"
+				}
+
+				c.Header("Cache-Control", "public, max-age=86400")
+				c.Header("Content-Disposition", "inline")
+				if strings.Contains(strings.ToLower(contentType), "svg") {
+					c.Header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox")
+				}
+				c.DataFromReader(http.StatusOK, size, contentType, rc, nil)
+				return
+			}
+		}
+	}
+
+	// 3.2. MinIO から直接ストリーミング配信 (レガシーフォールバック)
 	if h.Minio != nil && h.Bucket != "" && media.StorageKey != "" {
 		cleanKey := strings.TrimPrefix(media.StorageKey, "/")
 		keysToTry := []string{

@@ -12,6 +12,8 @@ type Config struct {
 	DatabaseURL string
 	RedisURL    string
 	JWTSecret   string
+	StorageDriver  string
+	StorageDir     string
 	MinioEndpoint   string
 	MinioAccessKey  string
 	MinioSecretKey  string
@@ -42,6 +44,8 @@ func Load() *Config {
 		DatabaseURL:    getEnv("DATABASE_URL", "host=localhost user=klados password=klados dbname=klados port=5432 sslmode=disable"),
 		RedisURL:       getEnv("REDIS_URL", "redis://localhost:6379"),
 		JWTSecret:      getEnv("JWT_SECRET", "change-me-in-production"),
+		StorageDriver:  getEnv("STORAGE_DRIVER", "local"),
+		StorageDir:     getEnv("STORAGE_DIR", "/data/media"),
 		MinioEndpoint:  getEnv("MINIO_ENDPOINT", "localhost:9000"),
 		MinioAccessKey: getEnvAny([]string{"MINIO_ACCESS_KEY", "MINIO_ROOT_USER"}, "minioadmin"),
 		MinioSecretKey: getEnvAny([]string{"MINIO_SECRET_KEY", "MINIO_ROOT_PASSWORD"}, "minioadmin"),
