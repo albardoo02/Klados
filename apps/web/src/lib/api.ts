@@ -116,8 +116,8 @@ export interface AuthRoutingRule {
   id: string;
   name: string;
   enabled: boolean;
-  provider: 'all' | 'google' | 'github' | 'discord' | 'email';
-  rule_type: 'github_org' | 'discord_guild' | 'email_domain' | 'email_list';
+  provider: 'all' | 'google' | 'github' | 'discord' | 'email' | 'azisaba';
+  rule_type: 'github_org' | 'discord_guild' | 'email_domain' | 'email_list' | 'azisaba_role' | 'azisaba_group';
   match_value: string;
   action_type: 'assign_site_role' | 'none';
   target_site_id?: string;
@@ -287,6 +287,7 @@ export interface AzisabaEditorPolicy {
   api_base_url?: string;
   server_api_key?: string;
   target_role?: 'editor' | 'admin' | 'viewer';
+  condition_logic?: 'AND' | 'OR';
   min_life_play_time_minutes?: number;
   min_life_rank?: number;
   min_life_balance?: number;

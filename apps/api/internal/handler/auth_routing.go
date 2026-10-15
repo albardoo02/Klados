@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -776,7 +777,8 @@ func (h *AuthHandler) applyRoutingRulesContext(
 		if rule.Provider != "all" && rule.Provider != "" && rule.Provider != ctx.Provider {
 			// ルールタイプが対象プロバイダと直接一致している場合は救済
 			isSpecialMatch := (rule.RuleType == "github_org" && ctx.Provider == "github") ||
-				(rule.RuleType == "discord_guild" && ctx.Provider == "discord")
+				(rule.RuleType == "discord_guild" && ctx.Provider == "discord") ||
+				((rule.RuleType == "azisaba_role" || rule.RuleType == "azisaba_group") && ctx.Provider == "azisaba")
 			if !isSpecialMatch {
 				continue
 			}
@@ -833,6 +835,58 @@ func (h *AuthHandler) applyRoutingRulesContext(
 				if strings.TrimSpace(allowed) == emailLower {
 					matched = true
 					break
+				}
+			}
+		case "azisaba_role":
+			cleanMatch := strings.ToLower(strings.TrimSpace(matchVal))
+			if strings.EqualFold(strings.ToLower(ctx.Org), cleanMatch) || strings.EqualFold(strings.ToLower(ctx.GuildName), cleanMatch) {
+				matched = true
+			}
+			if !matched && user != nil && user.ID != uuid.Nil && h.DB != nil {
+				var oa model.OAuthAccount
+				if h.DB.Where("user_id = ? AND provider = ?", user.ID, "azisaba").First(&oa).Error == nil && oa.ProviderID != "" {
+					var s model.Site
+					if rule.TargetSiteID != nil && h.DB.Where("id = ?", *rule.TargetSiteID).First(&s).Error == nil {
+						policy := ExtractSiteAzisabaPolicy(&s)
+						var fetched AzisabaPlayerProfile
+						if _, err := fetchAzisabaJSON(policy.ApiBaseURL+"/players/"+url.PathEscape(oa.ProviderID), policy.ServerApiKey, &fetched); err == nil {
+							for srv, srvData := range fetched.Servers {
+								for rk, rv := range srvData {
+									spec := fmt.Sprintf("%s:%s", strings.ToLower(srv), strings.ToLower(rk))
+									if (spec == cleanMatch || strings.EqualFold(rk, cleanMatch)) && toBool(rv) {
+										matched = true
+										break
+									}
+								}
+								if matched {
+									break
+								}
+							}
+						}
+					}
+				}
+			}
+		case "azisaba_group":
+			cleanMatch := strings.ToLower(strings.TrimSpace(matchVal))
+			if strings.EqualFold(strings.ToLower(ctx.Org), cleanMatch) || strings.EqualFold(strings.ToLower(ctx.GuildName), cleanMatch) {
+				matched = true
+			}
+			if !matched && user != nil && user.ID != uuid.Nil && h.DB != nil {
+				var oa model.OAuthAccount
+				if h.DB.Where("user_id = ? AND provider = ?", user.ID, "azisaba").First(&oa).Error == nil && oa.ProviderID != "" {
+					var s model.Site
+					if rule.TargetSiteID != nil && h.DB.Where("id = ?", *rule.TargetSiteID).First(&s).Error == nil {
+						policy := ExtractSiteAzisabaPolicy(&s)
+						var fetched AzisabaPlayerProfile
+						if _, err := fetchAzisabaJSON(policy.ApiBaseURL+"/players/"+url.PathEscape(oa.ProviderID), policy.ServerApiKey, &fetched); err == nil {
+							for _, g := range fetched.Groups {
+								if strings.EqualFold(strings.ToLower(g), cleanMatch) {
+									matched = true
+									break
+								}
+							}
+						}
+					}
 				}
 			}
 		}

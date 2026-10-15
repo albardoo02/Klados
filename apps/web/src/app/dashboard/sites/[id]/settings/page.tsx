@@ -344,6 +344,7 @@ export default function SiteSettingsPage() {
   const [azisabaPolicy, setAzisabaPolicy] = useState<AzisabaEditorPolicy>({
     enabled: false,
     allow_any_registered_user: false,
+    condition_logic: 'AND',
     min_life_play_time_minutes: 0,
     min_life_rank: 0,
     min_life_balance: 0,
@@ -413,6 +414,7 @@ export default function SiteSettingsPage() {
         setAzisabaPolicy({
           enabled: !!rawPolicy.enabled,
           allow_any_registered_user: !!rawPolicy.allow_any_registered_user,
+          condition_logic: rawPolicy.condition_logic === 'OR' ? 'OR' : 'AND',
           min_life_play_time_minutes: Number(rawPolicy.min_life_play_time_minutes || 0),
           min_life_rank: Number(rawPolicy.min_life_rank || 0),
           min_life_balance: Number(rawPolicy.min_life_balance || 0),
@@ -1452,26 +1454,73 @@ export default function SiteSettingsPage() {
 
           {/* アジ鯖プレイヤー条件設定 */}
           <div className="space-y-4 pt-2 border-t border-border">
-            <div className="flex items-center justify-between">
-              <h3 className="text-xs font-bold text-foreground">
-                自動承認の判定条件（すべて満たしたプレイヤーをEditorとして承認）
-              </h3>
-              <label className="inline-flex items-center gap-2 text-xs cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={azisabaPolicy.require_no_active_punishment ?? true}
-                  onChange={(e) =>
-                    setAzisabaPolicy({
-                      ...azisabaPolicy,
-                      require_no_active_punishment: e.target.checked,
-                    })
-                  }
-                  className="size-3.5 rounded border-border text-emerald-600"
-                />
-                <span className="font-semibold text-foreground">
-                  現在有効な処罰 (Active BAN/Mute) がないことを必須にする
-                </span>
-              </label>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-xs font-bold text-foreground">
+                    自動承認の判定条件
+                  </h3>
+                  {/* AND / OR 条件結合ロジック切り替え */}
+                  <div className="inline-flex items-center p-0.5 rounded-lg bg-muted border border-border text-[11px] font-bold">
+                    <button
+                      type="button"
+                      onClick={() => setAzisabaPolicy({ ...azisabaPolicy, condition_logic: 'AND' })}
+                      className={`px-2 py-0.5 rounded-md transition-colors ${
+                        (azisabaPolicy.condition_logic || 'AND') === 'AND'
+                          ? 'bg-emerald-600 text-white shadow-xs'
+                          : 'text-muted-foreground hover:text-foreground'
+                      }`}
+                      title="設定したすべての条件を満たしたプレイヤーのみ承認します"
+                    >
+                      AND (全条件必須)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAzisabaPolicy({ ...azisabaPolicy, condition_logic: 'OR' })}
+                      className={`px-2 py-0.5 rounded-md transition-colors ${
+                        azisabaPolicy.condition_logic === 'OR'
+                          ? 'bg-blue-600 text-white shadow-xs'
+                          : 'text-muted-foreground hover:text-foreground'
+                      }`}
+                      title="設定した条件のうち、いずれか1つでも満たせば承認します"
+                    >
+                      OR (いずれか1つ)
+                    </button>
+                  </div>
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  {(azisabaPolicy.condition_logic || 'AND') === 'AND'
+                    ? 'すべての条件を満たしたプレイヤーを Editor として自動承認します'
+                    : 'いずれか1つの条件を満たしたプレイヤーを Editor として即時自動承認します'}
+                </p>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <Link
+                  href={`/dashboard/settings/auth?site=${id}`}
+                  className="inline-flex items-center gap-1 text-[11px] text-blue-600 dark:text-blue-400 hover:underline font-semibold"
+                >
+                  <KeyRound className="size-3" />
+                  <span>ログイン・認証ルール全体で管理</span>
+                </Link>
+
+                <label className="inline-flex items-center gap-2 text-xs cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={azisabaPolicy.require_no_active_punishment ?? true}
+                    onChange={(e) =>
+                      setAzisabaPolicy({
+                        ...azisabaPolicy,
+                        require_no_active_punishment: e.target.checked,
+                      })
+                    }
+                    className="size-3.5 rounded border-border text-emerald-600"
+                  />
+                  <span className="font-semibold text-foreground text-[11px]">
+                    有効な処罰 (Active BAN/Mute) なしを必須
+                  </span>
+                </label>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">

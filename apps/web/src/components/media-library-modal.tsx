@@ -70,6 +70,7 @@ export function MediaLibraryModal({
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const zipInputRef = useRef<HTMLInputElement>(null);
+  const loadMoreRef = useRef<HTMLDivElement>(null);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -104,6 +105,13 @@ export function MediaLibraryModal({
       handleSelectItemForConfig(mediaItems[0]);
     }
   }, [isOpen, mediaItems]);
+
+  // モーダルオープン時または検索時にページネーション数をリセット
+  useEffect(() => {
+    if (isOpen) {
+      setVisibleCount(36);
+    }
+  }, [isOpen, searchQuery]);
 
   const handleSelectItemForConfig = (item: MediaItem) => {
     setSelectedItem(item);
@@ -247,6 +255,28 @@ export function MediaLibraryModal({
     );
   });
   const displayedItems = filteredItems.slice(0, visibleCount);
+
+  // 最下部到達時の自動読み込み（無限スクロール）
+  useEffect(() => {
+    if (!isOpen || visibleCount >= filteredItems.length) return;
+    const target = loadMoreRef.current;
+    if (!target) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          setVisibleCount((prev) => prev + 36);
+        }
+      },
+      {
+        rootMargin: '250px',
+        threshold: 0.1,
+      }
+    );
+
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [isOpen, visibleCount, filteredItems.length]);
 
   // 現在選択中アイテムに対する生成記法文字列
   const selectedRef = selectedItem
@@ -589,13 +619,20 @@ export function MediaLibraryModal({
                 })}
 
                 {visibleCount < filteredItems.length && (
-                  <div className="col-span-full py-4 flex justify-center">
+                  <div
+                    ref={loadMoreRef}
+                    className="col-span-full py-6 flex flex-col items-center justify-center gap-2 text-muted-foreground"
+                  >
+                    <div className="flex items-center gap-2 text-xs font-medium">
+                      <Loader2 className="size-4 animate-spin text-primary" />
+                      <span>画像を自動読み込み中... (残り {filteredItems.length - visibleCount} 件)</span>
+                    </div>
                     <button
                       type="button"
                       onClick={() => setVisibleCount((prev) => prev + 36)}
-                      className="px-4 py-2 text-xs font-semibold rounded-xl bg-secondary hover:bg-secondary/80 text-secondary-foreground transition-colors cursor-pointer shadow-xs"
+                      className="text-[11px] text-muted-foreground hover:text-foreground underline cursor-pointer"
                     >
-                      さらに読み込む (残り {filteredItems.length - visibleCount} 件)
+                      手動で追加読み込み
                     </button>
                   </div>
                 )}

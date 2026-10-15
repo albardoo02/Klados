@@ -193,8 +193,8 @@ export default function AuthSettingsPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editingRule, setEditingRule] = useState<AuthRoutingRule | null>(null);
   const [ruleName, setRuleName] = useState('');
-  const [provider, setProvider] = useState<'all' | 'google' | 'github' | 'discord' | 'email'>('all');
-  const [ruleType, setRuleType] = useState<'github_org' | 'discord_guild' | 'email_domain' | 'email_list'>('github_org');
+  const [provider, setProvider] = useState<'all' | 'google' | 'github' | 'discord' | 'email' | 'azisaba'>('all');
+  const [ruleType, setRuleType] = useState<'github_org' | 'discord_guild' | 'email_domain' | 'email_list' | 'azisaba_role' | 'azisaba_group'>('github_org');
   const [matchValue, setMatchValue] = useState('');
   const [targetSiteId, setTargetSiteId] = useState<string>('');
   const [targetRole, setTargetRole] = useState<'admin' | 'editor' | 'viewer'>('editor');
@@ -248,6 +248,8 @@ export default function AuthSettingsPage() {
       finalProvider = 'github';
     } else if (ruleType === 'discord_guild' && provider !== 'all' && provider !== 'discord') {
       finalProvider = 'discord';
+    } else if ((ruleType === 'azisaba_role' || ruleType === 'azisaba_group') && provider !== 'all' && provider !== 'azisaba') {
+      finalProvider = 'azisaba';
     }
 
     saveRuleMutation.mutate({
@@ -280,10 +282,11 @@ export default function AuthSettingsPage() {
   });
 
   // シミュレーター
-  const [testProvider, setTestProvider] = useState<'github' | 'discord' | 'google' | 'email'>('github');
+  const [testProvider, setTestProvider] = useState<'github' | 'discord' | 'google' | 'email' | 'azisaba'>('github');
   const [testEmail, setTestEmail] = useState('');
   const [testOrg, setTestOrg] = useState('');
   const [testGuildName, setTestGuildName] = useState('');
+  const [testAzisValue, setTestAzisValue] = useState('');
   const [testResults, setTestResults] = useState<{
     tested: boolean;
     matches: AppliedRuleResult[];
@@ -311,7 +314,7 @@ export default function AuthSettingsPage() {
     testMutation.mutate({
       provider: testProvider,
       email: testEmail.trim(),
-      org: testOrg.trim() || undefined,
+      org: (testProvider === 'azisaba' ? testAzisValue.trim() : testOrg.trim()) || undefined,
       guild_name: testGuildName.trim() || undefined,
     });
   };
@@ -1140,7 +1143,17 @@ export default function AuthSettingsPage() {
                         {rule.name}
                       </td>
                       <td className="px-4 py-3.5">
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-700 uppercase">
+                        <span
+                          className={`px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase ${
+                            rule.provider === 'azisaba'
+                              ? 'bg-amber-100 text-amber-800'
+                              : rule.provider === 'github'
+                              ? 'bg-slate-900 text-white'
+                              : rule.provider === 'discord'
+                              ? 'bg-indigo-100 text-indigo-700'
+                              : 'bg-slate-100 text-slate-700'
+                          }`}
+                        >
                           {rule.provider}
                         </span>
                       </td>
@@ -1151,6 +1164,8 @@ export default function AuthSettingsPage() {
                             {rule.rule_type === 'discord_guild' && 'Discord Guild:'}
                             {rule.rule_type === 'email_domain' && 'Domain:'}
                             {rule.rule_type === 'email_list' && 'Emails:'}
+                            {rule.rule_type === 'azisaba_role' && 'Azisaba Role:'}
+                            {rule.rule_type === 'azisaba_group' && 'Azisaba Group:'}
                           </span>
                           <span className="font-semibold text-slate-800">
                             {rule.match_value}
@@ -1249,6 +1264,7 @@ export default function AuthSettingsPage() {
               onChange={(e: any) => setTestProvider(e.target.value)}
               className="w-full text-xs px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
+              <option value="azisaba">Azisaba (アジ鯖)</option>
               <option value="github">GitHub</option>
               <option value="discord">Discord</option>
               <option value="google">Google</option>
@@ -1270,7 +1286,20 @@ export default function AuthSettingsPage() {
             />
           </div>
 
-          {testProvider === 'github' ? (
+          {testProvider === 'azisaba' ? (
+            <div>
+              <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                アジ鯖役職 または グループ名
+              </label>
+              <input
+                type="text"
+                placeholder="例: life:admin または 100yen"
+                value={testAzisValue}
+                onChange={(e) => setTestAzisValue(e.target.value)}
+                className="w-full text-xs px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+          ) : testProvider === 'github' ? (
             <div>
               <label className="block text-[11px] font-bold text-slate-700 mb-1">
                 GitHub 組織名 (Org)
@@ -1408,6 +1437,7 @@ export default function AuthSettingsPage() {
                     className="w-full px-3 py-2 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs"
                   >
                     <option value="all">すべて (All)</option>
+                    <option value="azisaba">Azisaba (アジ鯖)</option>
                     <option value="github">GitHub</option>
                     <option value="discord">Discord</option>
                     <option value="google">Google</option>
@@ -1424,18 +1454,22 @@ export default function AuthSettingsPage() {
                     onChange={(e: any) => {
                       const newType = e.target.value;
                       setRuleType(newType);
-                      if (newType === 'github_org') {
+                      if (newType === 'azisaba_role' || newType === 'azisaba_group') {
+                        setProvider('azisaba');
+                      } else if (newType === 'github_org') {
                         setProvider('github');
                       } else if (newType === 'discord_guild') {
                         setProvider('discord');
                       } else if (newType === 'email_domain' || newType === 'email_list') {
-                        if (provider === 'github' || provider === 'discord') {
+                        if (provider === 'github' || provider === 'discord' || provider === 'azisaba') {
                           setProvider('all');
                         }
                       }
                     }}
                     className="w-full px-3 py-2 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs"
                   >
+                    <option value="azisaba_role">アジ鯖 サーバー役職 (Life Admin, TSL Admin等)</option>
+                    <option value="azisaba_group">アジ鯖 グループ/皿 (100yen, nitro, developer等)</option>
                     <option value="github_org">GitHub 組織名 (Org)</option>
                     <option value="discord_guild">Discord サーバー (名/ID)</option>
                     <option value="email_domain">メールドメイン (@corp.com)</option>
@@ -1452,7 +1486,11 @@ export default function AuthSettingsPage() {
                   type="text"
                   required
                   placeholder={
-                    ruleType === 'github_org'
+                    ruleType === 'azisaba_role'
+                      ? '例: life:admin, tsl:admin, lgw:vip'
+                      : ruleType === 'azisaba_group'
+                      ? '例: 100yen, 500yen, nitro, developer'
+                      : ruleType === 'github_org'
                       ? '例: my-company-org'
                       : ruleType === 'discord_guild'
                       ? '例: MyCommunityServer または サーバーID'
