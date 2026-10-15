@@ -124,7 +124,7 @@ spec:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: klados-media-data
+  name: klados-minio-data
 spec:
   accessModes:
     - ReadWriteOnce
@@ -185,7 +185,7 @@ spec:
       volumes:
         - name: media-data
           persistentVolumeClaim:
-            claimName: klados-media-data
+            claimName: klados-minio-data
 ---
 apiVersion: v1
 kind: Service
