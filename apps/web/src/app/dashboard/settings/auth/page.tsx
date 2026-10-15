@@ -105,7 +105,7 @@ export default function AuthSettingsPage() {
   const [githubClientSecret, setGithubClientSecret] = useState<string>('');
   const [discordClientId, setDiscordClientId] = useState<string>('');
   const [discordClientSecret, setDiscordClientSecret] = useState<string>('');
-  const [mainDomains, setMainDomains] = useState<string>('klados.azisaba.net, cms.azisaba.net');
+  const [mainDomains, setMainDomains] = useState<string>('');
   const [copiedCallback, setCopiedCallback] = useState<string | null>(null);
   const [configSuccessMsg, setConfigSuccessMsg] = useState<string | null>(null);
 
@@ -125,7 +125,7 @@ export default function AuthSettingsPage() {
       setRestrictToRules(configData.config.restrict_to_rules || false);
       setGithubClientId(configData.config.github_client_id || '');
       setDiscordClientId(configData.config.discord_client_id || '');
-      setMainDomains(configData.config.main_domains || 'klados.azisaba.net, cms.azisaba.net');
+      setMainDomains(configData.config.main_domains || '');
     }
   }, [configData, selectedSiteId]);
 
@@ -837,13 +837,13 @@ export default function AuthSettingsPage() {
             </label>
             <input
               type="text"
-              placeholder="klados.azisaba.net, cms.azisaba.net, localhost"
+              placeholder="klados.app, localhost, example.com"
               value={mainDomains}
               onChange={(e) => setMainDomains(e.target.value)}
               className="w-full text-xs font-mono bg-white border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
             <p className="text-[11px] text-slate-500 mt-1.5">
-              💡 例: <code className="bg-white px-1 py-0.5 rounded border border-slate-200 font-mono text-slate-700">klados.azisaba.net, cms.azisaba.net</code> のように設定すると、どちらのドメインからアクセスしても管理画面やWikiが正しく表示されます。
+              💡 例: <code className="bg-white px-1 py-0.5 rounded border border-slate-200 font-mono text-slate-700">klados.app, my-domain.com</code> のように設定すると、指定したドメインからアクセスした際に管理画面やWikiが正しく表示されます。
             </p>
           </div>
 
@@ -879,7 +879,7 @@ export default function AuthSettingsPage() {
                   );
                 })}
               {mainDomains.trim() === '' && (
-                <span className="text-xs text-slate-400 italic">未入力（デフォルト: klados.azisaba.net, cms.azisaba.net）</span>
+                <span className="text-xs text-slate-400 italic">未入力（デフォルト: 環境変数 MAIN_DOMAIN または klados.app）</span>
               )}
             </div>
           </div>

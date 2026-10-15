@@ -24,7 +24,7 @@ type AuthConfig struct {
 	GithubClientSecret       string    `json:"github_client_secret,omitempty"`
 	DiscordClientID          string    `json:"discord_client_id"`
 	DiscordClientSecret      string    `json:"discord_client_secret,omitempty"`
-	MainDomains              string    `gorm:"type:text;default:''" json:"main_domains"` // カンマ区切りのシステムメインCMSドメイン（例: "klados.azisaba.net, cms.azisaba.net"）
+	MainDomains              string    `gorm:"type:text;default:''" json:"main_domains"` // カンマ区切りのシステムメインCMSドメイン（例: "klados.app, my-domain.com"）
 	UpdatedAt                time.Time `json:"updated_at"`
 }
 

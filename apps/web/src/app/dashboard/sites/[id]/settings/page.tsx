@@ -1033,7 +1033,7 @@ export default function SiteSettingsPage() {
                 <div>
                   <span className="text-muted-foreground block text-[10px]">Target / Value</span>
                   <span className="font-bold text-blue-600 dark:text-blue-400">
-                    {typeof window !== 'undefined' ? window.location.host : 'cms.azisaba.net'}
+                    {typeof window !== 'undefined' ? window.location.host : 'cname.klados.app'}
                   </span>
                 </div>
               </div>

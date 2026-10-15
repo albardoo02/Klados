@@ -5,7 +5,6 @@
 // 既知のメインCMSドメイン（フォールバック用）
 const DEFAULT_MAIN_DOMAINS = [
   'klados.app',
-  'cms.azisaba.net',
   'localhost',
   '127.0.0.1',
 ];
@@ -105,7 +104,7 @@ export function parseHost(hostname: string): HostType {
     return { type: 'main' };
   }
 
-  // 2. メインドメインのサブドメイン (例: developer.klados.app, my-wiki.cms.azisaba.net)
+  // 2. メインドメインのサブドメイン (例: developer.klados.app, my-wiki.example.com)
   for (const main of mainDomains) {
     if (main === 'localhost' || main === '127.0.0.1') continue;
     if (cleanHost.endsWith(`.${main}`)) {
@@ -151,8 +150,8 @@ export function isSystemPath(pathname: string): boolean {
 
 /**
  * 現在のホストに応じた管理画面・メインポータルのベースURLを取得
- * 独自ドメイン（azipedia.azisaba.net等）から呼び出された場合でも、
- * 集中型OAuthリレーのブローカーとなるメインポータルのURL（https://cms.azisaba.net等）を正確に返します。
+ * 独自ドメインから呼び出された場合でも、
+ * 集中型OAuthリレーのブローカーとなるメインポータルのURLを正確に返します。
  */
 export function getMainPortalUrl(mainDomainsConfig?: string, reqHost?: string): string {
   // クライアント側 (ブラウザ) または サーバー側 (reqHost) からのホスト取得
@@ -180,7 +179,7 @@ export function getMainPortalUrl(mainDomainsConfig?: string, reqHost?: string): 
       return `${proto}//${hostInfo.rootDomain}`;
     }
 
-    // もし現在のホストが *.azisaba.net などの場合、同じ親ドメインを持つメインドメインを優先
+    // 現在のホストと同じ親ドメイン（例: .example.com）を持つメインドメインが設定にあれば最優先
     const parts = currentHost.split('.');
     if (parts.length >= 2) {
       const parentDomain = parts.slice(-2).join('.');
@@ -202,7 +201,7 @@ export function getMainPortalUrl(mainDomainsConfig?: string, reqHost?: string): 
   // 2. メモリキャッシュにある動的メインドメイン
   if (dynamicMainDomains.length > 0) {
     const first = dynamicMainDomains[0];
-    if (first && first !== 'localhost' && first !== '127.0.0.1' && first !== 'klados.app') {
+    if (first && first !== 'localhost' && first !== '127.0.0.1') {
       return first.startsWith('http') ? first : `https://${first}`;
     }
   }
@@ -211,17 +210,13 @@ export function getMainPortalUrl(mainDomainsConfig?: string, reqHost?: string): 
   const configured = process.env.NEXT_PUBLIC_MAIN_DOMAIN || process.env.MAIN_DOMAIN;
   if (configured) {
     const domains = configured.split(',').map((s) => s.trim()).filter(Boolean);
-    const valid = domains.find((d) => d && d !== 'localhost' && d !== '127.0.0.1' && d !== 'klados.app');
+    const valid = domains.find((d) => d && d !== 'localhost' && d !== '127.0.0.1');
     if (valid) {
       return valid.startsWith('http') ? valid : `https://${valid}`;
     }
   }
 
-  // 4. デフォルトフォールバック
-  const defaultFallback = DEFAULT_MAIN_DOMAINS.find((d) => d && d !== 'localhost' && d !== '127.0.0.1' && d !== 'klados.app');
-  if (defaultFallback) {
-    return `https://${defaultFallback}`;
-  }
-
-  return 'https://cms.azisaba.net';
+  // 4. デフォルトフォールバック (OSS 標準ドメイン)
+  const defaultFallback = DEFAULT_MAIN_DOMAINS[0] || 'klados.app';
+  return defaultFallback.startsWith('http') ? defaultFallback : `https://${defaultFallback}`;
 }

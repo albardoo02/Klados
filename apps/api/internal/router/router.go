@@ -49,8 +49,6 @@ func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
 			// ローカルおよび正規ドメイン、Cloudflare Tunnel等のアクセスを安全に検証
 			lower := strings.ToLower(origin)
 			if lower == "https://klados.app" || strings.HasSuffix(lower, ".klados.app") ||
-				lower == "https://klados.azisaba.net" || strings.HasSuffix(lower, ".klados.azisaba.net") ||
-				lower == "https://cms.azisaba.net" || strings.HasSuffix(lower, ".cms.azisaba.net") ||
 				strings.HasSuffix(lower, ".trycloudflare.com") ||
 				strings.HasPrefix(lower, "http://localhost:") || lower == "http://localhost" ||
 				strings.HasPrefix(lower, "http://127.0.0.1:") || lower == "http://127.0.0.1" {

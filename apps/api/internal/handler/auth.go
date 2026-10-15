@@ -1089,7 +1089,7 @@ func (h *AuthHandler) isAllowedRelayDomain(targetHost string) bool {
 
 	// 1. メインドメイン一覧に含まれているか
 	cfg := h.getOrCreateAuthConfig()
-	mainDomains := []string{"cms.azisaba.net", "klados.app", "localhost", "127.0.0.1"}
+	mainDomains := []string{"klados.app", "localhost", "127.0.0.1"}
 	if envMD := strings.TrimSpace(os.Getenv("MAIN_DOMAIN")); envMD != "" {
 		for _, d := range strings.Split(envMD, ",") {
 			d = strings.ToLower(strings.TrimSpace(d))

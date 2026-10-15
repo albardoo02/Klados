@@ -433,7 +433,6 @@ func (h *AuthHandler) GetSystemDomains(c *gin.Context) {
 	domainsSet := make(map[string]bool)
 
 	// デフォルトドメイン
-	domainsSet["cms.azisaba.net"] = true
 	domainsSet["klados.app"] = true
 	domainsSet["localhost"] = true
 	domainsSet["127.0.0.1"] = true

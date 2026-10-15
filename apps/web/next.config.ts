@@ -22,8 +22,8 @@ const nextConfig: NextConfig = {
   allowedDevOrigins: [
     "klados.app",
     "*.klados.app",
-    "*.azisaba.net",
     "*.trycloudflare.com",
+    ...(process.env.MAIN_DOMAIN ? process.env.MAIN_DOMAIN.split(',').map(d => d.trim()).filter(Boolean) : []),
   ],
   async rewrites() {
     return [
