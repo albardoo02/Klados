@@ -6,9 +6,8 @@ data:
   ENVIRONMENT: "production"
   PORT: "8080"
   REDIS_URL: "redis://klados-redis:6379"
-  MINIO_ENDPOINT: "klados-minio:9000"
-  MINIO_BUCKET: "klados-media"
-  MINIO_USE_SSL: "false"
+  STORAGE_DRIVER: "local"
+  STORAGE_DIR: "/data/media"
   ALLOW_ORIGINS: "*"
   INTERNAL_API_URL: "http://klados-api:8080/v1"
   MAIN_DOMAIN: "cms.azisaba.net,klados.azisaba.net"
@@ -125,7 +124,7 @@ spec:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: klados-minio-data
+  name: klados-media-data
 spec:
   accessModes:
     - ReadWriteOnce
@@ -133,73 +132,6 @@ spec:
   resources:
     requests:
       storage: 20Gi
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: klados-minio
-spec:
-  replicas: 1
-  strategy:
-    type: Recreate
-  selector:
-    matchLabels:
-      app: klados-minio
-  template:
-    metadata:
-      labels:
-        app: klados-minio
-    spec:
-      containers:
-        - name: minio
-          image: minio/minio:latest
-          command:
-            - /bin/sh
-            - -c
-            - minio server /data --console-address ":9001"
-          env:
-            - name: MINIO_ROOT_USER
-              valueFrom:
-                secretKeyRef:
-                  name: klados-secrets
-                  key: MINIO_ROOT_USER
-            - name: MINIO_ROOT_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: klados-secrets
-                  key: MINIO_ROOT_PASSWORD
-          ports:
-            - containerPort: 9000
-            - containerPort: 9001
-          volumeMounts:
-            - name: minio-data
-              mountPath: /data
-          resources:
-            requests:
-              cpu: "100m"
-              memory: "128Mi"
-            limits:
-              cpu: "500m"
-              memory: "512Mi"
-      volumes:
-        - name: minio-data
-          persistentVolumeClaim:
-            claimName: klados-minio-data
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: klados-minio
-spec:
-  ports:
-    - name: api
-      port: 9000
-      targetPort: 9000
-    - name: console
-      port: 9001
-      targetPort: 9001
-  selector:
-    app: klados-minio
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -228,6 +160,9 @@ spec:
                 name: klados-config
             - secretRef:
                 name: klados-secrets
+          volumeMounts:
+            - name: media-data
+              mountPath: /data/media
           readinessProbe:
             httpGet:
               path: /health
@@ -247,6 +182,10 @@ spec:
             limits:
               cpu: "500m"
               memory: "512Mi"
+      volumes:
+        - name: media-data
+          persistentVolumeClaim:
+            claimName: klados-media-data
 ---
 apiVersion: v1
 kind: Service
