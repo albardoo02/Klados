@@ -276,6 +276,10 @@ func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
 		protected.POST("/media/upload", mediaH.Upload)
 		protected.GET("/media", mediaH.List)
 		protected.DELETE("/media/:id", mediaH.Delete)
+		protected.GET("/media/export", mediaH.Export)
+		protected.POST("/media/import", mediaH.Import)
+		protected.GET("/sites/:id/media/export", mediaH.Export)
+		protected.POST("/sites/:id/media/import", mediaH.Import)
 	}
 
 	// ヘルスチェック

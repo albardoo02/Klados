@@ -48,6 +48,8 @@ import {
   Users,
   Settings2,
   Menu,
+  Archive,
+  FolderArchive,
 } from 'lucide-react';
 import { SidebarEditorModal } from '@/components/wiki/sidebar-editor-modal';
 import { SidebarSection } from '@/types/sidebar';
@@ -1848,6 +1850,57 @@ export default function SiteSettingsPage() {
                       'サイトの紹介文がここに表示されます。'}
                   </p>
                 </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* データ管理 & サーバー移行 (Backup / Restore) */}
+        <div className="bg-card border border-border rounded-2xl p-6 shadow-xs space-y-4">
+          <div className="flex items-center gap-2 pb-3 border-b border-border">
+            <Archive className="size-5 text-primary" />
+            <div>
+              <h2 className="text-base font-bold">データ管理 & サーバー移行 (Backup / Restore)</h2>
+              <p className="text-xs text-muted-foreground">ページ本文や画像・メディアファイルの一括エクスポートとインポート</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* ページ一括エクスポート */}
+            <div className="p-4 rounded-xl border border-border bg-muted/20 flex flex-col justify-between gap-3">
+              <div>
+                <p className="text-sm font-bold text-foreground">ページ一括エクスポート (Markdown ZIP)</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  サイト内の全ページを YAML Frontmatter 付きの Markdown ファイルとして ZIP 形式で一括保存します。
+                </p>
+              </div>
+              <a
+                href={`${process.env.NEXT_PUBLIC_API_URL || '/v1'}/sites/${id}/export`}
+                download
+                className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl border border-border bg-background hover:bg-muted text-foreground text-xs font-semibold cursor-pointer shadow-2xs transition-colors self-start"
+              >
+                <Download className="size-3.5 text-blue-600" />
+                <span>ページをZIPで保存</span>
+              </a>
+            </div>
+
+            {/* 画像一括エクスポート & インポート */}
+            <div className="p-4 rounded-xl border border-border bg-muted/20 flex flex-col justify-between gap-3">
+              <div>
+                <p className="text-sm font-bold text-foreground">画像・メディア一括移行 (Media ZIP)</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  アップロードされた全画像とメタデータ（UUID保持）を ZIP で一括バックアップおよび他サーバーから一発復元できます。
+                </p>
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => setMediaLibraryOpen(true)}
+                  className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-semibold cursor-pointer shadow-xs transition-colors"
+                >
+                  <FolderArchive className="size-3.5" />
+                  <span>メディアライブラリを開いて移行</span>
+                </button>
               </div>
             </div>
           </div>

@@ -27,6 +27,8 @@ import {
   Maximize2,
   Settings2,
   Sparkles,
+  Download,
+  FolderArchive,
 } from 'lucide-react';
 
 interface MediaLibraryModalProps {
@@ -67,11 +69,15 @@ export function MediaLibraryModal({
 }: MediaLibraryModalProps) {
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const zipInputRef = useRef<HTMLInputElement>(null);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copiedSyntax, setCopiedSyntax] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const [importMessage, setImportMessage] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
 
@@ -146,6 +152,46 @@ export function MediaLibraryModal({
     }
   };
 
+  const handleExportZip = async () => {
+    if (!siteId || isExporting) return;
+    setIsExporting(true);
+    try {
+      const res = await mediaApi.exportZip(siteId);
+      const blob = new Blob([res.data], { type: 'application/zip' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `media-export-${siteId}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err: any) {
+      alert('メディアのエクスポートに失敗しました: ' + (err?.message || err));
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleImportZip = async (file: File) => {
+    if (!siteId || isImporting) return;
+    setIsImporting(true);
+    setImportMessage(null);
+    try {
+      const res = await mediaApi.importZip(siteId, file);
+      await queryClient.invalidateQueries({ queryKey: ['media', siteId] });
+      setImportMessage(res.data?.message || 'インポートが完了しました');
+      setTimeout(() => setImportMessage(null), 6000);
+    } catch (err: any) {
+      alert('メディアのインポートに失敗しました: ' + (err?.response?.data?.error || err?.message || err));
+    } finally {
+      setIsImporting(false);
+      if (zipInputRef.current) {
+        zipInputRef.current.value = '';
+      }
+    }
+  };
+
   const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -155,6 +201,14 @@ export function MediaLibraryModal({
     if (files && files.length > 0) {
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
+        if (
+          file.name.toLowerCase().endsWith('.zip') ||
+          file.type === 'application/zip' ||
+          file.type === 'application/x-zip-compressed'
+        ) {
+          await handleImportZip(file);
+          return;
+        }
         if (file.type.startsWith('image/')) {
           await handleUploadFile(file);
         }
@@ -285,22 +339,59 @@ export function MediaLibraryModal({
             />
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <input
               type="file"
               ref={fileInputRef}
-              onChange={(e) => {
+              multiple
+              onChange={async (e) => {
                 if (e.target.files && e.target.files.length > 0) {
-                  handleUploadFile(e.target.files[0]);
+                  for (let i = 0; i < e.target.files.length; i++) {
+                    await handleUploadFile(e.target.files[i]);
+                  }
                 }
               }}
               accept="image/*"
               className="hidden"
             />
+            <input
+              type="file"
+              ref={zipInputRef}
+              onChange={(e) => {
+                if (e.target.files && e.target.files.length > 0) {
+                  handleImportZip(e.target.files[0]);
+                }
+              }}
+              accept=".zip,application/zip,application/x-zip-compressed"
+              className="hidden"
+            />
+
+            <button
+              type="button"
+              onClick={handleExportZip}
+              disabled={isExporting || isUploading || isImporting}
+              title="サイト内の全画像をZIPファイルとして一括ダウンロードします（UUIDメタデータ付き）"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border bg-background hover:bg-muted text-foreground text-xs font-medium cursor-pointer shadow-2xs disabled:opacity-50 transition-colors"
+            >
+              {isExporting ? <Loader2 className="size-3.5 animate-spin" /> : <Download className="size-3.5 text-blue-600 dark:text-blue-400" />}
+              <span>一括エクスポート</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => zipInputRef.current?.click()}
+              disabled={isExporting || isUploading || isImporting}
+              title="エクスポートしたZIPファイルや画像ZIPを一括復元・インポートします"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border bg-background hover:bg-muted text-foreground text-xs font-medium cursor-pointer shadow-2xs disabled:opacity-50 transition-colors"
+            >
+              {isImporting ? <Loader2 className="size-3.5 animate-spin text-emerald-600" /> : <FolderArchive className="size-3.5 text-emerald-600 dark:text-emerald-400" />}
+              <span>一括インポート</span>
+            </button>
+
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              disabled={isUploading}
+              disabled={isUploading || isImporting}
               className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-semibold cursor-pointer shadow-xs disabled:opacity-50 transition-colors"
             >
               {isUploading ? (
@@ -308,10 +399,26 @@ export function MediaLibraryModal({
               ) : (
                 <Plus className="size-3.5" />
               )}
-              <span>画像をアップロード</span>
+              <span>画像アップロード</span>
             </button>
           </div>
         </div>
+
+        {importMessage && (
+          <div className="bg-emerald-500/10 border-b border-emerald-500/20 px-6 py-2 text-xs text-emerald-700 dark:text-emerald-300 flex items-center justify-between">
+            <span className="flex items-center gap-1.5">
+              <Check className="size-4" />
+              {importMessage}
+            </span>
+            <button
+              type="button"
+              onClick={() => setImportMessage(null)}
+              className="text-emerald-700/60 hover:text-emerald-700 cursor-pointer"
+            >
+              <X className="size-3.5" />
+            </button>
+          </div>
+        )}
 
         {/* メイン領域: 左側=画像一覧グリッド / 右側=MediaWiki挿入設定パネル */}
         <div className="flex-1 flex flex-col lg:flex-row overflow-hidden min-h-0">

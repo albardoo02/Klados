@@ -1,10 +1,14 @@
 package handler
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
+	"mime"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -487,4 +491,384 @@ func (h *MediaHandler) ServeByID(c *gin.Context) {
 
 	log.Printf("[MediaHandler.ServeByID] Media content not found in storage for media ID: %s", media.ID)
 	c.JSON(http.StatusNotFound, gin.H{"error": "media content not found in storage"})
+}
+
+// getMediaReader attempts to open a stream for the given media file across storage drivers and fallback paths
+func (h *MediaHandler) getMediaReader(ctx context.Context, media model.MediaFile) (io.ReadCloser, int64, string, error) {
+	cleanKey := strings.TrimPrefix(media.StorageKey, "/")
+	keysToTry := []string{
+		media.StorageKey,
+		cleanKey,
+		media.Filename,
+		fmt.Sprintf("sites/%s/media/%s", media.SiteID.String(), media.Filename),
+		media.ID.String(),
+	}
+	if h.Bucket != "" {
+		keysToTry = append(keysToTry, strings.TrimPrefix(cleanKey, h.Bucket+"/"))
+	}
+	if idx := strings.Index(cleanKey, "/media/"); idx != -1 {
+		keysToTry = append(keysToTry, cleanKey[idx+1:], cleanKey[idx+7:])
+	}
+	if media.Filename != "" && media.Filename != media.StorageKey {
+		keysToTry = append(keysToTry, media.Filename)
+	}
+
+	if h.Storage != nil {
+		for _, key := range keysToTry {
+			if key == "" {
+				continue
+			}
+			rc, size, cType, err := h.Storage.Get(ctx, key)
+			if err == nil {
+				contentType := media.MimeType
+				if contentType == "" {
+					contentType = cType
+				}
+				if contentType == "" {
+					contentType = "application/octet-stream"
+				}
+				return rc, size, contentType, nil
+			}
+		}
+	}
+
+	if h.Minio != nil && h.Bucket != "" {
+		for _, key := range keysToTry {
+			if key == "" {
+				continue
+			}
+			obj, err := h.Minio.GetObject(ctx, h.Bucket, key, minio.GetObjectOptions{})
+			if err == nil {
+				stat, sErr := obj.Stat()
+				if sErr == nil {
+					contentType := media.MimeType
+					if contentType == "" {
+						contentType = stat.ContentType
+					}
+					if contentType == "" {
+						contentType = "application/octet-stream"
+					}
+					return obj, stat.Size, contentType, nil
+				}
+				obj.Close()
+			}
+		}
+	}
+
+	return nil, 0, "", fmt.Errorf("media file not found: %s", media.ID)
+}
+
+// MediaManifestItem represents metadata exported in manifest.json
+type MediaManifestItem struct {
+	ID           uuid.UUID `json:"id"`
+	SiteID       uuid.UUID `json:"site_id"`
+	Filename     string    `json:"filename"`
+	OriginalName string    `json:"original_name"`
+	MimeType     string    `json:"mime_type"`
+	Size         int64     `json:"size"`
+	StorageKey   string    `json:"storage_key"`
+	Width        int       `json:"width,omitempty"`
+	Height       int       `json:"height,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+// Export packages all media files for a site (or all media) into a ZIP archive with manifest.json
+func (h *MediaHandler) Export(c *gin.Context) {
+	siteID := c.Query("site_id")
+	if siteID == "" {
+		siteID = c.Param("id")
+	}
+
+	var sUID uuid.UUID
+	var siteSlug string
+	if siteID != "" {
+		if parsed, err := uuid.Parse(siteID); err == nil {
+			sUID = parsed
+			var s model.Site
+			if err2 := h.DB.Where("id = ?", sUID).First(&s).Error; err2 == nil {
+				siteSlug = s.Slug
+			}
+		} else {
+			var s model.Site
+			if err2 := h.DB.Where("slug = ? OR custom_domain = ?", siteID, siteID).First(&s).Error; err2 == nil {
+				sUID = s.ID
+				siteSlug = s.Slug
+			}
+		}
+	}
+
+	var files []model.MediaFile
+	query := h.DB.Model(&model.MediaFile{})
+	if sUID != uuid.Nil {
+		query = query.Where("site_id = ?", sUID)
+	}
+
+	if err := query.Order("created_at asc").Find(&files).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "メディア一覧の取得に失敗しました"})
+		return
+	}
+
+	buf := new(bytes.Buffer)
+	zw := zip.NewWriter(buf)
+
+	manifestList := make([]MediaManifestItem, 0, len(files))
+
+	for _, file := range files {
+		manifestList = append(manifestList, MediaManifestItem{
+			ID:           file.ID,
+			SiteID:       file.SiteID,
+			Filename:     file.Filename,
+			OriginalName: file.OriginalName,
+			MimeType:     file.MimeType,
+			Size:         file.Size,
+			StorageKey:   file.StorageKey,
+			Width:        file.Width,
+			Height:       file.Height,
+			CreatedAt:    file.CreatedAt,
+		})
+
+		rc, _, _, err := h.getMediaReader(c.Request.Context(), file)
+		if err != nil {
+			log.Printf("[MediaHandler.Export] Warning: skipped missing file for media %s: %v", file.ID, err)
+			continue
+		}
+
+		entryName := file.Filename
+		if entryName == "" {
+			entryName = file.ID.String()
+		}
+
+		w, err := zw.Create(entryName)
+		if err != nil {
+			rc.Close()
+			continue
+		}
+		_, _ = io.Copy(w, rc)
+		rc.Close()
+	}
+
+	// Write manifest.json
+	manifestBytes, err := json.MarshalIndent(manifestList, "", "  ")
+	if err == nil {
+		if mw, mErr := zw.Create("manifest.json"); mErr == nil {
+			_, _ = mw.Write(manifestBytes)
+		}
+	}
+
+	if err := zw.Close(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "ZIPアーカイブの作成に失敗しました"})
+		return
+	}
+
+	exportFilename := "media-export.zip"
+	if siteSlug != "" {
+		exportFilename = fmt.Sprintf("%s-media-export.zip", siteSlug)
+	}
+
+	c.Header("Content-Type", "application/zip")
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", exportFilename))
+	c.Data(http.StatusOK, "application/zip", buf.Bytes())
+}
+
+// Import unzips an archive containing media files and optional manifest.json, restoring them to storage and database
+func (h *MediaHandler) Import(c *gin.Context) {
+	userIDStr := c.GetString("user_id")
+	uUID, _ := uuid.Parse(userIDStr)
+
+	siteID := c.PostForm("site_id")
+	if siteID == "" {
+		siteID = c.Param("id")
+	}
+	if siteID == "" {
+		siteID = c.Query("site_id")
+	}
+
+	var sUID uuid.UUID
+	if siteID != "" {
+		if parsed, err := uuid.Parse(siteID); err == nil {
+			sUID = parsed
+		} else {
+			var s model.Site
+			if err2 := h.DB.Where("slug = ? OR custom_domain = ?", siteID, siteID).First(&s).Error; err2 == nil {
+				sUID = s.ID
+			}
+		}
+	}
+
+	if sUID == uuid.Nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "有効なサイト (site_id) を指定してください"})
+		return
+	}
+
+	file, header, err := c.Request.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "インポートするZIPファイルを指定してください"})
+		return
+	}
+	defer file.Close()
+
+	zipReader, err := zip.NewReader(file, header.Size)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("無効なZIPファイルです: %v", err)})
+		return
+	}
+
+	// 1. manifest.json があれば読み込み
+	manifestMap := make(map[string]MediaManifestItem)
+	for _, zf := range zipReader.File {
+		if strings.EqualFold(filepath.Base(zf.Name), "manifest.json") {
+			rc, oErr := zf.Open()
+			if oErr == nil {
+				var items []MediaManifestItem
+				if decErr := json.NewDecoder(rc).Decode(&items); decErr == nil {
+					for _, item := range items {
+						if item.Filename != "" {
+							manifestMap[item.Filename] = item
+							manifestMap[strings.ToLower(item.Filename)] = item
+						}
+						if item.ID != uuid.Nil {
+							manifestMap[item.ID.String()] = item
+							manifestMap[strings.ToLower(item.ID.String())] = item
+						}
+					}
+				}
+				rc.Close()
+			}
+			break
+		}
+	}
+
+	importedCount := 0
+	skippedCount := 0
+
+	for _, zf := range zipReader.File {
+		if zf.FileInfo().IsDir() {
+			continue
+		}
+		baseName := filepath.Base(zf.Name)
+		if strings.HasPrefix(baseName, ".") || strings.EqualFold(baseName, "manifest.json") || strings.Contains(zf.Name, "__MACOSX") {
+			continue
+		}
+
+		ext := strings.ToLower(filepath.Ext(baseName))
+		mimeType := mime.TypeByExtension(ext)
+		if mimeType == "" {
+			switch ext {
+			case ".png":
+				mimeType = "image/png"
+			case ".jpg", ".jpeg":
+				mimeType = "image/jpeg"
+			case ".webp":
+				mimeType = "image/webp"
+			case ".gif":
+				mimeType = "image/gif"
+			case ".svg":
+				mimeType = "image/svg+xml"
+			case ".pdf":
+				mimeType = "application/pdf"
+			default:
+				mimeType = "application/octet-stream"
+			}
+		}
+
+		if !allowedMimeTypes[mimeType] && !strings.HasPrefix(mimeType, "image/") {
+			skippedCount++
+			continue
+		}
+
+		var mediaID uuid.UUID
+		var originalName string
+		cleanBase := strings.TrimSuffix(baseName, ext)
+
+		// manifest.json からメタデータを優先取得
+		if mItem, ok := manifestMap[baseName]; ok && mItem.ID != uuid.Nil {
+			mediaID = mItem.ID
+			originalName = mItem.OriginalName
+			if mItem.MimeType != "" {
+				mimeType = mItem.MimeType
+			}
+		} else if mItem, ok := manifestMap[cleanBase]; ok && mItem.ID != uuid.Nil {
+			mediaID = mItem.ID
+			originalName = mItem.OriginalName
+			if mItem.MimeType != "" {
+				mimeType = mItem.MimeType
+			}
+		} else {
+			// ファイル名がUUIDの場合はそのUUIDをそのまま保持
+			if parsedUID, pErr := uuid.Parse(cleanBase); pErr == nil && parsedUID != uuid.Nil {
+				mediaID = parsedUID
+				originalName = baseName
+			} else {
+				mediaID = uuid.New()
+				originalName = baseName
+			}
+		}
+
+		if originalName == "" {
+			originalName = baseName
+		}
+
+		filename := fmt.Sprintf("%s%s", mediaID.String(), ext)
+		storageKey := fmt.Sprintf("sites/%s/media/%s", sUID.String(), filename)
+
+		rc, oErr := zf.Open()
+		if oErr != nil {
+			skippedCount++
+			continue
+		}
+
+		var saveErr error
+		if h.Storage != nil {
+			saveErr = h.Storage.Save(c.Request.Context(), storageKey, rc, int64(zf.UncompressedSize64), mimeType)
+		} else if h.Minio != nil && h.Bucket != "" {
+			_, saveErr = h.Minio.PutObject(c.Request.Context(), h.Bucket, storageKey, rc, int64(zf.UncompressedSize64), minio.PutObjectOptions{
+				ContentType: mimeType,
+			})
+		}
+		rc.Close()
+
+		if saveErr != nil {
+			log.Printf("[MediaHandler.Import] Save error for %s: %v", storageKey, saveErr)
+			skippedCount++
+			continue
+		}
+
+		cdnURL := fmt.Sprintf("/v1/public/media/%s", mediaID.String())
+		var existing model.MediaFile
+		if err := h.DB.Where("id = ?", mediaID).First(&existing).Error; err == nil {
+			existing.SiteID = sUID
+			existing.Filename = filename
+			existing.OriginalName = originalName
+			existing.MimeType = mimeType
+			existing.Size = int64(zf.UncompressedSize64)
+			existing.StorageKey = storageKey
+			existing.CDNURL = cdnURL
+			_ = h.DB.Save(&existing)
+		} else {
+			newMedia := model.MediaFile{
+				ID:           mediaID,
+				SiteID:       sUID,
+				UserID:       uUID,
+				Filename:     filename,
+				OriginalName: originalName,
+				MimeType:     mimeType,
+				Size:         int64(zf.UncompressedSize64),
+				StorageKey:   storageKey,
+				CDNURL:       cdnURL,
+				CreatedAt:    time.Now(),
+			}
+			if cErr := h.DB.Create(&newMedia).Error; cErr != nil {
+				log.Printf("[MediaHandler.Import] DB Create error for %s: %v", mediaID, cErr)
+			}
+		}
+
+		importedCount++
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":        true,
+		"imported_count": importedCount,
+		"skipped_count":  skippedCount,
+		"message":        fmt.Sprintf("%d 件のメディアファイルをインポートしました（スキップ: %d 件）", importedCount, skippedCount),
+	})
 }

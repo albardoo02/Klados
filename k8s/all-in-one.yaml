@@ -10,7 +10,7 @@ data:
   STORAGE_DIR: "/data/media"
   ALLOW_ORIGINS: "*"
   INTERNAL_API_URL: "http://klados-api:8080/v1"
-  MAIN_DOMAIN: "cms.azisaba.net,klados.azisaba.net"
+  MAIN_DOMAIN: "cms.azisaba.net"
   ROOT_EMAIL: "admin@azisaba.net"
   ROOT_USERNAME: "admin"
 ---
@@ -230,15 +230,18 @@ spec:
             - name: NEXT_PUBLIC_API_URL
               value: "/v1"
             - name: MAIN_DOMAIN
-              value: "cms.azisaba.net,klados.azisaba.net"
+              value: "cms.azisaba.net"
             - name: NEXT_PUBLIC_MAIN_DOMAIN
-              value: "cms.azisaba.net,klados.azisaba.net"
+              value: "cms.azisaba.net"
             - name: NODE_TLS_REJECT_UNAUTHORIZED
               value: "0"
           readinessProbe:
             httpGet:
               path: /login
               port: 3000
+              httpHeaders:
+                - name: Host
+                  value: cms.azisaba.net
             initialDelaySeconds: 15
             periodSeconds: 10
             timeoutSeconds: 5
@@ -247,6 +250,9 @@ spec:
             httpGet:
               path: /login
               port: 3000
+              httpHeaders:
+                - name: Host
+                  value: cms.azisaba.net
             initialDelaySeconds: 30
             periodSeconds: 20
             timeoutSeconds: 5

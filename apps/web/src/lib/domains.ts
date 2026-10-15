@@ -6,7 +6,6 @@
 const DEFAULT_MAIN_DOMAINS = [
   'klados.app',
   'cms.azisaba.net',
-  'klados.azisaba.net',
   'localhost',
   '127.0.0.1',
 ];

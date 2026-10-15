@@ -484,6 +484,23 @@ export const mediaApi = {
   list: (siteId: string) => api.get(`/media?site_id=${siteId}`),
   delete: (id: string) => api.delete(`/media/${id}`),
   usage: (id: string) => api.get(`/media/usage/${id}`),
+  exportZip: (siteId: string) =>
+    api.get(`/media/export?site_id=${encodeURIComponent(siteId)}`, {
+      responseType: 'blob',
+    }),
+  importZip: (siteId: string, file: File) => {
+    const form = new FormData();
+    form.append('file', file);
+    form.append('site_id', siteId);
+    return api.post<{
+      success: boolean;
+      imported_count: number;
+      skipped_count: number;
+      message: string;
+    }>('/media/import', form, {
+      headers: { 'Content-Type': undefined },
+    });
+  },
 };
 
 // --- Analytics ---
