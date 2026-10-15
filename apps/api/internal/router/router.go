@@ -32,8 +32,8 @@ func New(cfg *config.Config, db *gorm.DB) *gin.Engine {
 	r.Use(middleware.SecurityHeaders())
 	r.Use(middleware.MaxBodySize(2 * 1024 * 1024))
 
-	// Global General Rate Limiting (180 requests/min, burst 40 per IP)
-	r.Use(middleware.RateLimit(180, 40))
+	// Global General Rate Limiting (600 requests/min, burst 150 per IP)
+	r.Use(middleware.RateLimit(600, 150))
 
 	// CORS
 	origins := strings.Split(cfg.AllowOrigins, ",")

@@ -90,6 +90,7 @@ export function MediaLibraryModal({
   const [heightInput, setHeightInput] = useState<string>('');
   const [captionInput, setCaptionInput] = useState<string>('');
   const [altInput, setAltInput] = useState<string>('');
+  const [visibleCount, setVisibleCount] = useState<number>(36);
 
   const { data: mediaItems, isLoading } = useQuery<MediaItem[]>({
     queryKey: ['media', siteId],
@@ -245,6 +246,7 @@ export function MediaLibraryModal({
       item.original_name?.toLowerCase().includes(q)
     );
   });
+  const displayedItems = filteredItems.slice(0, visibleCount);
 
   // 現在選択中アイテムに対する生成記法文字列
   const selectedRef = selectedItem
@@ -470,7 +472,7 @@ export function MediaLibraryModal({
               </div>
             ) : (
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3.5">
-                {filteredItems.map((item) => {
+                {displayedItems.map((item) => {
                   const displayName = item.original_name || item.filename;
                   const isCurrentlySelected = selectedItem?.id === item.id;
                   const primaryUrl = item.id
@@ -585,6 +587,18 @@ export function MediaLibraryModal({
                     </div>
                   );
                 })}
+
+                {visibleCount < filteredItems.length && (
+                  <div className="col-span-full py-4 flex justify-center">
+                    <button
+                      type="button"
+                      onClick={() => setVisibleCount((prev) => prev + 36)}
+                      className="px-4 py-2 text-xs font-semibold rounded-xl bg-secondary hover:bg-secondary/80 text-secondary-foreground transition-colors cursor-pointer shadow-xs"
+                    >
+                      さらに読み込む (残り {filteredItems.length - visibleCount} 件)
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>
