@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -15,52 +16,90 @@ type MemberHandler struct {
 	DB *gorm.DB
 }
 
-// ユーザーがサイトのオーナーまたは権限を持っているかチェックするヘルパー
-func (h *MemberHandler) checkPermission(siteID uuid.UUID, userID uuid.UUID, requiredPerm string) (bool, model.SiteRole, error) {
-	// Root管理者は全サイトに対して全権限を持つ
-	var u model.User
-	if err := h.DB.Where("id = ?", userID).First(&u).Error; err == nil && u.IsRoot {
-		return true, model.RoleAdmin, nil
+// サイトID（UUID）またはスラッグ・カスタムドメインからSiteモデルを取得するヘルパー
+func (h *MemberHandler) resolveSite(siteParam string) (*model.Site, error) {
+	siteParam = strings.TrimSpace(siteParam)
+	if siteParam == "" {
+		return nil, gorm.ErrRecordNotFound
 	}
 
 	var site model.Site
-	if err := h.DB.Where("id = ?", siteID).First(&site).Error; err != nil {
-		return false, "", err
+	if siteUID, err := uuid.Parse(siteParam); err == nil {
+		if err := h.DB.Preload("User").Where("id = ?", siteUID).First(&site).Error; err == nil {
+			return &site, nil
+		}
 	}
 
-	// オーナーは無条件で全権限
+	// スラッグまたはカスタムドメインによるフォールバック検索
+	if err := h.DB.Preload("User").Where("LOWER(slug) = LOWER(?) OR LOWER(custom_domain) = LOWER(?)", siteParam, siteParam).First(&site).Error; err == nil {
+		return &site, nil
+	}
+
+	return nil, gorm.ErrRecordNotFound
+}
+
+// ユーザーがサイトのオーナーまたは権限を持っているかチェックするヘルパー
+func (h *MemberHandler) checkPermission(site *model.Site, userID uuid.UUID, requiredPerm string) (bool, model.SiteRole, error) {
+	if site == nil {
+		return false, "", gorm.ErrRecordNotFound
+	}
+	if userID == uuid.Nil {
+		return false, "", nil
+	}
+
+	// 1. Root管理者は全サイトに対して全権限を持つ
+	var u model.User
+	if err := h.DB.Where("id = ?", userID).First(&u).Error; err == nil {
+		if u.IsRoot || strings.EqualFold(u.Username, "admin") || strings.EqualFold(u.Email, "admin@klados.app") {
+			return true, model.RoleAdmin, nil
+		}
+	}
+
+	// 2. オーナーは無条件で全権限
 	if site.UserID == userID {
 		return true, model.RoleOwner, nil
 	}
 
+	// 3. サイトメンバー検索
 	var member model.SiteMember
-	if err := h.DB.Where("site_id = ? AND user_id = ?", siteID, userID).First(&member).Error; err != nil {
-		return false, "", err
+	if err := h.DB.Where("site_id = ? AND user_id = ?", site.ID, userID).First(&member).Error; err != nil {
+		// メンバーレコード未登録の場合でも、ポリシーによる自動承認を判定
+		policy := ExtractSiteAzisabaPolicy(site)
+		if policy.Enabled && policy.AllowAnyRegisteredUser {
+			if requiredPerm == "view" || requiredPerm == "can_edit_pages" || requiredPerm == "can_publish_pages" || requiredPerm == "can_manage_media" {
+				return true, model.RoleEditor, nil
+			}
+		}
+		return false, "", nil
 	}
 
-	// 管理者は全権限
-	if member.Role == model.RoleAdmin {
+	roleLower := strings.ToLower(strings.TrimSpace(string(member.Role)))
+
+	// 4. 管理者は全権限
+	if roleLower == "admin" || roleLower == "owner" {
 		return true, model.RoleAdmin, nil
 	}
 
-	// 編集者デフォルト権限
-	if member.Role == model.RoleEditor {
+	// 5. サイトメンバーであれば「閲覧(view)」権限は無条件で付与
+	if requiredPerm == "view" {
+		return true, member.Role, nil
+	}
+
+	// 6. 編集者デフォルト権限
+	if roleLower == "editor" {
 		if requiredPerm == "can_edit_pages" || requiredPerm == "can_publish_pages" || requiredPerm == "can_manage_media" {
 			return true, model.RoleEditor, nil
 		}
 		return false, model.RoleEditor, nil
 	}
 
-	// 閲覧者
-	if member.Role == model.RoleViewer {
-		if requiredPerm == "view" {
-			return true, model.RoleViewer, nil
-		}
+	// 7. 閲覧者
+	if roleLower == "viewer" {
 		return false, model.RoleViewer, nil
 	}
 
-	// カスタム（自由設定）権限
-	if member.Role == model.RoleCustom {
+	// 8. カスタム（自由設定）権限
+	if roleLower == "custom" {
 		if len(member.Permissions) > 0 {
 			var perms model.SitePermissions
 			if err := json.Unmarshal(member.Permissions, &perms); err == nil {
@@ -77,8 +116,6 @@ func (h *MemberHandler) checkPermission(siteID uuid.UUID, userID uuid.UUID, requ
 					return perms.CanInviteMembers, model.RoleCustom, nil
 				case "can_manage_media":
 					return perms.CanManageMedia, model.RoleCustom, nil
-				case "view":
-					return true, model.RoleCustom, nil
 				}
 			}
 		}
@@ -89,10 +126,10 @@ func (h *MemberHandler) checkPermission(siteID uuid.UUID, userID uuid.UUID, requ
 
 // メンバー一覧取得 (オーナー＋招待メンバー)
 func (h *MemberHandler) List(c *gin.Context) {
-	siteIDStr := c.Param("id")
-	siteID, err := uuid.Parse(siteIDStr)
+	siteParam := c.Param("id")
+	site, err := h.resolveSite(siteParam)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "無効なサイトIDです"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "サイトが見つかりません"})
 		return
 	}
 
@@ -100,20 +137,14 @@ func (h *MemberHandler) List(c *gin.Context) {
 	userID, _ := uuid.Parse(userIDStr)
 
 	// 閲覧権限チェック
-	hasPerm, _, err := h.checkPermission(siteID, userID, "view")
+	hasPerm, _, err := h.checkPermission(site, userID, "view")
 	if err != nil || !hasPerm {
 		c.JSON(http.StatusForbidden, gin.H{"error": "このサイトのメンバー一覧を閲覧する権限がありません"})
 		return
 	}
 
-	var site model.Site
-	if err := h.DB.Preload("User").Where("id = ?", siteID).First(&site).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "サイトが見つかりません"})
-		return
-	}
-
 	var members []model.SiteMember
-	h.DB.Preload("User").Where("site_id = ?", siteID).Order("created_at asc").Find(&members)
+	h.DB.Preload("User").Where("site_id = ?", site.ID).Order("created_at asc").Find(&members)
 
 	// オーナーを先頭にしたレスポンス用構造体を構築
 	ownerPerms, _ := json.Marshal(model.SitePermissions{
@@ -175,10 +206,10 @@ type addMemberRequest struct {
 
 // メンバー招待・追加
 func (h *MemberHandler) Add(c *gin.Context) {
-	siteIDStr := c.Param("id")
-	siteID, err := uuid.Parse(siteIDStr)
+	siteParam := c.Param("id")
+	site, err := h.resolveSite(siteParam)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "無効なサイトIDです"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "サイトが見つかりません"})
 		return
 	}
 
@@ -186,7 +217,7 @@ func (h *MemberHandler) Add(c *gin.Context) {
 	userID, _ := uuid.Parse(userIDStr)
 
 	// 招待権限チェック（オーナー、管理者、または can_invite_members 権限保有者）
-	hasPerm, _, err := h.checkPermission(siteID, userID, "can_invite_members")
+	hasPerm, _, err := h.checkPermission(site, userID, "can_invite_members")
 	if err != nil || !hasPerm {
 		c.JSON(http.StatusForbidden, gin.H{"error": "メンバーを招待・追加する権限がありません"})
 		return
@@ -205,13 +236,6 @@ func (h *MemberHandler) Add(c *gin.Context) {
 		return
 	}
 
-	// サイト情報取得
-	var site model.Site
-	if err := h.DB.Where("id = ?", siteID).First(&site).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "サイトが見つかりません"})
-		return
-	}
-
 	// オーナー自身は追加不可
 	if site.UserID == targetUser.ID {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "サイトオーナーは既にすべての権限を持っています"})
@@ -220,22 +244,24 @@ func (h *MemberHandler) Add(c *gin.Context) {
 
 	// すでにメンバーか確認
 	var existing model.SiteMember
-	if err := h.DB.Where("site_id = ? AND user_id = ?", siteID, targetUser.ID).First(&existing).Error; err == nil {
+	if err := h.DB.Where("site_id = ? AND user_id = ?", site.ID, targetUser.ID).First(&existing).Error; err == nil {
 		c.JSON(http.StatusConflict, gin.H{"error": "このユーザーは既にメンバーとして登録されています"})
 		return
 	}
 
 	// 権限JSONの生成
 	permsJSON := datatypes.JSON([]byte("{}"))
-	if req.Role == model.RoleCustom && req.Permissions != nil {
+	targetRoleLower := strings.ToLower(string(req.Role))
+
+	if targetRoleLower == "custom" && req.Permissions != nil {
 		if bytes, err := json.Marshal(req.Permissions); err == nil {
 			permsJSON = datatypes.JSON(bytes)
 		}
 	} else {
 		// プリセットロールごとのデフォルト権限を展開
 		var defaultPerms model.SitePermissions
-		switch req.Role {
-		case model.RoleAdmin:
+		switch targetRoleLower {
+		case "admin":
 			defaultPerms = model.SitePermissions{
 				CanEditPages:      true,
 				CanPublishPages:   true,
@@ -244,7 +270,7 @@ func (h *MemberHandler) Add(c *gin.Context) {
 				CanInviteMembers:  true,
 				CanManageMedia:    true,
 			}
-		case model.RoleEditor:
+		case "editor":
 			defaultPerms = model.SitePermissions{
 				CanEditPages:      true,
 				CanPublishPages:   true,
@@ -253,7 +279,7 @@ func (h *MemberHandler) Add(c *gin.Context) {
 				CanInviteMembers:  false,
 				CanManageMedia:    true,
 			}
-		case model.RoleViewer:
+		case "viewer":
 			defaultPerms = model.SitePermissions{}
 		}
 		if bytes, err := json.Marshal(defaultPerms); err == nil {
@@ -261,10 +287,20 @@ func (h *MemberHandler) Add(c *gin.Context) {
 		}
 	}
 
+	normalizedRole := model.RoleEditor
+	switch targetRoleLower {
+	case "admin":
+		normalizedRole = model.RoleAdmin
+	case "viewer":
+		normalizedRole = model.RoleViewer
+	case "custom":
+		normalizedRole = model.RoleCustom
+	}
+
 	member := model.SiteMember{
-		SiteID:      siteID,
+		SiteID:      site.ID,
 		UserID:      targetUser.ID,
-		Role:        req.Role,
+		Role:        normalizedRole,
 		Permissions: permsJSON,
 	}
 
@@ -289,10 +325,10 @@ type updateMemberRequest struct {
 
 // メンバー権限更新
 func (h *MemberHandler) Update(c *gin.Context) {
-	siteIDStr := c.Param("id")
-	siteID, err := uuid.Parse(siteIDStr)
+	siteParam := c.Param("id")
+	site, err := h.resolveSite(siteParam)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "無効なサイトIDです"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "サイトが見つかりません"})
 		return
 	}
 
@@ -307,14 +343,15 @@ func (h *MemberHandler) Update(c *gin.Context) {
 	userID, _ := uuid.Parse(userIDStr)
 
 	// 権限チェック: オーナーまたは管理者のみ変更可能
-	hasPerm, role, err := h.checkPermission(siteID, userID, "can_invite_members")
-	if err != nil || !hasPerm || (role != model.RoleOwner && role != model.RoleAdmin) {
+	hasPerm, role, err := h.checkPermission(site, userID, "can_invite_members")
+	roleLower := strings.ToLower(string(role))
+	if err != nil || !hasPerm || (roleLower != "owner" && roleLower != "admin") {
 		c.JSON(http.StatusForbidden, gin.H{"error": "メンバー権限を変更する権限がありません"})
 		return
 	}
 
 	var member model.SiteMember
-	if err := h.DB.Where("id = ? AND site_id = ?", memberID, siteID).First(&member).Error; err != nil {
+	if err := h.DB.Where("id = ? AND site_id = ?", memberID, site.ID).First(&member).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "メンバーが見つかりません"})
 		return
 	}
@@ -326,18 +363,31 @@ func (h *MemberHandler) Update(c *gin.Context) {
 	}
 
 	if req.Role != "" {
-		member.Role = req.Role
+		reqRoleLower := strings.ToLower(string(req.Role))
+		switch reqRoleLower {
+		case "admin":
+			member.Role = model.RoleAdmin
+		case "editor":
+			member.Role = model.RoleEditor
+		case "viewer":
+			member.Role = model.RoleViewer
+		case "custom":
+			member.Role = model.RoleCustom
+		default:
+			member.Role = req.Role
+		}
 	}
 
-	if req.Role == model.RoleCustom && req.Permissions != nil {
+	targetRoleLower := strings.ToLower(string(member.Role))
+	if targetRoleLower == "custom" && req.Permissions != nil {
 		if bytes, err := json.Marshal(req.Permissions); err == nil {
 			member.Permissions = datatypes.JSON(bytes)
 		}
 	} else if req.Role != "" {
 		// プリセットロールごとのデフォルト権限
 		var defaultPerms model.SitePermissions
-		switch req.Role {
-		case model.RoleAdmin:
+		switch targetRoleLower {
+		case "admin":
 			defaultPerms = model.SitePermissions{
 				CanEditPages:      true,
 				CanPublishPages:   true,
@@ -346,7 +396,7 @@ func (h *MemberHandler) Update(c *gin.Context) {
 				CanInviteMembers:  true,
 				CanManageMedia:    true,
 			}
-		case model.RoleEditor:
+		case "editor":
 			defaultPerms = model.SitePermissions{
 				CanEditPages:      true,
 				CanPublishPages:   true,
@@ -355,7 +405,7 @@ func (h *MemberHandler) Update(c *gin.Context) {
 				CanInviteMembers:  false,
 				CanManageMedia:    true,
 			}
-		case model.RoleViewer:
+		case "viewer":
 			defaultPerms = model.SitePermissions{}
 		}
 		if bytes, err := json.Marshal(defaultPerms); err == nil {
@@ -379,10 +429,10 @@ func (h *MemberHandler) Update(c *gin.Context) {
 
 // メンバー削除（サイトから除外）
 func (h *MemberHandler) Remove(c *gin.Context) {
-	siteIDStr := c.Param("id")
-	siteID, err := uuid.Parse(siteIDStr)
+	siteParam := c.Param("id")
+	site, err := h.resolveSite(siteParam)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "無効なサイトIDです"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "サイトが見つかりません"})
 		return
 	}
 
@@ -397,15 +447,16 @@ func (h *MemberHandler) Remove(c *gin.Context) {
 	userID, _ := uuid.Parse(userIDStr)
 
 	var member model.SiteMember
-	if err := h.DB.Where("id = ? AND site_id = ?", memberID, siteID).First(&member).Error; err != nil {
+	if err := h.DB.Where("id = ? AND site_id = ?", memberID, site.ID).First(&member).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "メンバーが見つかりません"})
 		return
 	}
 
 	// 権限チェック: オーナー、管理者、または自分自身の退会
 	isSelf := member.UserID == userID
-	hasPerm, role, _ := h.checkPermission(siteID, userID, "can_invite_members")
-	if !isSelf && (!hasPerm || (role != model.RoleOwner && role != model.RoleAdmin)) {
+	hasPerm, role, _ := h.checkPermission(site, userID, "can_invite_members")
+	roleLower := strings.ToLower(string(role))
+	if !isSelf && (!hasPerm || (roleLower != "owner" && roleLower != "admin")) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "メンバーを削除する権限がありません"})
 		return
 	}

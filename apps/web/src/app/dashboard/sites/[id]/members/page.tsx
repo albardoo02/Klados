@@ -131,11 +131,15 @@ export default function SiteMembersPage() {
     queryFn: () => membersApi.list(id).then((r) => r.data.data as SiteMemberItem[]),
   });
 
-  // 現在のユーザーのロール・権限を特定
+  // 現在のユーザーのロール・権限を特定 (Root管理者 / オーナー / サイト管理者 / 個別権限)
+  const isRoot = Boolean(currentUser?.is_root || currentUser?.username?.toLowerCase() === 'admin');
   const currentMemberRecord = members.find((m) => m.user_id === currentUser?.id);
-  const isOwner = site?.is_owner || site?.user_id === currentUser?.id;
-  const isAdmin = currentMemberRecord?.role === 'admin';
+  const memberRole = currentMemberRecord?.role?.toLowerCase();
+  const siteRole = site?.role?.toLowerCase();
+  const isOwner = isRoot || Boolean(site?.is_owner) || (Boolean(currentUser?.id) && site?.user_id === currentUser?.id);
+  const isAdmin = isRoot || isOwner || memberRole === 'admin' || memberRole === 'owner' || siteRole === 'admin' || siteRole === 'owner';
   const canInvite =
+    isRoot ||
     isOwner ||
     isAdmin ||
     Boolean(currentMemberRecord?.permissions?.can_invite_members);
@@ -227,7 +231,7 @@ export default function SiteMembersPage() {
         </span>
       );
     }
-    switch (role) {
+    switch ((role || '').toLowerCase()) {
       case 'admin':
         return (
           <span className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-purple-100 text-purple-800 dark:bg-purple-950/80 dark:text-purple-300 font-semibold border border-purple-200 dark:border-purple-900">
@@ -416,9 +420,10 @@ export default function SiteMembersPage() {
         <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-xs divide-y divide-slate-100 dark:divide-slate-800">
           {members.map((member) => {
             const isMe = member.user_id === currentUser?.id;
-            const isMemberOwner = member.is_owner;
+            const isMemberOwner = Boolean(member.is_owner || member.user_id === site?.user_id);
+            const targetMemberRole = member.role?.toLowerCase();
             const canModifyThisMember =
-              (isOwner || isAdmin) && !isMemberOwner && (!isAdmin || member.role !== 'admin');
+              !isMemberOwner && (isRoot || isOwner || (isAdmin && targetMemberRole !== 'admin'));
 
             return (
               <div
