@@ -13,9 +13,9 @@ const DEFAULT_MAIN_DOMAINS = [
 let dynamicMainDomains: string[] = [];
 
 /**
- * middleware がクライアントへ受け渡すメインドメイン一覧の Cookie 名。
+ * proxy がクライアントへ受け渡すメインドメイン一覧の Cookie 名。
  * NEXT_PUBLIC_MAIN_DOMAIN はビルド時に埋め込まれるため、実行時の環境変数(k8s 等)や
- * DB 設定はクライアントバンドルからは参照できない。そのため middleware が Cookie で渡す。
+ * DB 設定はクライアントバンドルからは参照できない。そのため proxy が Cookie で渡す。
  */
 export const MAIN_DOMAINS_COOKIE = 'klados_main_domains';
 
@@ -32,7 +32,7 @@ export function getConfiguredMainDomains(): string[] {
 }
 
 /**
- * ブラウザ上で middleware が設定した Cookie からメインドメイン一覧を取得
+ * ブラウザ上で proxy が設定した Cookie からメインドメイン一覧を取得
  */
 function getCookieMainDomains(): string[] {
   if (typeof document === 'undefined') return [];
@@ -246,7 +246,7 @@ export function getMainPortalUrl(mainDomainsConfig?: string, reqHost?: string): 
     }
   }
 
-  // 2.5 middleware から Cookie で受け渡された実行時メインドメイン (クライアント側)
+  // 2.5 proxy から Cookie で受け渡された実行時メインドメイン (クライアント側)
   const cookieDomain = getCookieMainDomains().find((d) => d !== 'localhost' && d !== '127.0.0.1');
   if (cookieDomain) {
     return cookieDomain.startsWith('http') ? cookieDomain : `https://${cookieDomain}`;

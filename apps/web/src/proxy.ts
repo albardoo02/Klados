@@ -39,7 +39,7 @@ function isExactOrSubpath(pathname: string, target: string): boolean {
   return pathname === target || pathname.startsWith(`${target}/`);
 }
 
-export async function middleware(req: NextRequest) {
+export async function proxy(req: NextRequest) {
   const res = await handle(req);
   const { pathname } = req.nextUrl;
   if (
