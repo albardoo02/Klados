@@ -65,22 +65,8 @@ func (h *AuthHandler) canManageSiteAuth(userID string, siteID *uuid.UUID) bool {
 	if err := h.DB.Where("id = ?", *siteID).First(&site).Error; err != nil {
 		return false
 	}
-	if site.UserID == uid {
-		return true
-	}
-	var member model.SiteMember
-	if err := h.DB.Where("site_id = ? AND user_id = ?", *siteID, uid).First(&member).Error; err == nil {
-		if member.Role == model.RoleOwner || member.Role == model.RoleAdmin {
-			return true
-		}
-		if member.Role == model.RoleCustom && len(member.Permissions) > 0 {
-			var perms model.SitePermissions
-			if json.Unmarshal(member.Permissions, &perms) == nil && (perms.CanManageSettings || perms.CanInviteMembers) {
-				return true
-			}
-		}
-	}
-	return false
+	access := ResolveSiteAccess(h.DB, &site, uid)
+	return access.Can(PermManageSettings) || access.Can(PermInviteMembers)
 }
 
 func (h *AuthHandler) getOrCreateAuthConfig() *model.AuthConfig {
@@ -887,7 +873,7 @@ func (h *AuthHandler) applyRoutingRulesContext(
 							Permissions: datatypes.JSON(permsBytes),
 						}
 						h.DB.Create(&newMember)
-					} else if member.Role != rule.TargetRole && member.Role != model.RoleOwner {
+					} else if roleRank[rule.TargetRole] > roleRank[member.Role] && member.Role != model.RoleOwner {
 						member.Role = rule.TargetRole
 						member.Permissions = datatypes.JSON(permsBytes)
 						h.DB.Save(&member)

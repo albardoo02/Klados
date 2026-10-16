@@ -167,12 +167,8 @@ func (h *SiteHandler) VerifyPassword(c *gin.Context) {
 
 // SetPassword sets or removes password protection for a site: POST /v1/sites/:id/password
 func (h *SiteHandler) SetPassword(c *gin.Context) {
-	userID := c.GetString("user_id")
-	id := c.Param("id")
-
-	var site model.Site
-	if err := h.DB.Where("id = ? AND user_id = ?", id, userID).First(&site).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "site not found"})
+	site, _, ok := requireSitePerm(c, h.DB, c.Param("id"), PermManageSettings)
+	if !ok {
 		return
 	}
 
@@ -185,6 +181,7 @@ func (h *SiteHandler) SetPassword(c *gin.Context) {
 	trimmed := strings.TrimSpace(req.Password)
 	if trimmed == "" {
 		site.PasswordHash = nil
+		site.IsProtected = false
 	} else {
 		hash, err := bcrypt.GenerateFromPassword([]byte(trimmed), bcrypt.DefaultCost)
 		if err != nil {
@@ -193,9 +190,10 @@ func (h *SiteHandler) SetPassword(c *gin.Context) {
 		}
 		hashStr := string(hash)
 		site.PasswordHash = &hashStr
+		site.IsProtected = true
 	}
 
-	if err := h.DB.Save(&site).Error; err != nil {
+	if err := h.DB.Save(site).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

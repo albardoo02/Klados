@@ -182,13 +182,18 @@ func (h *PageHandler) Create(c *gin.Context) {
 		siteID = c.Param("siteId")
 	}
 
+	site, _, ok := requireSitePerm(c, h.DB, siteID, PermEditPages)
+	if !ok {
+		return
+	}
+
 	var req createPageRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	sUID, _ := uuid.Parse(siteID)
+	sUID := site.ID
 	uUID, _ := uuid.Parse(userID)
 
 	page := &model.Page{
@@ -241,16 +246,23 @@ func (h *PageHandler) Update(c *gin.Context) {
 	userIDStr := c.GetString("user_id")
 	userID, _ := uuid.Parse(userIDStr)
 
-	var page model.Page
-	if err := h.DB.Where("id = ? AND deleted_at IS NULL", id).First(&page).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "page not found"})
+	pagePtr, access, ok := requirePagePerm(c, h.DB, id, PermEditPages, false)
+	if !ok {
 		return
 	}
+	page := *pagePtr
 
 	var req updatePageRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
+	}
+
+	if req.Status != "" && req.Status != page.Status {
+		if !access.Can(PermPublishPages) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "ページの公開ステータスを変更する権限がありません"})
+			return
+		}
 	}
 
 	// コンテンツに変更がある場合のみ新しいバージョンとして履歴を保存
@@ -316,6 +328,17 @@ func (h *PageHandler) Update(c *gin.Context) {
 
 func (h *PageHandler) Delete(c *gin.Context) {
 	id := c.Param("id")
+	page, access, ok := requirePagePerm(c, h.DB, id, PermEditPages, false)
+	if !ok {
+		return
+	}
+	if page.Site.ID == uuid.Nil {
+		// PermDeletePages または PermEditPages を持つメンバーにソフトデリート許可
+		if !access.Can(PermDeletePages) && !access.Can(PermEditPages) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "ページを削除する権限がありません"})
+			return
+		}
+	}
 	now := time.Now()
 	result := h.DB.Model(&model.Page{}).Where("id = ?", id).Updates(map[string]interface{}{
 		"deleted_at": now,
@@ -499,11 +522,11 @@ func (h *PageHandler) ListTrash(c *gin.Context) {
 // Restore restores a soft-deleted page (POST /v1/pages/:id/restore)
 func (h *PageHandler) Restore(c *gin.Context) {
 	id := c.Param("id")
-	var page model.Page
-	if err := h.DB.Where("id = ?", id).First(&page).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "page not found"})
+	pagePtr, _, ok := requirePagePerm(c, h.DB, id, PermEditPages, true)
+	if !ok {
 		return
 	}
+	page := *pagePtr
 
 	if err := h.DB.Model(&model.Page{}).Where("id = ?", id).Updates(map[string]interface{}{
 		"deleted_at": nil,
@@ -535,11 +558,11 @@ func (h *PageHandler) Revert(c *gin.Context) {
 		return
 	}
 
-	var page model.Page
-	if err := h.DB.Where("id = ? AND deleted_at IS NULL", id).First(&page).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "page not found"})
+	pagePtr, _, ok := requirePagePerm(c, h.DB, id, PermEditPages, false)
+	if !ok {
 		return
 	}
+	page := *pagePtr
 
 	var targetVersion model.PageVersion
 	if err := h.DB.Where("page_id = ? AND version = ?", page.ID, ver).First(&targetVersion).Error; err != nil {

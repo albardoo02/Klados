@@ -48,14 +48,14 @@ type AzisabaEditorPolicy struct {
 }
 
 type AzisabaEvaluationResult struct {
-	SiteID                 uuid.UUID              `json:"site_id"`
-	SiteSlug               string                 `json:"site_slug"`
-	SiteTitle              string                 `json:"site_title"`
-	Approved               bool                   `json:"approved"`
-	GrantedRole            string                 `json:"granted_role,omitempty"`
-	Reasons                []string               `json:"reasons"`
-	FailedReasons          []string               `json:"failed_reasons,omitempty"`
-	PlayerStats            map[string]interface{} `json:"player_stats,omitempty"`
+	SiteID        uuid.UUID              `json:"site_id"`
+	SiteSlug      string                 `json:"site_slug"`
+	SiteTitle     string                 `json:"site_title"`
+	Approved      bool                   `json:"approved"`
+	GrantedRole   string                 `json:"granted_role,omitempty"`
+	Reasons       []string               `json:"reasons"`
+	FailedReasons []string               `json:"failed_reasons,omitempty"`
+	PlayerStats   map[string]interface{} `json:"player_stats,omitempty"`
 }
 
 func ExtractSiteAzisabaPolicy(site *model.Site) AzisabaEditorPolicy {
@@ -589,7 +589,7 @@ func (h *AuthHandler) AzisabaAuth(c *gin.Context) {
 						Role:   role,
 					}
 					h.DB.Create(&member)
-				} else if member.Role == model.RoleViewer && (role == model.RoleEditor || role == model.RoleAdmin) {
+				} else if roleRank[role] > roleRank[member.Role] && member.Role != model.RoleOwner {
 					member.Role = role
 					h.DB.Save(&member)
 				}
@@ -620,10 +620,8 @@ func (h *AuthHandler) AzisabaAuth(c *gin.Context) {
 // POST /v1/sites/:id/azisaba-test
 // Allows site admins to test a player's MCID or UUID against the site's AzisabaEditorPolicy.
 func (h *SiteHandler) TestAzisabaPlayer(c *gin.Context) {
-	siteID := c.Param("id")
-	var site model.Site
-	if err := h.DB.Where("id = ?", siteID).First(&site).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "site not found"})
+	site, _, ok := requireSitePerm(c, h.DB, c.Param("id"), PermManageSettings)
+	if !ok {
 		return
 	}
 
@@ -637,7 +635,7 @@ func (h *SiteHandler) TestAzisabaPlayer(c *gin.Context) {
 		return
 	}
 
-	policy := ExtractSiteAzisabaPolicy(&site)
+	policy := ExtractSiteAzisabaPolicy(site)
 	if req.Policy != nil {
 		policy = *req.Policy
 		if strings.TrimSpace(policy.ApiBaseURL) == "" {
@@ -676,7 +674,7 @@ func (h *SiteHandler) TestAzisabaPlayer(c *gin.Context) {
 		return err
 	}()
 
-	eval := EvaluateAzisabaPolicy(&site, policy, &profile, punishments)
+	eval := EvaluateAzisabaPolicy(site, policy, &profile, punishments)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{

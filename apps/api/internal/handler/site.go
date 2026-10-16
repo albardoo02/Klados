@@ -178,39 +178,15 @@ func (h *SiteHandler) Get(c *gin.Context) {
 		return
 	}
 
-	var currentUser model.User
-	_ = h.DB.Where("id = ?", userID).First(&currentUser)
-
-	// オーナーかメンバーか確認 (Root管理者は全サイトでオーナー/管理者権限)
-	isOwner := site.UserID == userID || currentUser.IsRoot
-	role := model.RoleOwner
-	if currentUser.IsRoot && site.UserID != userID {
-		role = model.RoleAdmin
+	access := ResolveSiteAccess(h.DB, &site, userID)
+	if !access.HasAccess() {
+		c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+		return
 	}
 
-	if !isOwner {
-		var member model.SiteMember
-		if err := h.DB.Where("site_id = ? AND user_id = ?", site.ID, userID).First(&member).Error; err != nil {
-			policy := ExtractSiteAzisabaPolicy(&site)
-			if policy.Enabled && policy.AllowAnyRegisteredUser && userID != uuid.Nil {
-				targetRole := model.SiteRole(policy.TargetRole)
-				if targetRole == "" {
-					targetRole = model.RoleEditor
-				}
-				newMember := model.SiteMember{
-					SiteID: site.ID,
-					UserID: userID,
-					Role:   targetRole,
-				}
-				h.DB.Create(&newMember)
-				role = targetRole
-			} else {
-				c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
-				return
-			}
-		} else {
-			role = member.Role
-		}
+	// Azisaba ポリシーによる仮想ロールの場合は実メンバーとして登録しておく
+	if !access.IsOwner && !access.IsRoot && !access.IsMember {
+		h.DB.Create(&model.SiteMember{SiteID: site.ID, UserID: userID, Role: access.Role})
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -228,51 +204,31 @@ func (h *SiteHandler) Get(c *gin.Context) {
 			"settings":      site.Settings,
 			"created_at":    site.CreatedAt,
 			"updated_at":    site.UpdatedAt,
-			"role":          role,
-			"is_owner":      isOwner,
+			"role":          access.Role,
+			"is_owner":      access.IsOwner || access.IsRoot,
+			"permissions":   access.Permissions,
 		},
 	})
 }
 
 func (h *SiteHandler) Update(c *gin.Context) {
-	userIDStr := c.GetString("user_id")
-	userID, _ := uuid.Parse(userIDStr)
-	id := c.Param("id")
-
-	var site model.Site
-	if err := h.DB.Where("id = ?", id).First(&site).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "site not found"})
-		return
-	}
-
-	var currentUser model.User
-	_ = h.DB.Where("id = ?", userID).First(&currentUser)
-
-	// オーナーまたは管理者・設定変更権限を持つカスタムメンバー (Root管理者は無条件許可)
-	if site.UserID != userID && !currentUser.IsRoot {
-		var member model.SiteMember
-		if err := h.DB.Where("site_id = ? AND user_id = ?", site.ID, userID).First(&member).Error; err != nil {
-			c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
-			return
-		}
-		canManage := member.Role == model.RoleAdmin
-		if member.Role == model.RoleCustom && len(member.Permissions) > 0 {
-			var perms model.SitePermissions
-			if json.Unmarshal(member.Permissions, &perms) == nil && perms.CanManageSettings {
-				canManage = true
-			}
-		}
-		if !canManage {
-			c.JSON(http.StatusForbidden, gin.H{"error": "サイト設定を変更する権限がありません"})
-			return
-		}
-	}
-
 	var rawReq map[string]interface{}
 	if err := c.ShouldBindJSON(&rawReq); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+
+	// サイドバー設定のみの変更であれば、設定管理権限に加えてページ編集権限を持つメンバーにも許可
+	requiredPerm := PermManageSettings
+	if isSidebarOnlyUpdate(rawReq) {
+		requiredPerm = PermEditPages
+	}
+
+	site, access, ok := requireSitePerm(c, h.DB, c.Param("id"), requiredPerm)
+	if !ok {
+		return
+	}
+	_ = access
 
 	if title, ok := rawReq["title"].(string); ok && title != "" {
 		site.Title = title
@@ -306,12 +262,28 @@ func (h *SiteHandler) Update(c *gin.Context) {
 		site.Settings = datatypes.JSON(mergedBytes)
 	}
 
-	if err := h.DB.Save(&site).Error; err != nil {
+	if err := h.DB.Save(site).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": site})
+}
+
+func isSidebarOnlyUpdate(rawReq map[string]interface{}) bool {
+	if len(rawReq) != 1 {
+		return false
+	}
+	newSettings, ok := rawReq["settings"].(map[string]interface{})
+	if !ok || len(newSettings) == 0 {
+		return false
+	}
+	for k := range newSettings {
+		if k != "sidebar_sections" && k != "sidebar_show_tools" {
+			return false
+		}
+	}
+	return true
 }
 
 func (h *SiteHandler) Delete(c *gin.Context) {
@@ -357,10 +329,12 @@ func (h *SiteHandler) GetBySlug(c *gin.Context) {
 		return
 	}
 
-	// オプショナル認証: トークンが存在する場合、現在のユーザーの権限をチェック
+	// オプショナル認証: トークンが存在する場合、現在のユーザーの権限を一元解決
 	canEdit := false
+	canManageSettings := false
 	isOwner := false
 	var role string
+	var perms model.SitePermissions
 
 	token := extractTokenFromHeaderOrCookie(c)
 	if token != "" && h.JWTSecret != "" {
@@ -371,37 +345,12 @@ func (h *SiteHandler) GetBySlug(c *gin.Context) {
 		if err == nil && t.Valid {
 			if sub, ok := claims["sub"].(string); ok {
 				if uid, err := uuid.Parse(sub); err == nil {
-					var currentUser model.User
-					_ = h.DB.Where("id = ?", uid).First(&currentUser)
-
-					if currentUser.IsRoot || site.UserID == uid {
-						canEdit = true
-						isOwner = true
-						if currentUser.IsRoot && site.UserID != uid {
-							role = string(model.RoleAdmin)
-						} else {
-							role = string(model.RoleOwner)
-						}
-					} else {
-						var member model.SiteMember
-						if err := h.DB.Where("site_id = ? AND user_id = ?", site.ID, uid).Limit(1).Find(&member).Error; err == nil && member.ID != uuid.Nil {
-							role = string(member.Role)
-							if member.Role == model.RoleAdmin || member.Role == model.RoleEditor {
-								canEdit = true
-							} else if member.Role == model.RoleCustom && len(member.Permissions) > 0 {
-								var perms model.SitePermissions
-								if json.Unmarshal(member.Permissions, &perms) == nil && perms.CanEditPages {
-									canEdit = true
-								}
-							}
-						} else {
-							policy := ExtractSiteAzisabaPolicy(&site)
-							if policy.Enabled && policy.AllowAnyRegisteredUser {
-								canEdit = true
-								role = string(model.RoleEditor)
-							}
-						}
-					}
+					access := ResolveSiteAccess(h.DB, &site, uid)
+					role = string(access.Role)
+					isOwner = access.IsOwner || access.IsRoot
+					canEdit = access.Can(PermEditPages) || access.Can(PermManageSettings)
+					canManageSettings = access.Can(PermManageSettings)
+					perms = access.Permissions
 				}
 			}
 		}
@@ -417,34 +366,32 @@ func (h *SiteHandler) GetBySlug(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
-			"id":            site.ID,
-			"user_id":       site.UserID,
-			"slug":          site.Slug,
-			"custom_domain": site.CustomDomain,
-			"title":         site.Title,
-			"description":   site.Description,
-			"theme":         site.Theme,
-			"is_public":     site.IsPublic,
-			"is_protected":  site.IsProtected,
-			"settings":      site.Settings,
-			"created_at":    site.CreatedAt,
-			"updated_at":    site.UpdatedAt,
-			"can_edit":      canEdit,
-			"is_owner":      isOwner,
-			"role":          role,
-			"pages":         pages,
+			"id":                  site.ID,
+			"user_id":             site.UserID,
+			"slug":                site.Slug,
+			"custom_domain":       site.CustomDomain,
+			"title":               site.Title,
+			"description":         site.Description,
+			"theme":               site.Theme,
+			"is_public":           site.IsPublic,
+			"is_protected":        site.IsProtected,
+			"settings":            site.Settings,
+			"created_at":          site.CreatedAt,
+			"updated_at":          site.UpdatedAt,
+			"can_edit":            canEdit,
+			"can_manage_settings": canManageSettings,
+			"is_owner":            isOwner,
+			"role":                role,
+			"permissions":         perms,
+			"pages":               pages,
 		},
 	})
 }
 
 // UpdateCustomDomain sets the custom domain for a site (protected endpoint)
 func (h *SiteHandler) UpdateCustomDomain(c *gin.Context) {
-	userID := c.GetString("user_id")
-	id := c.Param("id")
-
-	var site model.Site
-	if err := h.DB.Where("id = ? AND user_id = ?", id, userID).First(&site).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "site not found"})
+	site, _, ok := requireSitePerm(c, h.DB, c.Param("id"), PermManageSettings)
+	if !ok {
 		return
 	}
 
@@ -474,7 +421,7 @@ func (h *SiteHandler) UpdateCustomDomain(c *gin.Context) {
 	}
 
 	site.CustomDomain = domain
-	if err := h.DB.Save(&site).Error; err != nil {
+	if err := h.DB.Save(site).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -484,12 +431,8 @@ func (h *SiteHandler) UpdateCustomDomain(c *gin.Context) {
 
 // VerifyDomain verifies that the site's custom domain CNAME points to cname.klados.app or klados.app
 func (h *SiteHandler) VerifyDomain(c *gin.Context) {
-	userID := c.GetString("user_id")
-	id := c.Param("id")
-
-	var site model.Site
-	if err := h.DB.Where("id = ? AND user_id = ?", id, userID).First(&site).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "site not found"})
+	site, _, ok := requireSitePerm(c, h.DB, c.Param("id"), PermManageSettings)
+	if !ok {
 		return
 	}
 
@@ -623,12 +566,8 @@ func (h *SiteHandler) GetRobotsTxt(c *gin.Context) {
 
 // Export packages all pages as .md files (with YAML frontmatter) into a downloadable ZIP archive
 func (h *SiteHandler) Export(c *gin.Context) {
-	userID := c.GetString("user_id")
-	id := c.Param("id")
-
-	var site model.Site
-	if err := h.DB.Where("id = ? AND user_id = ?", id, userID).First(&site).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "site not found"})
+	site, _, ok := requireSitePerm(c, h.DB, c.Param("id"), PermView)
+	if !ok {
 		return
 	}
 

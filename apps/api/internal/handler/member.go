@@ -17,74 +17,20 @@ type MemberHandler struct {
 
 // ユーザーがサイトのオーナーまたは権限を持っているかチェックするヘルパー
 func (h *MemberHandler) checkPermission(siteID uuid.UUID, userID uuid.UUID, requiredPerm string) (bool, model.SiteRole, error) {
-	// Root管理者は全サイトに対して全権限を持つ
-	var u model.User
-	if err := h.DB.Where("id = ?", userID).First(&u).Error; err == nil && u.IsRoot {
-		return true, model.RoleAdmin, nil
-	}
-
 	var site model.Site
 	if err := h.DB.Where("id = ?", siteID).First(&site).Error; err != nil {
+		var u model.User
+		if h.DB.Where("id = ?", userID).First(&u).Error == nil && u.IsRoot {
+			return true, model.RoleAdmin, nil
+		}
 		return false, "", err
 	}
 
-	// オーナーは無条件で全権限
-	if site.UserID == userID {
-		return true, model.RoleOwner, nil
+	access := ResolveSiteAccess(h.DB, &site, userID)
+	if !access.HasAccess() {
+		return false, "", nil
 	}
-
-	var member model.SiteMember
-	if err := h.DB.Where("site_id = ? AND user_id = ?", siteID, userID).First(&member).Error; err != nil {
-		return false, "", err
-	}
-
-	// 管理者は全権限
-	if member.Role == model.RoleAdmin {
-		return true, model.RoleAdmin, nil
-	}
-
-	// 編集者デフォルト権限
-	if member.Role == model.RoleEditor {
-		if requiredPerm == "can_edit_pages" || requiredPerm == "can_publish_pages" || requiredPerm == "can_manage_media" {
-			return true, model.RoleEditor, nil
-		}
-		return false, model.RoleEditor, nil
-	}
-
-	// 閲覧者
-	if member.Role == model.RoleViewer {
-		if requiredPerm == "view" {
-			return true, model.RoleViewer, nil
-		}
-		return false, model.RoleViewer, nil
-	}
-
-	// カスタム（自由設定）権限
-	if member.Role == model.RoleCustom {
-		if len(member.Permissions) > 0 {
-			var perms model.SitePermissions
-			if err := json.Unmarshal(member.Permissions, &perms); err == nil {
-				switch requiredPerm {
-				case "can_edit_pages":
-					return perms.CanEditPages, model.RoleCustom, nil
-				case "can_publish_pages":
-					return perms.CanPublishPages, model.RoleCustom, nil
-				case "can_delete_pages":
-					return perms.CanDeletePages, model.RoleCustom, nil
-				case "can_manage_settings":
-					return perms.CanManageSettings, model.RoleCustom, nil
-				case "can_invite_members":
-					return perms.CanInviteMembers, model.RoleCustom, nil
-				case "can_manage_media":
-					return perms.CanManageMedia, model.RoleCustom, nil
-				case "view":
-					return true, model.RoleCustom, nil
-				}
-			}
-		}
-	}
-
-	return false, member.Role, nil
+	return access.Can(SitePerm(requiredPerm)), access.Role, nil
 }
 
 // メンバー一覧取得 (オーナー＋招待メンバー)
