@@ -145,12 +145,8 @@ func (h *AnalyticsHandler) RecordView(c *gin.Context) {
 
 // GetAnalytics returns analytics stats for the site (protected endpoint)
 func (h *AnalyticsHandler) GetAnalytics(c *gin.Context) {
-	userID := c.GetString("user_id")
-	siteID := c.Param("id")
-
-	var site model.Site
-	if err := h.DB.Where("id = ? AND user_id = ?", siteID, userID).First(&site).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "site not found"})
+	site, _, ok := requireSitePerm(c, h.DB, c.Param("id"), PermView)
+	if !ok {
 		return
 	}
 

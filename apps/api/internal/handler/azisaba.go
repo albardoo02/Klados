@@ -39,7 +39,6 @@ type AzisabaEditorPolicy struct {
 	ApiBaseURL                string   `json:"api_base_url"`
 	ServerApiKey              string   `json:"server_api_key,omitempty"`
 	TargetRole                string   `json:"target_role"`
-	ConditionLogic            string   `json:"condition_logic"` // "AND" (デフォルト) または "OR"
 	MinLifePlayTimeMinutes    int64    `json:"min_life_play_time_minutes"`
 	MinLifeRank               int      `json:"min_life_rank"`
 	MinLifeBalance            float64  `json:"min_life_balance"`
@@ -49,22 +48,21 @@ type AzisabaEditorPolicy struct {
 }
 
 type AzisabaEvaluationResult struct {
-	SiteID                 uuid.UUID              `json:"site_id"`
-	SiteSlug               string                 `json:"site_slug"`
-	SiteTitle              string                 `json:"site_title"`
-	Approved               bool                   `json:"approved"`
-	GrantedRole            string                 `json:"granted_role,omitempty"`
-	Reasons                []string               `json:"reasons"`
-	FailedReasons          []string               `json:"failed_reasons,omitempty"`
-	PlayerStats            map[string]interface{} `json:"player_stats,omitempty"`
+	SiteID        uuid.UUID              `json:"site_id"`
+	SiteSlug      string                 `json:"site_slug"`
+	SiteTitle     string                 `json:"site_title"`
+	Approved      bool                   `json:"approved"`
+	GrantedRole   string                 `json:"granted_role,omitempty"`
+	Reasons       []string               `json:"reasons"`
+	FailedReasons []string               `json:"failed_reasons,omitempty"`
+	PlayerStats   map[string]interface{} `json:"player_stats,omitempty"`
 }
 
 func ExtractSiteAzisabaPolicy(site *model.Site) AzisabaEditorPolicy {
 	policy := AzisabaEditorPolicy{
-		Enabled:        false,
-		ApiBaseURL:     DefaultAzisabaAPIBaseURL,
-		TargetRole:     string(model.RoleEditor),
-		ConditionLogic: "AND",
+		Enabled:    false,
+		ApiBaseURL: DefaultAzisabaAPIBaseURL,
+		TargetRole: string(model.RoleEditor),
 	}
 	if envURL := strings.TrimSpace(os.Getenv("AZISABA_API_URL")); envURL != "" {
 		policy.ApiBaseURL = strings.TrimRight(envURL, "/")
@@ -95,9 +93,6 @@ func ExtractSiteAzisabaPolicy(site *model.Site) AzisabaEditorPolicy {
 	policy.ApiBaseURL = strings.TrimRight(strings.TrimSpace(policy.ApiBaseURL), "/")
 	if policy.TargetRole == "" {
 		policy.TargetRole = string(model.RoleEditor)
-	}
-	if strings.TrimSpace(policy.ConditionLogic) == "" {
-		policy.ConditionLogic = "AND"
 	}
 	return policy
 }
@@ -285,7 +280,6 @@ func EvaluateAzisabaPolicy(site *model.Site, policy AzisabaEditorPolicy, profile
 	}
 
 	// 6. Active Punishment check
-	hasActivePunishment := false
 	if policy.RequireNoActivePunishment && punishments != nil {
 		activeCount := 0
 		for _, p := range punishments {
@@ -296,39 +290,15 @@ func EvaluateAzisabaPolicy(site *model.Site, policy AzisabaEditorPolicy, profile
 		if activeCount == 0 {
 			res.Reasons = append(res.Reasons, "有効な処罰(BAN/Mute等)なし")
 		} else {
-			hasActivePunishment = true
 			res.FailedReasons = append(res.FailedReasons, fmt.Sprintf("現在有効な処罰が %d 件あるため承認できません", activeCount))
 		}
 	}
 
-	isOrLogic := strings.EqualFold(strings.TrimSpace(policy.ConditionLogic), "OR")
-
-	if hasActivePunishment {
-		// 有効な処罰がある場合は AND/OR 問わず承認不可
-		res.Approved = false
-	} else if isOrLogic {
-		// OR 条件: 設定された条件のうち、いずれか1つでもクリアしていれば承認
-		hasSatisfiedCondition := false
-		for _, r := range res.Reasons {
-			if strings.Contains(r, "条件クリア") {
-				hasSatisfiedCondition = true
-				break
-			}
-		}
-		if hasSatisfiedCondition {
-			res.Approved = true
-			res.GrantedRole = policy.TargetRole
-		} else {
-			res.Approved = false
-		}
-	} else {
-		// AND 条件: すべての条件を満たすこと (FailedReasons が空であること)
-		if len(res.FailedReasons) == 0 {
-			res.Approved = true
-			res.GrantedRole = policy.TargetRole
-			if len(res.Reasons) == 0 {
-				res.Reasons = append(res.Reasons, "アジ鯖プレイヤー認証クリア")
-			}
+	if len(res.FailedReasons) == 0 {
+		res.Approved = true
+		res.GrantedRole = policy.TargetRole
+		if len(res.Reasons) == 0 {
+			res.Reasons = append(res.Reasons, "アジ鯖プレイヤー認証クリア")
 		}
 	}
 
@@ -619,7 +589,7 @@ func (h *AuthHandler) AzisabaAuth(c *gin.Context) {
 						Role:   role,
 					}
 					h.DB.Create(&member)
-				} else if member.Role == model.RoleViewer && (role == model.RoleEditor || role == model.RoleAdmin) {
+				} else if roleRank[role] > roleRank[member.Role] && member.Role != model.RoleOwner {
 					member.Role = role
 					h.DB.Save(&member)
 				}
@@ -650,10 +620,8 @@ func (h *AuthHandler) AzisabaAuth(c *gin.Context) {
 // POST /v1/sites/:id/azisaba-test
 // Allows site admins to test a player's MCID or UUID against the site's AzisabaEditorPolicy.
 func (h *SiteHandler) TestAzisabaPlayer(c *gin.Context) {
-	siteID := c.Param("id")
-	site, err := h.resolveSite(siteID)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "site not found"})
+	site, _, ok := requireSitePerm(c, h.DB, c.Param("id"), PermManageSettings)
+	if !ok {
 		return
 	}
 
@@ -667,7 +635,7 @@ func (h *SiteHandler) TestAzisabaPlayer(c *gin.Context) {
 		return
 	}
 
-	policy := ExtractSiteAzisabaPolicy(&site)
+	policy := ExtractSiteAzisabaPolicy(site)
 	if req.Policy != nil {
 		policy = *req.Policy
 		if strings.TrimSpace(policy.ApiBaseURL) == "" {
@@ -706,7 +674,7 @@ func (h *SiteHandler) TestAzisabaPlayer(c *gin.Context) {
 		return err
 	}()
 
-	eval := EvaluateAzisabaPolicy(&site, policy, &profile, punishments)
+	eval := EvaluateAzisabaPolicy(site, policy, &profile, punishments)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{

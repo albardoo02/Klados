@@ -113,22 +113,20 @@ func (h *CommentHandler) Delete(c *gin.Context) {
 		return
 	}
 
-	// Check if user is author
-	isAuthor := comment.UserID != nil && *comment.UserID == userUID
-
-	// Check if user is owner of the site where this page is hosted
-	isSiteOwner := false
-	if !isAuthor {
+	// Check if user is author or has edit/settings permission on the site
+	canDelete := comment.UserID != nil && *comment.UserID == userUID
+	if !canDelete {
 		var page model.Page
 		if err := h.DB.Where("id = ?", comment.PageID).First(&page).Error; err == nil {
 			var site model.Site
-			if err := h.DB.Where("id = ? AND user_id = ?", page.SiteID, userUID).First(&site).Error; err == nil {
-				isSiteOwner = true
+			if err := h.DB.Where("id = ?", page.SiteID).First(&site).Error; err == nil {
+				access := ResolveSiteAccess(h.DB, &site, userUID)
+				canDelete = access.Can(PermEditPages) || access.Can(PermManageSettings) || access.Can(PermDeletePages)
 			}
 		}
 	}
 
-	if !isAuthor && !isSiteOwner {
+	if !canDelete {
 		c.JSON(http.StatusForbidden, gin.H{"error": "not authorized to delete this comment"})
 		return
 	}

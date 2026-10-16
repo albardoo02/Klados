@@ -8,7 +8,7 @@ export function isCustomDomainHost(siteSlug?: string): boolean {
   if (typeof window !== 'undefined') {
     const path = window.location.pathname;
     // ブラウザのURLが /sites/... で始まる場合は必ずパスベースのルーティング（メインドメイン扱い）。
-    // 独自ドメインでは middleware が /sites/... を隠すため、このパスがブラウザに現れることはない。
+    // 独自ドメインでは proxy が /sites/... を隠すため、このパスがブラウザに現れることはない。
     // ※ クライアント側では MAIN_DOMAIN や DB 設定のメインドメインを参照できないため、
     //   ホスト名だけで判定すると未登録ホスト（IPアクセス等）で誤判定し、プレフィックスが欠落する。
     if (path === '/sites' || path.startsWith('/sites/')) {

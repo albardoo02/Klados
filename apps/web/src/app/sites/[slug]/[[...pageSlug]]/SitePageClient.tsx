@@ -97,8 +97,17 @@ interface PublicSite {
   primary_color?: string;
   custom_css?: string;
   can_edit?: boolean;
+  can_manage_settings?: boolean;
   is_owner?: boolean;
   role?: string;
+  permissions?: {
+    can_edit_pages?: boolean;
+    can_publish_pages?: boolean;
+    can_delete_pages?: boolean;
+    can_manage_settings?: boolean;
+    can_invite_members?: boolean;
+    can_manage_media?: boolean;
+  };
   settings?: {
     ogp_title?: string;
     ogp_description?: string;
@@ -629,13 +638,13 @@ export default function SitePageClient() {
     }
   }, [siteSlug, currentSlug]);
 
-  // サイト情報取得
+  // サイト情報取得 (ログイン状態やユーザー切替時に権限を再評価するため user?.id をクエリキーに含める)
   const {
     data: siteData,
     isLoading: isSiteLoading,
     isError: isSiteError,
   } = useQuery({
-    queryKey: ['public-site', siteSlug],
+    queryKey: ['public-site', siteSlug, user?.id ?? 'guest'],
     queryFn: () =>
       publicApi
         .getSite(siteSlug)
@@ -667,11 +676,23 @@ export default function SitePageClient() {
 
   // 編集権限判定:
   // 1. ゲストユーザーは常に編集不可
-  // 2. ログインユーザーの場合、バックエンドから返された can_edit を判定
+  // 2. ログインユーザーの場合、バックエンドから返された can_edit / can_manage_settings / role / permissions を判定
   // 3. または、サイトのオーナー (site.user_id === user.id) であれば編集可能
   // 4. システム管理者 (user.is_root) は無条件で全サイト編集可能
-  const isOwner = !isGuest && (Boolean(user?.is_root) || (!!site.user_id && site.user_id === user?.id));
-  const canEdit = !isGuest && (Boolean(user?.is_root) || (site.can_edit !== undefined ? site.can_edit : isOwner));
+  const isOwner = !isGuest && (Boolean(user?.is_root) || Boolean(site.is_owner) || (!!site.user_id && site.user_id === user?.id));
+  const hasRoleEdit =
+    site.role === 'owner' ||
+    site.role === 'admin' ||
+    site.role === 'editor' ||
+    Boolean(site.permissions?.can_edit_pages) ||
+    Boolean(site.permissions?.can_manage_settings) ||
+    Boolean(site.can_manage_settings);
+  const canEdit =
+    !isGuest &&
+    (Boolean(user?.is_root) ||
+      isOwner ||
+      hasRoleEdit ||
+      (site.can_edit !== undefined ? site.can_edit : false));
 
   const targetSlug = useMemo(() => {
     const raw = currentSlug;

@@ -102,17 +102,11 @@ func (h *MediaHandler) Upload(c *gin.Context) {
 		}
 	}
 
-	sUID, err := uuid.Parse(siteID)
-	if err != nil || sUID == uuid.Nil {
-		var s model.Site
-		if err2 := h.DB.Where("slug = ? OR custom_domain = ?", siteID, siteID).First(&s).Error; err2 == nil {
-			sUID = s.ID
-		} else {
-			log.Printf("[MediaHandler.Upload] invalid site_id: %s", siteID)
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid site_id"})
-			return
-		}
+	site, _, ok := requireSitePerm(c, h.DB, siteID, PermManageMedia)
+	if !ok {
+		return
 	}
+	sUID := site.ID
 
 	mediaID := uuid.New()
 	ext := filepath.Ext(header.Filename)
@@ -211,6 +205,9 @@ func (h *MediaHandler) Delete(c *gin.Context) {
 	var media model.MediaFile
 	if err := h.DB.Where("id = ?", id).First(&media).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "media not found"})
+		return
+	}
+	if _, _, ok := requireSitePerm(c, h.DB, media.SiteID.String(), PermManageMedia); !ok {
 		return
 	}
 
@@ -703,22 +700,11 @@ func (h *MediaHandler) Import(c *gin.Context) {
 		siteID = c.Query("site_id")
 	}
 
-	var sUID uuid.UUID
-	if siteID != "" {
-		if parsed, err := uuid.Parse(siteID); err == nil {
-			sUID = parsed
-		} else {
-			var s model.Site
-			if err2 := h.DB.Where("slug = ? OR custom_domain = ?", siteID, siteID).First(&s).Error; err2 == nil {
-				sUID = s.ID
-			}
-		}
-	}
-
-	if sUID == uuid.Nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "有効なサイト (site_id) を指定してください"})
+	site, _, ok := requireSitePerm(c, h.DB, siteID, PermManageMedia)
+	if !ok {
 		return
 	}
+	sUID := site.ID
 
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {
