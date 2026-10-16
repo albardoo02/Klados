@@ -1924,30 +1924,37 @@ export default function SitePageClient() {
                     <input
                       type="password"
                       value={azisabaApiKey}
-                      onChange={(e) => setAzisabaApiKey(e.target.value)}
-                      placeholder="アジ鯖のAPIキーを入力..."
-                      className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      onChange={(e) => {
+                        let val = e.target.value.trim();
+                        if (val.toLowerCase().startsWith('bearer ')) {
+                          val = val.substring(7).trim();
+                        }
+                        setAzisabaApiKey(val);
+                      }}
+                      placeholder="ゲーム内 /api 等で発行したAPIキー..."
+                      className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono"
                     />
                   </div>
                   <p className="text-[11px] text-slate-400 mt-1">
-                    ※ アジ鯖内で発行した個人のAPIキーを入力すると、あなたのMinecraftアカウントで自動ログイン＆共同編集承認が行われます。
+                    ※ 「Bearer 」の入力は不要です。ゲーム内チャットで <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded text-emerald-600 dark:text-emerald-400">/api</code> コマンドを実行して発行されたキーを入力してください。
                   </p>
                 </div>
 
-                {! isGuest && (
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                      または Minecraft ID / UUID (ログイン済みでサイト側にAPIキーが設定されている場合)
-                    </label>
-                    <input
-                      type="text"
-                      value={azisabaPlayerName}
-                      onChange={(e) => setAzisabaPlayerName(e.target.value)}
-                      placeholder={user?.username || '例: Steve'}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                    />
-                  </div>
-                )}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    Minecraft ID / MCID <span className="text-slate-400 font-normal">(推奨)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={azisabaPlayerName}
+                    onChange={(e) => setAzisabaPlayerName(e.target.value)}
+                    placeholder={user?.username || '例: Steve (あなたのMCID)'}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono"
+                  />
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    ※ MCIDを入力しておくと、照会キー経由でのプレイヤー判定や認証の確実性が向上します。
+                  </p>
+                </div>
               </div>
 
               {azisabaError && (

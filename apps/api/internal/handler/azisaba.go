@@ -305,14 +305,26 @@ func EvaluateAzisabaPolicy(site *model.Site, policy AzisabaEditorPolicy, profile
 	return res
 }
 
+func cleanAzisabaKey(key string) string {
+	clean := strings.TrimSpace(key)
+	clean = strings.Trim(clean, "\"'`\r\n\t")
+	if strings.HasPrefix(strings.ToLower(clean), "bearer ") {
+		clean = clean[7:]
+	}
+	clean = strings.TrimSpace(clean)
+	clean = strings.Trim(clean, "\"'`")
+	return clean
+}
+
 func fetchAzisabaJSON(endpoint, apiKey string, target interface{}) (int, error) {
 	client := &http.Client{Timeout: 8 * time.Second}
 	req, err := http.NewRequest("GET", endpoint, nil)
 	if err != nil {
 		return 0, err
 	}
-	if strings.TrimSpace(apiKey) != "" {
-		req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(apiKey))
+	cleanKey := cleanAzisabaKey(apiKey)
+	if cleanKey != "" {
+		req.Header.Set("Authorization", "Bearer "+cleanKey)
 	}
 	req.Header.Set("Accept", "application/json")
 
@@ -329,13 +341,29 @@ func fetchAzisabaJSON(endpoint, apiKey string, target interface{}) (int, error) 
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		var errResp struct {
-			Error string `json:"error"`
+			Error   string `json:"error"`
+			Message string `json:"message"`
 		}
 		_ = json.Unmarshal(body, &errResp)
-		if errResp.Error != "" {
-			return resp.StatusCode, fmt.Errorf("%s (HTTP %d)", errResp.Error, resp.StatusCode)
+		msg := errResp.Error
+		if msg == "" {
+			msg = errResp.Message
 		}
-		return resp.StatusCode, fmt.Errorf("Azisaba API returned HTTP %d", resp.StatusCode)
+		if msg != "" {
+			return resp.StatusCode, fmt.Errorf("%s (HTTP %d)", msg, resp.StatusCode)
+		}
+		switch resp.StatusCode {
+		case http.StatusUnauthorized:
+			return resp.StatusCode, fmt.Errorf("APIキーが無効または期限切れです (HTTP 401)")
+		case http.StatusForbidden:
+			return resp.StatusCode, fmt.Errorf("APIキーの権限が不足しているか、アクセスが拒否されました (HTTP 403)")
+		case http.StatusNotFound:
+			return resp.StatusCode, fmt.Errorf("対象のプレイヤーまたは情報が見つかりませんでした (HTTP 404)")
+		case http.StatusTooManyRequests:
+			return resp.StatusCode, fmt.Errorf("APIリクエスト頻度制限を超過しました。少し待ってから再試行してください (HTTP 429)")
+		default:
+			return resp.StatusCode, fmt.Errorf("Azisaba API returned HTTP %d", resp.StatusCode)
+		}
 	}
 
 	if err := json.Unmarshal(body, target); err != nil {
@@ -408,61 +436,86 @@ func (h *AuthHandler) AzisabaAuth(c *gin.Context) {
 
 	var profile *AzisabaPlayerProfile
 	var punishments []AzisabaPunishment
-	apiKey := strings.TrimSpace(req.APIKey)
+	apiKey := cleanAzisabaKey(req.APIKey)
+	playerName := strings.TrimSpace(req.PlayerName)
+
+	var tp AzisabaEditorPolicy
+	if targetSite != nil {
+		tp = ExtractSiteAzisabaPolicy(targetSite)
+	}
+	srvKey := cleanAzisabaKey(tp.ServerApiKey)
+	if srvKey == "" {
+		srvKey = cleanAzisabaKey(os.Getenv("AZISABA_API_KEY"))
+	}
 
 	if apiKey != "" {
 		var fetched AzisabaPlayerProfile
 		_, err := fetchAzisabaJSON(apiBaseURL+"/players/me", apiKey, &fetched)
-		if err != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"error": fmt.Sprintf("アジ鯖APIキーでの認証に失敗しました: %v", err),
-			})
-			return
+		if err == nil {
+			profile = &fetched
+		} else {
+			// /players/me が失敗した場合、MCID が指定されていれば入力キーまたはサーバーキーでフォールバック
+			recovered := false
+			if playerName != "" {
+				// 入力キー自体がサーバー/照会用キーの可能性を試す
+				var byNameEndpoint string
+				if _, uErr := uuid.Parse(playerName); uErr == nil {
+					byNameEndpoint = apiBaseURL + "/players/" + url.PathEscape(playerName)
+				} else {
+					byNameEndpoint = apiBaseURL + "/players/by-name/" + url.PathEscape(playerName)
+				}
+				if _, fErr := fetchAzisabaJSON(byNameEndpoint, apiKey, &fetched); fErr == nil {
+					profile = &fetched
+					recovered = true
+				} else if srvKey != "" {
+					// サイトの照会用キーで試す
+					if _, sErr := fetchAzisabaJSON(byNameEndpoint, srvKey, &fetched); sErr == nil {
+						profile = &fetched
+						recovered = true
+					}
+				}
+			}
+
+			if !recovered {
+				c.JSON(http.StatusUnauthorized, gin.H{
+					"error": fmt.Sprintf("アジ鯖APIキーでの認証に失敗しました: %v。アジ鯖ゲーム内（/api 等）で最新のAPIキーを再発行して入力してください。", err),
+				})
+				return
+			}
 		}
-		profile = &fetched
 
 		// Optionally fetch punishments if possible
 		var puns []AzisabaPunishment
 		punKey := apiKey
-		if targetSite != nil {
-			tp := ExtractSiteAzisabaPolicy(targetSite)
-			if tp.ServerApiKey != "" {
-				punKey = tp.ServerApiKey
-			}
+		if srvKey != "" {
+			punKey = srvKey
 		}
 		if _, pErr := fetchAzisabaJSON(apiBaseURL+"/players/"+url.PathEscape(profile.UUID)+"/punishments", punKey, &puns); pErr == nil {
 			punishments = puns
 		}
-	} else if currentUser != nil {
-		srvKey := strings.TrimSpace(os.Getenv("AZISABA_API_KEY"))
-		if targetSite != nil {
-			tp := ExtractSiteAzisabaPolicy(targetSite)
-			if tp.ServerApiKey != "" {
-				srvKey = tp.ServerApiKey
+	} else {
+		// APIキー未入力の場合: サイトの照会キーまたは環境変数キーで MCID 照会を試行
+		lookupTarget := playerName
+		if lookupTarget == "" && currentUser != nil {
+			var oa model.OAuthAccount
+			if h.DB.Where("user_id = ? AND provider = ?", currentUser.ID, "azisaba").First(&oa).Error == nil && oa.ProviderID != "" {
+				lookupTarget = oa.ProviderID
 			}
 		}
-		if srvKey != "" {
-			lookupTarget := strings.TrimSpace(req.PlayerName)
-			if lookupTarget == "" {
-				var oa model.OAuthAccount
-				if h.DB.Where("user_id = ? AND provider = ?", currentUser.ID, "azisaba").First(&oa).Error == nil && oa.ProviderID != "" {
-					lookupTarget = oa.ProviderID
-				}
+
+		if lookupTarget != "" && srvKey != "" {
+			var fetched AzisabaPlayerProfile
+			var endpoint string
+			if _, err := uuid.Parse(lookupTarget); err == nil {
+				endpoint = apiBaseURL + "/players/" + url.PathEscape(lookupTarget)
+			} else {
+				endpoint = apiBaseURL + "/players/by-name/" + url.PathEscape(lookupTarget)
 			}
-			if lookupTarget != "" {
-				var fetched AzisabaPlayerProfile
-				var endpoint string
-				if _, err := uuid.Parse(lookupTarget); err == nil {
-					endpoint = apiBaseURL + "/players/" + url.PathEscape(lookupTarget)
-				} else {
-					endpoint = apiBaseURL + "/players/by-name/" + url.PathEscape(lookupTarget)
-				}
-				if _, err := fetchAzisabaJSON(endpoint, srvKey, &fetched); err == nil {
-					profile = &fetched
-					var puns []AzisabaPunishment
-					if _, pErr := fetchAzisabaJSON(apiBaseURL+"/players/"+url.PathEscape(profile.UUID)+"/punishments", srvKey, &puns); pErr == nil {
-						punishments = puns
-					}
+			if _, err := fetchAzisabaJSON(endpoint, srvKey, &fetched); err == nil {
+				profile = &fetched
+				var puns []AzisabaPunishment
+				if _, pErr := fetchAzisabaJSON(apiBaseURL+"/players/"+url.PathEscape(profile.UUID)+"/punishments", srvKey, &puns); pErr == nil {
+					punishments = puns
 				}
 			}
 		}
@@ -644,12 +697,12 @@ func (h *SiteHandler) TestAzisabaPlayer(c *gin.Context) {
 		policy.ApiBaseURL = strings.TrimRight(strings.TrimSpace(policy.ApiBaseURL), "/")
 	}
 
-	apiKey := strings.TrimSpace(req.APIKey)
+	apiKey := cleanAzisabaKey(req.APIKey)
 	if apiKey == "" {
-		apiKey = strings.TrimSpace(policy.ServerApiKey)
+		apiKey = cleanAzisabaKey(policy.ServerApiKey)
 	}
 	if apiKey == "" {
-		apiKey = strings.TrimSpace(os.Getenv("AZISABA_API_KEY"))
+		apiKey = cleanAzisabaKey(os.Getenv("AZISABA_API_KEY"))
 	}
 
 	identifier := strings.TrimSpace(req.Identifier)
