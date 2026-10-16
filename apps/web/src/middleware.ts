@@ -1,6 +1,12 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { parseHost, getMainPortalUrl, setDynamicMainDomains } from './lib/domains';
+import {
+  parseHost,
+  getMainPortalUrl,
+  setDynamicMainDomains,
+  getConfiguredMainDomains,
+  MAIN_DOMAINS_COOKIE,
+} from './lib/domains';
 
 let lastDomainsFetch = 0;
 const DOMAINS_CACHE_TTL = 60 * 1000; // 60秒キャッシュ
@@ -34,6 +40,31 @@ function isExactOrSubpath(pathname: string, target: string): boolean {
 }
 
 export async function middleware(req: NextRequest) {
+  const res = await handle(req);
+  const { pathname } = req.nextUrl;
+  if (
+    pathname.startsWith('/_next') ||
+    isExactOrSubpath(pathname, '/api') ||
+    isExactOrSubpath(pathname, '/v1')
+  ) {
+    return res;
+  }
+
+  // クライアント側 getMainPortalUrl() が実行時のメインドメイン（環境変数 / DB 設定）を
+  // 参照できるよう Cookie で受け渡す（NEXT_PUBLIC_* はビルド時に固定されるため）
+  const domains = getConfiguredMainDomains().join(',');
+  if (domains && req.cookies.get(MAIN_DOMAINS_COOKIE)?.value !== domains) {
+    res.cookies.set(MAIN_DOMAINS_COOKIE, domains, {
+      path: '/',
+      sameSite: 'lax',
+      httpOnly: false,
+      maxAge: 60 * 60 * 24,
+    });
+  }
+  return res;
+}
+
+async function handle(req: NextRequest): Promise<NextResponse> {
   const url = req.nextUrl;
   const hostname =
     (req.headers.get('x-forwarded-host') || req.headers.get('host'))

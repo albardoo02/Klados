@@ -13,6 +13,45 @@ const DEFAULT_MAIN_DOMAINS = [
 let dynamicMainDomains: string[] = [];
 
 /**
+ * middleware がクライアントへ受け渡すメインドメイン一覧の Cookie 名。
+ * NEXT_PUBLIC_MAIN_DOMAIN はビルド時に埋め込まれるため、実行時の環境変数(k8s 等)や
+ * DB 設定はクライアントバンドルからは参照できない。そのため middleware が Cookie で渡す。
+ */
+export const MAIN_DOMAINS_COOKIE = 'klados_main_domains';
+
+/**
+ * Cookie に保存すべき「設定済み」メインドメイン一覧（デフォルト値を除く、環境変数 → DB の順）
+ */
+export function getConfiguredMainDomains(): string[] {
+  const envDomains = [process.env.MAIN_DOMAIN, process.env.NEXT_PUBLIC_MAIN_DOMAIN]
+    .filter(Boolean)
+    .flatMap((d) => (d as string).split(',').map((s) => s.trim().toLowerCase()));
+  return Array.from(new Set([...envDomains, ...dynamicMainDomains])).filter(
+    (d) => d && d !== 'localhost' && d !== '127.0.0.1'
+  );
+}
+
+/**
+ * ブラウザ上で middleware が設定した Cookie からメインドメイン一覧を取得
+ */
+function getCookieMainDomains(): string[] {
+  if (typeof document === 'undefined') return [];
+  const entry = document.cookie
+    .split(';')
+    .map((c) => c.trim())
+    .find((c) => c.startsWith(`${MAIN_DOMAINS_COOKIE}=`));
+  if (!entry) return [];
+  try {
+    return decodeURIComponent(entry.slice(MAIN_DOMAINS_COOKIE.length + 1))
+      .split(',')
+      .map((d) => d.trim().toLowerCase())
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+/**
  * DBから取得した動的メインドメインをメモリキャッシュに登録
  */
 export function setDynamicMainDomains(domains: string[] | string) {
@@ -41,6 +80,7 @@ export function getMainDomains(): string[] {
     ...DEFAULT_MAIN_DOMAINS,
     ...envDomains,
     ...dynamicMainDomains,
+    ...getCookieMainDomains(),
   ]);
   return Array.from(allDomains);
 }
@@ -204,6 +244,12 @@ export function getMainPortalUrl(mainDomainsConfig?: string, reqHost?: string): 
     if (first && first !== 'localhost' && first !== '127.0.0.1') {
       return first.startsWith('http') ? first : `https://${first}`;
     }
+  }
+
+  // 2.5 middleware から Cookie で受け渡された実行時メインドメイン (クライアント側)
+  const cookieDomain = getCookieMainDomains().find((d) => d !== 'localhost' && d !== '127.0.0.1');
+  if (cookieDomain) {
+    return cookieDomain.startsWith('http') ? cookieDomain : `https://${cookieDomain}`;
   }
 
   // 3. 環境変数 (NEXT_PUBLIC_MAIN_DOMAIN / MAIN_DOMAIN)
